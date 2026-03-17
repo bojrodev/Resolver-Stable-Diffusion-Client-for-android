@@ -6,6 +6,11 @@
 ![Backend](https://img.shields.io/badge/Backend-Forge%20Neo-blue)
 ![Backend](https://img.shields.io/badge/Backend-Comfy%20UI-blue)
 ![License](https://img.shields.io/badge/License-GPLv3-red.svg)
+<a href="https://bojrodev.com/donate">
+<img src="https://img.shields.io/badge/SUPPORT-Donate-00C853?style=for-the-badge&logo=tether&logoColor=white"/>
+</a>
+
+<br><br>
 
 <a href="https://github.com/bojrodev/Resolver-WebUI-Forge-Client/releases">
 <img src="https://img.shields.io/github/downloads/bojrodev/Resolver-WebUI-Forge-Client/total?style=for-the-badge&label=Download%20APK&logo=android&color=3DDC84"/>
@@ -27,31 +32,32 @@
 - [Remote PC Wake](#remote-pc-wake)
 - [Installation](#installation)
 - [Architecture](#architecture)
+- [Support the Developer](#support-the-developer)
 - [License](#license)
 
 ## Quickstart
 
-To get started with development, clone the repository, install dependencies with npm install, run npx cap sync, and then npx cap open android to launch in Android Studio.
+To get started with development, clone the repository, install dependencies with `npm install`, run `npx cap sync`, and then `npx cap open android` to launch in Android Studio.
 
 ## Features
 
 ### Core Engines
-- Forge WebUI Integration: Natively optimized for WebUI Forge Neo.
-- ComfyUI Orchestration: Execute .json workflows with dynamic UI generation (sliders, dropdowns, and inputs).
-- Flux and SDXL Powerhouse: Full control over sampling, scheduling, and Flux First Block Cache (FBC) optimizations.
-- Qwen / Z-Image: Specialized mode for dense narrative-to-image support.
+- **Forge WebUI Integration:** Natively optimized for WebUI Forge Neo.
+- **ComfyUI Orchestration:** Execute `.json` workflows with dynamic UI generation (sliders, dropdowns, and inputs).
+- **Flux and SDXL Powerhouse:** Full control over sampling, scheduling, and Flux First Block Cache (FBC) optimizations.
+- **Qwen / Z-Image:** Specialized mode for dense narrative-to-image support.
 
 ### Advanced Capabilities
-- True Background Generation: Java-based Foreground Service with Wake Locks keeps tasks running while the app is minimized.
-- Native Metadata Analysis: Built-in viewer to analyze and reuse generation parameters directly from your local history.
-- Live WebSocket Feedback: Real-time step monitoring and binary image previews.
-- Magic Prompt: Connect to local LLMs (LM Studio/Ollama) to expand simple ideas into complex prompts using Bojro PromptMaster.
-- Mobile Inpainting: Touch-optimized canvas editor with mask blurring and denoising controls.
+- **True Background Generation:** Java-based Foreground Service with Wake Locks keeps tasks running while the app is minimized.
+- **Native Metadata Analysis:** Built-in viewer to analyze and reuse generation parameters directly from your local history.
+- **Live WebSocket Feedback:** Real-time step monitoring and binary image previews.
+- **Magic Prompt:** Connect to local LLMs (LM Studio/Ollama) to expand simple ideas into complex prompts using Bojro PromptMaster.
+- **Mobile Inpainting:** Touch-optimized canvas editor with mask blurring and denoising controls.
 
 ### Remote Management
-- Smart Connection: Seamlessly toggle between Local (LAN) and External (HTTPS/Ngrok) modes.
-- Power Control: Integrated remote KILL! signal to halt backend services instantly.
-- Remote Wake: Integration with Bojro Power helper for remote system startup.
+- **Smart Connection:** Seamlessly toggle between Local (LAN) and External (HTTPS/Ngrok) modes.
+- **Power Control:** Integrated remote `KILL!` signal to halt backend services instantly.
+- **Remote Wake:** Integration with Bojro Power helper for remote system startup.
 
 ## Screenshots
 
@@ -112,36 +118,46 @@ To get started with development, clone the repository, install dependencies with
 
 To allow Resolver to communicate with your PC, you must enable API access:
 
-WebUI Forge:
-In webui-user.bat, set COMMANDLINE_ARGS to include --listen --api --cors-allow-origins *
+**WebUI Forge:**
+In `webui-user.bat`, set `COMMANDLINE_ARGS` to include `--listen --api --cors-allow-origins *`
 
-ComfyUI:
-Append --listen and --enable-cors-header * to your launch command.
+**ComfyUI:**
+Append `--listen` and `--enable-cors-header *` to your launch command.
 
 ## Magic Prompt (LLM) Setup
 
-1. Model: Download PromptMaster v2 from HuggingFace.
-2. Host: Load the model into LM Studio or Ollama.
-3. Link: Enter your PC IP or Server URL in the Resolver Bot modal.
+1. **Model:** Download **[PromptMaster v2](https://huggingface.co/bojrodev/BojroPromptMaster_uncensored_v2-8B)** from HuggingFace.
+2. **Host:** Load the model into LM Studio or Ollama.
+3. **Link:** Enter your PC IP or Server URL in the Resolver Bot modal.
 
 ## Remote PC Wake
 
-Requires the Bojro Power (BojroPowerv_x_portable.exe) utility running on the host PC.
+Requires the Bojro Power (`BojroPowerv_x_portable.exe`) utility running on the host PC.
 - Set the Wake Port (Default: 5000) in the CFG Tab.
 - Use the Power Icon (ტ) to trigger the wake signal through the Bojro Power helper.
 
 ## Installation
 
-1. Download the latest .apk from the Releases page.
+1. Download the latest `.apk` from the Releases page.
 2. Install on your Android device.
 3. Open the CFG Tab, enter your PC IP address, and save.
 
 ## Architecture
 
 Resolver utilizes a Hybrid Mobile Architecture to balance UI flexibility with system-level performance:
-- Frontend: Vanilla JS + Capacitor 6.0 for a responsive UI.
-- Backend Communication: REST API for state sync and WebSockets for real-time image streaming.
-- Native Layer: Java-based Android Foreground Services with Wake Locks to ensure background task persistence.
+- **Frontend:** Vanilla JS + Capacitor 6.0 for a responsive UI.
+- **Backend Communication:** REST API for state sync and WebSockets for real-time image streaming.
+- **Native Layer:** Java-based Android Foreground Services with Wake Locks to ensure background task persistence.
+
+---
+
+## <a id="support-the-developer"></a>💖 Support the Developer
+
+Resolver is completely free and open-source. If you find this app useful and want to support its ongoing development, please consider leaving a tip! Donations help cover the costs of testing devices, servers, and training custom LLM models for the ecosystem.
+
+👉 **[Donate via Crypto (USDT)](https://bojrodev.com/donate)**
+
+---
 
 ## License
 
