@@ -94,7 +94,8 @@
                     <div class="row" style="justify-content:space-between; margin-bottom: 5px;">
                          <div style="display:flex; align-items:center; gap:8px;">
                              <label style="margin:0;"><i data-lucide="sparkles" size="12"></i> Prompt</label>
-                             <button onclick="resetPrompt('xl')" class="btn-icon" style="width:20px; height:20px; padding:2px; color:var(--text-muted);" title="Reset Default"><i data-lucide="trash-2" size="12"></i></button>
+                             <button onclick="clearPrompt('xl')" class="btn-icon" style="width:20px; height:20px; padding:2px; color:#f44336;" title="Clear Prompt"><i data-lucide="trash-2" size="12"></i></button>
+                             <button onclick="saveAsNewDefault('xl')" class="btn-icon" style="width:20px; height:20px; padding:2px; color:var(--accent-primary);" title="Save Current as Default"><i data-lucide="save" size="12"></i></button>
                          </div>
                          <button onclick="openLlmModal('xl')" class="btn-small" style="width: auto; padding: 4px 8px; font-size: 10px; border-color: var(--accent-primary); color: var(--accent-primary);"><i data-lucide="bot" size="10" style="margin-right:4px;"></i>MAGIC PROMPT</button>
                     </div>
@@ -228,7 +229,8 @@
                     <div class="row" style="justify-content:space-between; margin-bottom: 5px;">
                         <div style="display:flex; align-items:center; gap:8px;">
                             <label style="margin:0;"><i data-lucide="sparkles" size="12"></i> Prompt</label>
-                            <button onclick="resetPrompt('flux')" class="btn-icon" style="width:20px; height:20px; padding:2px; color:var(--text-muted);" title="Reset Default"><i data-lucide="trash-2" size="12"></i></button>
+                            <button onclick="clearPrompt('flux')" class="btn-icon" style="width:20px; height:20px; padding:2px; color:#f44336;" title="Clear Prompt"><i data-lucide="trash-2" size="12"></i></button>
+                            <button onclick="saveAsNewDefault('flux')" class="btn-icon" style="width:20px; height:20px; padding:2px; color:var(--accent-primary);" title="Save Current as Default"><i data-lucide="save" size="12"></i></button>
                         </div>
                         <button onclick="openLlmModal('flux')" class="btn-small" style="width: auto; padding: 4px 8px; font-size: 10px; border-color: var(--accent-primary); color: var(--accent-primary);"><i data-lucide="bot" size="10" style="margin-right:4px;"></i>MAGIC PROMPT</button>
                    </div>
@@ -439,7 +441,8 @@
                     <div class="row" style="justify-content:space-between; margin-bottom: 5px;">
                         <div style="display:flex; align-items:center; gap:8px;">
                             <label style="margin:0;"><i data-lucide="sparkles" size="12"></i> Prompt</label>
-                            <button onclick="resetPrompt('qwen')" class="btn-icon" style="width:20px; height:20px; padding:2px; color:var(--text-muted);" title="Reset Default"><i data-lucide="trash-2" size="12"></i></button>
+                            <button onclick="clearPrompt('qwen')" class="btn-icon" style="width:20px; height:20px; padding:2px; color:#f44336;" title="Clear Prompt"><i data-lucide="trash-2" size="12"></i></button>
+                            <button onclick="saveAsNewDefault('qwen')" class="btn-icon" style="width:20px; height:20px; padding:2px; color:var(--accent-primary);" title="Save Current as Default"><i data-lucide="save" size="12"></i></button>
                         </div>
                         <button onclick="openLlmModal('qwen')" class="btn-small" style="width: auto; padding: 4px 8px; font-size: 10px; border-color: var(--accent-primary); color: var(--accent-primary);"><i data-lucide="bot" size="10" style="margin-right:4px;"></i>MAGIC PROMPT</button>
                     </div>
@@ -1025,7 +1028,7 @@
                     <i data-lucide="save" size="16" style="vertical-align: -3px; margin-right: 8px;"></i> SAVE CONFIGURATION
                 </button>
                 
-                <div class="cfg-badge" style="text-align: center; color: var(--text-muted); font-size: 10px; margin-top: 20px; opacity: 0.6; letter-spacing: 1px; text-transform: uppercase;">Resolver Client v2.0 (Ota Up-v2.0) • GPLv3 License</div>
+                <div class="cfg-badge" style="text-align: center; color: var(--text-muted); font-size: 10px; margin-top: 20px; opacity: 0.6; letter-spacing: 1px; text-transform: uppercase;">Resolver Client v2.0 (Ota Up-v2.1) • GPLv3 License</div>
             </div>
             </div>
     </div>
@@ -1326,7 +1329,7 @@
                 <i data-lucide="sparkles" size="32" style="color: var(--accent-primary);"></i>
             </div>
             <h3 style="margin: 0; font-size: 18px; color: #fff;">Update Available</h3>
-            <div id="updateVersionBadge" style="display: inline-block; background: var(--accent-gradient); color: white; font-size: 10px; font-weight: 900; padding: 2px 8px; border-radius: 4px; margin-top: 6px;">v2.0</div>
+            <div id="updateVersionBadge" style="display: inline-block; background: var(--accent-gradient); color: white; font-size: 10px; font-weight: 900; padding: 2px 8px; border-radius: 4px; margin-top: 6px;">v2.1</div>
         </div>
 
         <div class="glass-box" style="text-align: left; padding: 12px; margin-bottom: 20px; max-height: 180px; overflow-y: auto; background: rgba(0,0,0,0.3);">

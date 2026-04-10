@@ -166,9 +166,33 @@ window.resetPrompt = function(mode) {
     if (confirm("Reset prompt to default?")) {
         const el = document.getElementById(`${mode}_prompt`);
         if (el) {
-            el.value = DEFAULT_PROMPTS[mode] || "";
+            // Check if the user has saved a custom default, otherwise use the hardcoded one
+            const customDefault = localStorage.getItem(`bojro_custom_default_${mode}`);
+            el.value = customDefault !== null ? customDefault : (DEFAULT_PROMPTS[mode] || "");
             savePrompt(mode); 
         }
+    }
+}
+
+// Allow the user to save their current text (even if empty) as the new default
+window.saveAsNewDefault = function(mode) {
+    const el = document.getElementById(`${mode}_prompt`);
+    if (el) {
+        localStorage.setItem(`bojro_custom_default_${mode}`, el.value);
+        if (typeof Toast !== 'undefined' && Toast) {
+            Toast.show({ text: 'Saved as new default prompt!', duration: 'short' });
+        } else {
+            alert("Saved as new default prompt!");
+        }
+    }
+}
+
+// Empties the prompt box
+window.clearPrompt = function(mode) {
+    const el = document.getElementById(`${mode}_prompt`);
+    if (el) {
+        el.value = "";
+        savePrompt(mode); // Save the empty state
     }
 }
 
@@ -176,8 +200,17 @@ window.loadSavedPrompts = function() {
     ['xl', 'flux', 'qwen', 'inp'].forEach(mode => {
         const saved = localStorage.getItem(`bojro_prompt_${mode}`);
         const el = document.getElementById(`${mode}_prompt`);
-        if (el && saved !== null) {
-            el.value = saved;
+        
+        if (el) {
+            if (saved !== null) {
+                // Load their last active prompt
+                el.value = saved;
+            } else {
+                // FIRST RUN: No active prompt saved yet.
+                // Fall back to their custom default, or the hardcoded default.
+                const customDefault = localStorage.getItem(`bojro_custom_default_${mode}`);
+                el.value = customDefault !== null ? customDefault : (DEFAULT_PROMPTS[mode] || "");
+            }
         }
     });
     window.initHr();
