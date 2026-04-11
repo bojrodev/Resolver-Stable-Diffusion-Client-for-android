@@ -46,7 +46,7 @@ async function checkForAppUpdate(silent = false) {
         const UPDATE_URL = 'https://raw.githubusercontent.com/bojrodev/Resolver-Stable-Diffusion-Client-for-android/dev/v2ersion.json';
         
         // IMPORTANT: Update this number manually when you release a new version
-        const currentVersion = '2.1';
+        const currentVersion = '2.2';
         // ---------------------
 
         const response = await fetch(UPDATE_URL + '?t=' + new Date().getTime());
@@ -90,8 +90,36 @@ function showUpdateModal(data, UpdaterPlugin) {
     if (skipTag) skipTag.innerText = data.version;
 
     btnUpdate.onclick = async () => {
+        
+        // --- 1. NEW NATIVE POPUP LOGIC ---
+        // If the JSON tells us a native update is required, open the browser!
+        if (data.isNativeRequired && data.nativeUrl) {
+            btnUpdate.innerHTML = `<div class="spinner" style="width:16px;height:16px;border-width:2px;margin-right:8px; display:inline-block;"></div> OPENING...`;
+            
+            try {
+                // Try to open the Capacitor Browser Plugin (In-App Popup)
+                if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Browser) {
+                    await window.Capacitor.Plugins.Browser.open({ url: data.nativeUrl });
+                } else {
+                    // Fallback to standard web opening if plugin is missing
+                    window.open(data.nativeUrl, '_blank');
+                }
+                
+                // Reset button text so they can click it again if they closed the popup
+                setTimeout(() => {
+                    btnUpdate.innerHTML = `OPEN GITHUB AGAIN`;
+                }, 1500);
+                
+            } catch (e) {
+                console.error("Browser plugin failed:", e);
+                window.open(data.nativeUrl, '_blank');
+            }
+            return; // <--- CRITICAL: Stop here so it doesn't try to download an OTA zip!
+        }
+
+        // --- 2. ORIGINAL OTA ZIP DOWNLOAD LOGIC ---
         btnUpdate.disabled = true;
-        btnUpdate.innerHTML = `<div class="spinner" style="width:16px;height:16px;border-width:2px;margin-right:8px;"></div> DOWNLOADING...`;
+        btnUpdate.innerHTML = `<div class="spinner" style="width:16px;height:16px;border-width:2px;margin-right:8px; display:inline-block;"></div> DOWNLOADING...`;
         
         try {
             const update = await UpdaterPlugin.download({
