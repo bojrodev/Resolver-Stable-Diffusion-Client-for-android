@@ -1,5 +1,7 @@
 {
-  "version": "2.1",
+  "version": "2.2",
+  "isNativeRequired": true,
+  "nativeUrl": "https://github.com/bojrodev/Resolver-Stable-Diffusion-Client-for-android/releases",
   "url": "https://github.com/bojrodev/Resolver-Stable-Diffusion-Client-for-android/releases/download/OTAv2.1/OTA2.1.zip",
-  "note": "User:abel1502, request-> Configurable Prompt Update"
+  "note": "User:abel1502, request-> RootCA Implementation. NATIVE UPDATE REQUIRED! To fix connection issues with custom certificates (ZeroTier/Caddy), you MUST manually download the new APK from our GitHub Releases page. Do NOT click the Update button below, as OTA cannot apply native Android fixes. Please skip this and go to https://github.com/bojrodev/Resolver-Stable-Diffusion-Client-for-android."
 }
