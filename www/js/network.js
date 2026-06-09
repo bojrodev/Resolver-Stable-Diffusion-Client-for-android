@@ -65,6 +65,46 @@ async function performNativeRequest(url, options = {}) {
 
 // 3. Global Override Logic
 window.fetch = async function(input, init) {
+    
+    // --- FORGE NEO SANITIZER PATCH ---
+    try {
+        let urlStr = typeof input === 'string' ? input : (input && input.url ? input.url : '');
+        if (urlStr.includes('/sdapi/v1/') && init && init.body) {
+            let isString = typeof init.body === 'string';
+            let payload = isString ? JSON.parse(init.body) : init.body;
+            
+            if (payload && payload.override_settings) {
+                let modifiedSomething = false;
+                
+                // 1. Purge ONLY the specific legacy memory variables that crash Neo.
+                // Leave 'forge_additional_modules' intact so your engine.js flush logic works!
+                const toxicKeys = ['forge_inference_memory', 'forge_unet_storage_dtype'];
+                toxicKeys.forEach(toxicKey => {
+                    if (payload.override_settings[toxicKey] !== undefined) {
+                        delete payload.override_settings[toxicKey];
+                        modifiedSomething = true;
+                    }
+                });
+                
+                // 2. Fix VAE for BOTH servers.
+                // Neo crashes looking for a file named "Automatic". Legacy Forge needs an explicit reset.
+                // Changing it to "None" safely clears the VAE in both architectures.
+                if (payload.override_settings['sd_vae'] === 'Automatic') {
+                    payload.override_settings['sd_vae'] = 'None';
+                    modifiedSomething = true;
+                }
+                
+                if (modifiedSomething) {
+                    init.body = isString ? JSON.stringify(payload) : payload;
+                    console.log("[NeoPatch] Payload sanitized. Isolation logic preserved.");
+                }
+            }
+        }
+    } catch (e) {
+        console.warn("[NeoPatch] Error sanitizing payload", e);
+    }
+    // ---------------------------------
+
     // A. VALIDATION CHECK: Only run if Remote + Cloudflare are ON
     if (typeof connectionConfig === 'undefined' || !connectionConfig.isRemote) {
         return window.originalFetch(input, init);
