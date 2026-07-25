@@ -151,11 +151,11 @@ Resolver utilizes a Hybrid Mobile Architecture to balance UI flexibility with sy
 
 ---
 
-## <a id="support-the-developer"></a>💖 Support the Developer
+## <a id="support-the-developer"></a> Support the Developer
 
 Resolver is completely free and open-source. If you find this app useful and want to support its ongoing development, please consider leaving a tip! Donations help cover the costs of testing devices, servers, and training custom LLM models for the ecosystem.
 
-👉 **[Donate via Crypto (USDT)](https://bojrodev.com/donate)**
+ **[Donate via Crypto (USDT)](https://bojrodev.com/donate)**
 
 ---
 
