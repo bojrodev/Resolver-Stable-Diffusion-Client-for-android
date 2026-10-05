@@ -456,3 +456,67 @@ window.setInpaintMode = function(mode) {
     document.getElementById('mode-fill').classList.toggle('active', mode === 'fill');
     document.getElementById('mode-mask').classList.toggle('active', mode === 'mask');
 }
+// 1. Mode Switching & UI Logic
+function setCanvasMode(mode) {
+    activeEditorMode = mode;
+    
+    document.getElementById('canvas-mode-mask').classList.toggle('active', mode === 'mask');
+    document.getElementById('canvas-mode-paint').classList.toggle('active', mode === 'paint');
+    
+    const colorPicker = document.getElementById('paintColorPicker');
+    if (mode === 'paint') {
+        colorPicker.classList.remove('hidden');
+    } else {
+        colorPicker.classList.add('hidden');
+    }
+}
+
+function updatePaintColor(hexColor) {
+    activePaintColor = hexColor;
+}
+
+// 2. The Engine Hijack (Forces the brush to change color)
+const originalStroke = CanvasRenderingContext2D.prototype.stroke;
+CanvasRenderingContext2D.prototype.stroke = function() {
+    // Only hijack the color if we are inside ComfyUI editing mode
+    if (typeof isComfyMaskingMode !== 'undefined' && isComfyMaskingMode) {
+        if (typeof activeEditorMode !== 'undefined' && activeEditorMode === 'paint') {
+            // Apply chosen paint color
+            this.strokeStyle = typeof activePaintColor !== 'undefined' ? activePaintColor : '#ff0000';
+        } else {
+            // Force white for standard masking so cutouts keep working
+            this.strokeStyle = '#ffffff'; 
+        }
+    }
+    // Continue drawing the line normally
+    originalStroke.apply(this, arguments);
+};
+
+// 3. Fail-Safe Patch for the Delete (Trash) Button
+const originalClearMask = window.clearMask;
+window.clearMask = function() {
+    if (typeof isComfyMaskingMode !== 'undefined' && isComfyMaskingMode) {
+        // Wipe visible canvas
+        const canvas = document.getElementById('paintCanvas');
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        // Redraw clean base image
+        if (typeof comfyBaseImage !== 'undefined' && comfyBaseImage) {
+            ctx.drawImage(comfyBaseImage, 0, 0);
+        }
+        
+        // Wipe invisible mask canvas
+        if (typeof maskCanvas !== 'undefined' && maskCanvas) {
+            const mCtx = maskCanvas.getContext('2d');
+            mCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+        }
+        
+        // Reset brush stroke arrays if they exist in your editor.js
+        if (typeof strokes !== 'undefined') strokes = [];
+        if (typeof paths !== 'undefined') paths = [];
+    } else if (typeof originalClearMask === 'function') {
+        // Do normal behavior if not in Comfy Mode
+        originalClearMask();
+    }
+};
