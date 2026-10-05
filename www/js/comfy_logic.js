@@ -1555,10 +1555,21 @@ function startComfyMasking(nodeId) {
         comfyBar.style.cssText = "margin-top:10px; background:var(--accent-secondary); border:1px solid var(--accent-primary);";
         comfyBar.innerHTML = `
             <div class="row" style="justify-content:space-between; align-items:center;">
-                <label style="color:white; font-weight:900;"><i data-lucide="brush"></i> MASK EDITING</label>
+                
+                <!-- NEW MODE SWITCHER IN THE TOP BAR -->
+                <div class="row" style="width:auto; gap:10px; align-items:center;">
+                    <label style="color:white; font-weight:900; margin:0;"><i data-lucide="brush"></i> EDIT:</label>
+                    <div class="row" style="width:auto; gap:4px; background:rgba(0,0,0,0.3); padding:4px; border-radius:6px;">
+                        <div class="toggle-opt active" id="canvas-mode-mask" onclick="setCanvasMode('mask')" style="color:white; border:none; padding:4px 10px; font-size:10px;">MASK</div>
+                        <div class="toggle-opt" id="canvas-mode-paint" onclick="setCanvasMode('paint')" style="color:white; border:none; padding:4px 10px; font-size:10px;">PAINT</div>
+                        <input type="color" id="paintColorPicker" value="#ff0000" class="hidden" style="width:24px; height:24px; border:none; padding:0; cursor:pointer;" onchange="updatePaintColor(this.value)">
+                    </div>
+                </div>
+
+                <!-- APPLY/CANCEL BUTTONS -->
                 <div class="row" style="width:auto; gap:10px;">
-                    <button class="btn-small" onclick="cancelComfyMasking()" style="background:rgba(0,0,0,0.2);">CANCEL</button>
-                    <button class="btn-small" onclick="finishComfyMasking()" style="background:white; color:var(--accent-secondary); font-weight:900;">APPLY MASK</button>
+                    <button class="btn-small" onclick="cancelComfyMasking()" style="background:rgba(0,0,0,0.2); color:white; border:none;">CANCEL</button>
+                    <button class="btn-small" onclick="finishComfyMasking()" style="background:white; color:var(--accent-secondary); font-weight:900; border:none;">APPLY</button>
                 </div>
             </div>
         `;
@@ -1645,27 +1656,39 @@ async function finishComfyMasking() {
         return;
     }
 
-    // 1. Create Composite (Clean Image + Transparent Holes)
+    // 1. Create Canvas to Composite Original Image + Canvas Edits
     const tempCanvas = document.createElement('canvas');
     tempCanvas.width = comfyBaseImage.width;
     tempCanvas.height = comfyBaseImage.height;
     const ctx = tempCanvas.getContext('2d');
 
+    // 2. Draw the clean base image first
     ctx.drawImage(comfyBaseImage, 0, 0);
 
-    if (typeof maskCanvas !== 'undefined') {
-        ctx.globalCompositeOperation = 'destination-out';
+    // 3. Apply Compositing based on Mode
+    if (typeof maskCanvas !== 'undefined' && maskCanvas) {
+        if (typeof activeEditorMode !== 'undefined' && activeEditorMode === 'paint') {
+            // PAINT MODE: Bake drawn RGB colors on top
+            ctx.globalCompositeOperation = 'source-over';
+        } else {
+            // MASK MODE: Punch transparent holes
+            ctx.globalCompositeOperation = 'destination-out';
+        }
         ctx.drawImage(maskCanvas, 0, 0);
     }
 
-    // 2. Upload
+    // 4. Export composite image to Blob
     tempCanvas.toBlob(async (blob) => {
         const btn = document.querySelector('#comfy-mask-bar button:last-child');
-        const oldText = btn.innerText;
-        btn.innerText = "UPLOADING...";
+        const oldText = btn ? btn.innerText : '';
+        if (btn) btn.innerText = "UPLOADING...";
 
         const formData = new FormData();
-        const filename = `mask_edit_${Date.now()}.png`;
+        
+        // Dynamically name the file based on the operation
+        const prefix = (typeof activeEditorMode !== 'undefined' && activeEditorMode === 'paint') ? 'paint' : 'mask';
+        const filename = `${prefix}_edit_${Date.now()}.png`;
+        
         formData.append("image", blob, filename);
         formData.append("overwrite", "true");
 
@@ -1676,10 +1699,9 @@ async function finishComfyMasking() {
             });
             const data = await resp.json();
 
-            // 3. Update Comfy Node Logic
+            // 5. Update Comfy Node Logic & Visuals
             updateComfyValue(comfyMaskTargetNodeId, 'image', data.name);
             
-            // 4. Update UI Visuals (Thumbnail & Label)
             const thumbImg = document.getElementById(`thumb_${comfyMaskTargetNodeId}`);
             const labelSpan = document.getElementById(`label_${comfyMaskTargetNodeId}`);
             
@@ -1687,19 +1709,17 @@ async function finishComfyMasking() {
                 thumbImg.src = `http://${comfyHost}/view?filename=${data.name}&type=input&t=${Date.now()}`;
                 thumbImg.style.display = 'block';
             }
-            // THIS FIXES THE "NO IMAGE CHOSEN" ISSUE
             if (labelSpan) {
                 labelSpan.innerText = data.name; 
             }
             
-            btn.innerText = oldText;
+            if (btn) btn.innerText = oldText;
             
-            // 5. Cleanup & Return (Clears canvas via cancel function)
+            // 6. Cleanup & Reset Canvas
             cancelComfyMasking(); 
-
         } catch (e) {
             alert("Upload Failed: " + e.message);
-            btn.innerText = oldText;
+            if (btn) btn.innerText = oldText;
         }
     }, 'image/png');
 }

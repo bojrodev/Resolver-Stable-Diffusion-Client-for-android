@@ -167,3 +167,6 @@ function handleUniversalProceed() {
         }
     }
 }
+// --- EDITOR MODES ---
+var activeEditorMode = 'mask';    // Modes: 'mask' | 'paint'
+var activePaintColor = '#ff0000'; // Default hex color for painting
