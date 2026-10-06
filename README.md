@@ -6,7 +6,7 @@
 ![Backend](https://img.shields.io/badge/Backend-Forge%20Neo-blue)
 ![Backend](https://img.shields.io/badge/Backend-Comfy%20UI-blue)
 ![License](https://img.shields.io/badge/License-GPLv3-red.svg)
-<a href="https://bojrodev.com/donate">
+<a href="https://bojrodev.github.io/Portfolio/donate.html">
 <img src="https://img.shields.io/badge/SUPPORT-Donate-00C853?style=for-the-badge&logo=tether&logoColor=white"/>
 </a>
 
@@ -155,7 +155,7 @@ Resolver utilizes a Hybrid Mobile Architecture to balance UI flexibility with sy
 
 Resolver is completely free and open-source. If you find this app useful and want to support its ongoing development, please consider leaving a tip! Donations help cover the costs of testing devices, servers, and training custom LLM models for the ecosystem.
 
- **[Donate via Crypto (USDT)](https://bojrodev.com/donate)**
+ **[Donate via Crypto (USDT)](https://bojrodev.github.io/Portfolio/donate.html)**
 
 ---
 
