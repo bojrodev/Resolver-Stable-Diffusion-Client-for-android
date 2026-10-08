@@ -1,7 +1,7 @@
 {
-  "version": "2.3",
-  "isNativeRequired": true,
+  "version": "2.4",
+  "isNativeRequired": false,
   "nativeUrl": "https://github.com/bojrodev/Resolver-Stable-Diffusion-Client-for-android/releases",
-  "url": "https://github.com/bojrodev/Resolver-Stable-Diffusion-Client-for-android/releases/download/OTAv2.1/OTA2.1.zip",
-  "note": "User:celulari, fix--> Isuse no 45:Package not working with neo."
+  "url": "https://github.com/bojrodev/Resolver-Stable-Diffusion-Client-for-android/releases/download/v2.4/distv2.4.zip",
+  "note": "Dev Feature Add: ComfyUI Inpainting Paint brush Tool implement Fix along with masks "
 }
