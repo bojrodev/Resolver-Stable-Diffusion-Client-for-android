@@ -1356,6 +1356,20 @@
         </div>
     </div>
 </div>
+
+<div id="noticeBoardModal" class="modal hidden notice-board-modal" role="dialog" aria-modal="true" aria-labelledby="noticeBoardTitle">
+    <div class="modal-content notice-board-content">
+        <div class="notice-board-icon">
+            <i data-lucide="megaphone" size="28"></i>
+        </div>
+        <div class="notice-board-eyebrow">RESOLVER NOTICE BOARD</div>
+        <h3 id="noticeBoardTitle" class="notice-board-title"></h3>
+        <div id="noticeBoardMessage" class="notice-board-message"></div>
+        <a id="noticeBoardLink" class="btn-main notice-board-link hidden" target="_blank" rel="noopener noreferrer"></a>
+        <button id="noticeBoardDismiss" class="btn-small notice-board-dismiss">GOT IT</button>
+    </div>
+</div>
+
 <div id="saac-img-modal" onclick="window.SaacManager.closeImage()">
     <img id="saac-img-content" src="" alt="Preview">
     <div id="saac-img-title" style="color: white; margin-top: 15px; font-weight: 800; font-family: 'Orbitron';"></div>
@@ -1444,6 +1458,7 @@
     <script src="js/engine.js"></script>
     <script src="js/comfy_logic.js"></script>
     <script src="js/updater.js"></script>
+    <script src="js/notice_board.js"></script>
     <script src="js/saac.js"></script>
     <script src="js/boot.js"></script>
 
