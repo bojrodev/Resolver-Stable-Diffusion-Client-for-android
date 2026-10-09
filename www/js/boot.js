@@ -195,10 +195,14 @@ window.onload = function() {
         // =========================================================================
         // 16. SILENT AUTO-UPDATE CHECK
         // =========================================================================
-        setTimeout(() => {
+        setTimeout(async () => {
             if (typeof checkForAppUpdate === 'function') {
                 console.log("Boot: Running silent update check...");
-                checkForAppUpdate(true); // <--- TRUE means "Silent Mode"
+                await checkForAppUpdate(true); // TRUE means "Silent Mode"
+            }
+            if (typeof checkForNoticeBoard === 'function') {
+                console.log("Boot: Checking the notice board...");
+                await checkForNoticeBoard();
             }
         }, 3000); // Waits 3 seconds after boot
 

@@ -1,0 +1,7 @@
+{
+  "id": "welcome-2026-10-10",
+  "title": "Welcome to the Notice Board",
+  "message": "Important Resolver announcements will appear here. To publish a new notice, update this file on the dev branch and change its id.",
+  "link": "",
+  "linkText": "LEARN MORE"
+}
