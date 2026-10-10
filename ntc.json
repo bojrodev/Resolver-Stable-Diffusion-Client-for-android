@@ -1,7 +1,7 @@
 {
-  "id": "v2.6-announcement",
-  "title": "Advanced Mode Integration",
-  "message": "A massive patch from contributor Bungles (Oliver Lufti) is currently under active testing! This overhaul introduces multi-pass ADetailer pass stacking, 3-unit ControlNet, Never OOM memory optimizations, unified Inpaint/img2img/Upscale tabs, and dedicated support for Krea 2 and Anima architectures. Huge shoutout to Bungles for driving the evolution of Resolver!",
+  "id": "v2.6-announcement-2",
+  "title": "Advanced Mode Integration completed",
+  "message": "A massive patch from contributor Bungles (Oliver Lufti) is deployed",
   "type": "info",
   "date": "2026-10-10",
   "active": true
