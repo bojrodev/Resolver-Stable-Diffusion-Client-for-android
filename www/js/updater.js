@@ -23,7 +23,7 @@ window.resetNativeUpdater = async function() {
         window.location.reload(); 
     } catch (e) {
         console.error(e);
-        alert("Reset failed: " + e.message);
+        await window.appAlert("Reset failed: " + e.message, { title: 'Reset Failed', danger: true });
     }
 };
 
@@ -43,6 +43,7 @@ async function checkForAppUpdate(silent = false) {
             Toast.show({text: 'Checking for updates...', duration: 'short'});
         }
 
+        // Update source: the upstream project's repo (checked on launch and from CHECK FOR UPDATES).
         const UPDATE_URL = 'https://raw.githubusercontent.com/bojrodev/Resolver-Stable-Diffusion-Client-for-android/dev/v2ersion.json';
         
         // IMPORTANT: Update this number manually when you release a new version
@@ -130,7 +131,7 @@ function showUpdateModal(data, UpdaterPlugin) {
             await UpdaterPlugin.set(update);
         } catch (e) {
             console.error(e);
-            alert("Download Failed: " + e.message);
+            await window.appAlert("Download Failed: " + e.message, { title: 'Download Failed', danger: true });
             btnUpdate.disabled = false;
             btnUpdate.innerHTML = `<i data-lucide="download-cloud"></i> RETRY`;
         }

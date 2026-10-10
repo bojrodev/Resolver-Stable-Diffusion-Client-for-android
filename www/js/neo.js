@@ -23,10 +23,13 @@ const Neo = {
 
         const currentVal = sel.value;
         sel.innerHTML = "";
-        
-        models.forEach(m => {
-            sel.appendChild(new Option(m.model_name, m.title));
-        });
+
+        // Grouped options as on the other main tabs (confident Qwen matches first).
+        if (typeof buildGroupedModelOptions === 'function') {
+            buildGroupedModelOptions(models, 'qwen', 'Qwen Models').forEach(g => sel.appendChild(g));
+        } else {
+            models.forEach(m => sel.appendChild(new Option(m.model_name, m.title)));
+        }
 
         const saved = localStorage.getItem('bojroModel_qwen');
         if (saved) {
@@ -34,6 +37,8 @@ const Neo = {
         } else if (currentVal) {
             sel.value = currentVal;
         }
+        // Setting .value fires no 'change', so refresh the trigger button explicitly.
+        if (typeof updateModelPickerTriggerText === 'function') updateModelPickerTriggerText('qwen_modelSelect');
     },
 
     // Called by app.js when samplers are fetched
@@ -44,19 +49,18 @@ const Neo = {
          samplers.forEach(s => {
              sel.appendChild(new Option(s.name, s.name));
          });
-         
-         // 1. Set Default Sampler to Euler
-         if(Array.from(sel.options).some(o => o.value === "Euler")) {
+
+         // Restore sampler/scheduler from the live-state store, as other modes do.
+         const savedSampler = localStorage.getItem('bojro_qwen_live_qwen_sampler');
+         if (savedSampler && Array.from(sel.options).some(o => o.value === savedSampler)) {
+             sel.value = savedSampler;
+         } else if(Array.from(sel.options).some(o => o.value === "Euler")) {
              sel.value = "Euler";
          } else if(Array.from(sel.options).some(o => o.value === "Euler a")) {
              sel.value = "Euler a";
          }
 
-         // 2. Set Default Scheduler to Simple (if element exists)
-         const sched = document.getElementById('qwen_scheduler');
-         if(sched) {
-             sched.value = "Simple";
-         }
+         // Scheduler is restored by fetchSchedulers() (network.js), so it is left alone here.
     },
 
     // Populates the Dual Dropdowns (VAE and Qwen/TE)
@@ -125,7 +129,8 @@ const Neo = {
     buildJob: function() {
         const modelTitle = document.getElementById('qwen_modelSelect').value;
         if(!modelTitle || modelTitle.includes("Link first")) {
-            alert("Neo System: Please select a Qwen/Turbo model first.");
+            window.appAlert("Neo System: Please select a Qwen/Turbo model first.");
+            window.__buildJobOwnMessageShown = true;
             return null;
         }
 
@@ -137,7 +142,7 @@ const Neo = {
         const cfg = parseFloat(document.getElementById('qwen_cfg').value) || 1.0;
         const width = parseInt(document.getElementById('qwen_width').value) || 1024;
         const height = parseInt(document.getElementById('qwen_height').value) || 1024;
-        const seed = parseInt(document.getElementById('qwen_seed').value) || -1;
+        const seed = parseSeedValue(document.getElementById('qwen_seed').value);
         const batchSize = parseInt(document.getElementById('qwen_batch_size').value) || 1;
         const batchCount = parseInt(document.getElementById('qwen_batch_count').value) || 1;
 
@@ -149,7 +154,7 @@ const Neo = {
         const te = document.getElementById('qwen_te').value;
         
         // Get Low Bits setting (from app.js UI logic)
-        const bits = document.getElementById('qwen_bits') ? document.getElementById('qwen_bits').value : "Automatic (fp16 LoRA)";
+        const bits = typeof getLowBitsForMode === 'function' ? getLowBitsForMode('qwen') : "Automatic";
 
         const modulesToLoad = [vae, te].filter(v => v && v !== "Automatic" && v !== "None");
 
@@ -159,7 +164,9 @@ const Neo = {
             "forge_additional_modules": modulesToLoad, 
             "forge_unet_storage_dtype": bits,
             // CRITICAL FIX: Reserve 6GB to force Offload
-            "forge_inference_memory": this.getMemoryReserve() 
+            "forge_inference_memory": this.getMemoryReserve(),
+            // return_grid keeps Forge from returning a grid in the response (do_not_save_grid only affects disk).
+            "return_grid": false
         };
 
         // 3. Construct Payload
@@ -176,6 +183,8 @@ const Neo = {
             "scheduler": scheduler,
             "seed": seed,
             "save_images": true,
+            // No combined grid for batches (same as the other modes).
+            "do_not_save_grid": true,
             "override_settings": overrides
         };
 
@@ -191,6 +200,26 @@ const Neo = {
             payload.hr_cfg = parseFloat(document.getElementById('qwen_hr_cfg').value) || 1.0;
             // FIX: Add hr_additional_modules to prevent NoneType error in processing.py
             payload.hr_additional_modules = ["Use same choices"]; 
+        }
+
+        // ADetailer + Never OOM + ControlNet Injection
+        const qwenAdetailerScripts = typeof buildAdetailerScriptPayload === 'function' ? buildAdetailerScriptPayload('qwen') : {};
+        const qwenNeverOomScripts = typeof buildNeverOomScriptPayload === 'function' ? buildNeverOomScriptPayload('qwen') : {};
+        // Guarded: buildControlNetScriptPayload lives in engine.js.
+        const qwenCnScripts = typeof buildControlNetScriptPayload === 'function' ? buildControlNetScriptPayload('qwen', null) : {};
+        // Guarded: controlNetMissingRequiredImage lives in engine.js.
+        if (typeof controlNetMissingRequiredImage === 'function' && controlNetMissingRequiredImage(qwenCnScripts)) {
+            if (typeof Toast !== 'undefined') Toast.show({ text: "Load a reference image for ControlNET, or disable it.", duration: 'short' });
+            window.__buildJobOwnMessageShown = true;
+            return null;
+        }
+        const qwenCombinedScripts = { ...qwenAdetailerScripts, ...qwenNeverOomScripts, ...qwenCnScripts };
+        if (Object.keys(qwenCombinedScripts).length > 0) {
+            payload.alwayson_scripts = qwenCombinedScripts;
+        }
+        // ControlNet reads a top-level resize_mode from the request.
+        if (qwenCnScripts.controlnet) {
+            payload.resize_mode = qwenCnScripts.controlnet.args[0].resize_mode;
         }
 
         return {

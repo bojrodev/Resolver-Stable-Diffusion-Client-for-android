@@ -11,6 +11,15 @@ let comfyInputMap = {};
 // Find this line at the top
 let comfyServerLists = { checkpoints: [], loras: [], vaes: [], clips: [], unets: [], samplers: [], schedulers: [] };
 
+// Sanitises workflow node ids/fields (untrusted JSON) into deterministic DOM-safe ids.
+function safeId(s) {
+    return String(s).replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
+// Unique ids for dynamically built switches so each label's for= points at its own switch.
+let comfySwitchSeq = 0;
+function nextComfySwitchId() { return 'comfy_sw_' + (++comfySwitchSeq); }
+
 let comfyRunBuffer = [];        // Stores all images from the current run
 let isComfySelectionMode = false; // Tracks if we are selecting images
 let selectedComfyImages = new Map(); // Stores DOM Element -> URL
@@ -33,11 +42,6 @@ var comfyMaskTargetNodeId = null;
 
 
 // --- 1. CONNECTION & SETUP ---
-
-function toggleComfyConfig() {
-    const el = document.getElementById('comfy-config-area');
-    if(el) el.classList.toggle('hidden');
-}
 
 function connectToComfy() {
     // 1. Try to use Centralized Config first
@@ -161,7 +165,7 @@ function loadWorkflowFile(event) {
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
         try {
             const jsonStr = e.target.result;
             comfyLoadedWorkflow = JSON.parse(jsonStr);
@@ -184,7 +188,7 @@ function loadWorkflowFile(event) {
                 document.getElementById('comfyQueueBtn').disabled = false;
             }
         } catch (err) {
-            alert("Invalid JSON: " + err.message);
+            await window.appAlert("Invalid JSON: " + err.message, { title: 'Invalid JSON', danger: true });
         }
     };
     reader.readAsText(file);
@@ -226,8 +230,8 @@ function restoreComfySession() {
     }
 }
 
-function unloadComfyTemplate() {
-    if(confirm("Unload current template?")) {
+async function unloadComfyTemplate() {
+    if (await window.appConfirm("Unload current template?", { title: 'Unload Template', okText: 'UNLOAD' })) {
         localStorage.removeItem('bojro_comfy_template_name');
         localStorage.removeItem('bojro_comfy_template_json');
         localStorage.removeItem('bojro_comfy_snapshot');
@@ -355,18 +359,18 @@ function buildComfyUI(workflow) {
 // --- 3. UI GENERATORS (Namespaced & Collapsible) ---
 
 function addComfyDropdown(parent, nodeId, fieldName, label, listData, currentVal) {
-    const uid = `in_${nodeId}_${fieldName}`;
-    const options = listData && listData.length > 0 
-        ? listData.map(f => `<option value="${f}" ${f === currentVal ? 'selected' : ''}>${f}</option>`).join('')
-        : `<option value="${currentVal}">${currentVal}</option>`;
+    const uid = `in_${safeId(nodeId)}_${safeId(fieldName)}`;
+    const options = listData && listData.length > 0
+        ? listData.map(f => `<option value="${escapeHtmlAttr(f)}" ${f === currentVal ? 'selected' : ''}>${escapeHtmlAttr(f)}</option>`).join('')
+        : `<option value="${escapeHtmlAttr(currentVal)}">${escapeHtmlAttr(currentVal)}</option>`;
 
     const div = document.createElement('div');
     div.className = 'col';
     div.innerHTML = `
         <div class="row" style="justify-content:space-between">
-            <label>${label} <span style="opacity:0.5; font-weight:400;">#${nodeId}</span></label>
+            <label>${escapeHtmlAttr(label)} <span style="opacity:0.5; font-weight:400;">#${escapeHtmlAttr(nodeId)}</span></label>
         </div>
-        <select id="${uid}" onchange="updateComfyValue('${nodeId}', '${fieldName}', this.value)" style="border-left: 2px solid var(--accent-secondary);">
+        <select id="${uid}" onchange="updateComfyValue('${safeId(nodeId)}', '${safeId(fieldName)}', this.value)" style="border-left: 2px solid var(--accent-secondary);">
             ${options}
         </select>
     `;
@@ -380,55 +384,50 @@ function addComfyLora(parent, nodeId, title, inputs) {
     
     const listData = comfyServerLists.loras;
     const currentVal = inputs.lora_name;
-    const options = listData && listData.length > 0 
-        ? listData.map(f => `<option value="${f}" ${f === currentVal ? 'selected' : ''}>${f}</option>`).join('')
-        : `<option value="${currentVal}">${currentVal}</option>`;
-    
+    const options = listData && listData.length > 0
+        ? listData.map(f => `<option value="${escapeHtmlAttr(f)}" ${f === currentVal ? 'selected' : ''}>${escapeHtmlAttr(f)}</option>`).join('')
+        : `<option value="${escapeHtmlAttr(currentVal)}">${escapeHtmlAttr(currentVal)}</option>`;
+
     // Use model strength as the initial display value
     const initialStrength = inputs.strength_model || 1.0;
-    const uid = `in_${nodeId}_strength`;
+    const uid = `in_${safeId(nodeId)}_strength`;
 
     wrapper.innerHTML = `
         <div class="row" style="justify-content:space-between; margin-bottom:5px;">
-            <label style="color:var(--accent-secondary); display:block;">🧩 LORA <span style="opacity:0.5">#${nodeId}</span></label>
+            <label style="color:var(--accent-secondary); display:block;">🧩 LORA <span style="opacity:0.5">#${escapeHtmlAttr(nodeId)}</span></label>
             <div class="row" style="gap:5px;">
-                <button onclick="window.setComfyLoraStrength('${nodeId}', 1.0, this)" title="Max Strength"
+                <button onclick="window.setComfyLoraStrength('${safeId(nodeId)}', 1.0, this)" title="Max Strength"
                     style="background:rgba(76, 175, 80, 0.2); color:#4CAF50; border:1px solid rgba(76, 175, 80, 0.3); width:24px; height:24px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:4px;">
                     <i data-lucide="check" size="14"></i>
                 </button>
-                <button onclick="window.setComfyLoraStrength('${nodeId}', 0.0, this)" title="Disable"
+                <button onclick="window.setComfyLoraStrength('${safeId(nodeId)}', 0.0, this)" title="Disable"
                     style="background:rgba(244,67,54,0.2); color:#f44336; border:1px solid rgba(244,67,54,0.3); width:24px; height:24px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:4px;">
                     <i data-lucide="x" size="14"></i>
                 </button>
             </div>
         </div>
 
-        <select id="in_${nodeId}_lora_name" onchange="updateComfyValue('${nodeId}', 'lora_name', this.value)" style="margin-bottom:8px;">
+        <select id="in_${safeId(nodeId)}_lora_name" onchange="updateComfyValue('${safeId(nodeId)}', 'lora_name', this.value)" style="margin-bottom:8px;">
             ${options}
         </select>
 
         <div class="col">
             <div class="row" style="justify-content:space-between">
                 <label>Strength</label>
-                <span id="val_${uid}" style="font-family:monospace; font-size:10px; color:var(--accent-primary)">${initialStrength}</span>
+                <span id="val_${uid}" style="font-family:monospace; font-size:10px; color:var(--accent-primary)">${escapeHtmlAttr(initialStrength)}</span>
             </div>
-            <input type="range" class="orange-slider" id="${uid}" min="0" max="2" step="0.1" value="${initialStrength}"
+            <input type="range" class="orange-slider" id="${uid}" min="0" max="2" step="0.1" value="${escapeHtmlAttr(initialStrength)}"
                 oninput="
                     document.getElementById('val_${uid}').innerText = this.value; 
-                    updateComfyValue('${nodeId}', 'strength_model', this.value);
-                    updateComfyValue('${nodeId}', 'strength_clip', this.value);
+                    updateComfyValue('${safeId(nodeId)}', 'strength_model', this.value);
+                    updateComfyValue('${safeId(nodeId)}', 'strength_clip', this.value);
                 ">
         </div>
     `;
     
-    comfyInputMap[`in_${nodeId}_lora_name`] = { nodeId, field: 'lora_name' };
+    comfyInputMap[`in_${safeId(nodeId)}_lora_name`] = { nodeId, field: 'lora_name' };
     parent.appendChild(wrapper);
     if(window.lucide) lucide.createIcons();
-}
-
-function clearComfyLora(nodeId) {
-    if(!confirm("Disable this LoRA? (Sets strength to 0)")) return;
-    window.setComfyLoraStrength(nodeId, 0.0);
 }
 
 // --- GENERIC NODE BUILDER (The Catch-All) ---
@@ -438,11 +437,13 @@ function createGenericNode(parent, nodeId, inputs, title) {
     // Grey border to distinguish "Generic" nodes from "Special" ones
     wrapper.style.borderLeft = '4px solid #777'; 
 
-    const state = getCollapseClass('node_' + nodeId);
+    // safeId keeps this key consistent with toggleCollapse().
+    const collapseKey = 'node_' + safeId(nodeId);
+    const state = getCollapseClass(collapseKey);
 
     wrapper.innerHTML = `
-        <div class="row" onclick="toggleCollapse(this, 'node_${nodeId}')" style="cursor:pointer; justify-content:space-between; margin-bottom:10px;">
-            <div class="node-header" style="margin:0; color:#ccc"><span>⚙️ ${title}</span> <span style="opacity:0.5">#${nodeId}</span></div>
+        <div class="row" onclick="toggleCollapse(this, '${collapseKey}')" style="cursor:pointer; justify-content:space-between; margin-bottom:10px;">
+            <div class="node-header" style="margin:0; color:#ccc"><span>⚙️ ${escapeHtmlAttr(title)}</span> <span style="opacity:0.5">#${escapeHtmlAttr(nodeId)}</span></div>
             <i data-lucide="chevron-down" size="14"></i>
         </div>
         <div class="col ${state}" style="gap:10px;"></div>
@@ -455,17 +456,18 @@ function createGenericNode(parent, nodeId, inputs, title) {
         // SKIP CONNECTIONS: If value is an array like ["55", 0], it's a wire, not a user setting.
         if (Array.isArray(val)) continue;
 
-        const uid = `gen_${nodeId}_${key}`;
+        const uid = `gen_${safeId(nodeId)}_${safeId(key)}`;
         
         // 1. Handle BOOLEANS (Checkboxes)
         if (typeof val === 'boolean') {
             const row = document.createElement('div');
             row.className = 'row';
             row.style.justifyContent = 'space-between';
+            const swId = nextComfySwitchId();
             row.innerHTML = `
-                <label>${key}</label>
-                <input type="checkbox" class="bojro-switch" ${val ? 'checked' : ''} 
-                    onchange="updateComfyValue('${nodeId}', '${key}', this.checked)">
+                <label for="${swId}">${escapeHtmlAttr(key)}</label>
+                <input type="checkbox" id="${swId}" class="bojro-switch" ${val ? 'checked' : ''} 
+                    onchange="updateComfyValue('${safeId(nodeId)}', '${safeId(key)}', this.checked)">
             `;
             content.appendChild(row);
         }
@@ -479,9 +481,9 @@ function createGenericNode(parent, nodeId, inputs, title) {
             const div = document.createElement('div');
             div.className = 'col';
             div.innerHTML = `
-                <label style="opacity:0.7; font-size:10px; margin-bottom:2px;">${key}</label>
-                <input type="${inputType}" ${stepAttr} value="${val}" style="width:100%; background:rgba(0,0,0,0.2); border:1px solid var(--border-color); padding:6px; border-radius:4px; color:white;"
-                    onchange="updateComfyValue('${nodeId}', '${key}', this.value)">
+                <label style="opacity:0.7; font-size:10px; margin-bottom:2px;">${escapeHtmlAttr(key)}</label>
+                <input type="${inputType}" ${stepAttr} value="${escapeHtmlAttr(val)}" style="width:100%; background:rgba(0,0,0,0.2); border:1px solid var(--border-color); padding:6px; border-radius:4px; color:white;"
+                    onchange="updateComfyValue('${safeId(nodeId)}', '${safeId(key)}', this.value)">
             `;
             content.appendChild(div);
         }
@@ -496,18 +498,20 @@ function createPowerLora(parent, nodeId, inputs, title) {
     wrapper.className = 'glass-box node-group';
     wrapper.style.borderLeft = '4px solid #ab47bc'; 
 
-    // DB State
-    const state = getCollapseClass('node_' + nodeId);
+    // safeId keeps this key consistent with toggleCollapse().
+    const collapseKey = 'node_' + safeId(nodeId);
+    const state = getCollapseClass(collapseKey);
+    const slotsId = `power_slots_${safeId(nodeId)}`;
 
     wrapper.innerHTML = `
-        <div class="row" onclick="toggleCollapse(this, 'node_${nodeId}')" style="cursor:pointer; justify-content:space-between; margin-bottom:10px;">
-            <div class="node-header" style="margin:0; color:#ab47bc"><span>⚡ ${title}</span> <span style="opacity:0.5">#${nodeId}</span></div>
+        <div class="row" onclick="toggleCollapse(this, '${collapseKey}')" style="cursor:pointer; justify-content:space-between; margin-bottom:10px;">
+            <div class="node-header" style="margin:0; color:#ab47bc"><span>⚡ ${escapeHtmlAttr(title)}</span> <span style="opacity:0.5">#${escapeHtmlAttr(nodeId)}</span></div>
             <i data-lucide="chevron-down" size="14"></i>
         </div>
-        <div id="power_slots_${nodeId}" class="col ${state}" style="gap:10px;"></div>
+        <div id="${slotsId}" class="col ${state}" style="gap:10px;"></div>
     `;
     
-    const slotsContainer = wrapper.querySelector(`#power_slots_${nodeId}`);
+    const slotsContainer = wrapper.querySelector(`#${slotsId}`);
 
     const keys = Object.keys(inputs).filter(k => k.startsWith('lora_')).sort();
     keys.forEach(key => {
@@ -531,43 +535,45 @@ function renderPowerLoraSlot(container, nodeId, key, data) {
     
     const loraList = comfyServerLists.loras || [];
     const options = loraList.length > 0 
-        ? loraList.map(f => `<option value="${f}" ${f === data.lora ? 'selected' : ''}>${f}</option>`).join('')
-        : `<option value="${data.lora}">${data.lora}</option>`;
+        ? loraList.map(f => `<option value="${escapeHtmlAttr(f)}" ${f === data.lora ? 'selected' : ''}>${escapeHtmlAttr(f)}</option>`).join('')
+        : `<option value="${escapeHtmlAttr(data.lora)}">${escapeHtmlAttr(data.lora)}</option>`;
+    const valId = `val_${safeId(nodeId)}_${safeId(key)}`;
+    const enabledSwId = nextComfySwitchId();
 
     div.innerHTML = `
         <div class="row" style="justify-content:space-between; margin-bottom:5px; align-items:center;">
-            <label style="color:var(--text-main); font-weight:900; margin:0;">${key.toUpperCase().replace('_', ' ')}</label>
+            <label style="color:var(--text-main); font-weight:900; margin:0;">${escapeHtmlAttr(key.toUpperCase().replace('_', ' '))}</label>
             
             <div class="row" style="width:auto; gap:8px; align-items:center;">
-                <label style="margin:0; font-size:9px;">ENABLED</label>
-                <input type="checkbox" class="bojro-switch" 
+                <label for="${enabledSwId}" style="margin:0; font-size:9px;">ENABLED</label>
+                <input type="checkbox" id="${enabledSwId}" class="bojro-switch" 
                     ${data.on ? 'checked' : ''} 
-                    onchange="updateComfyValue('${nodeId}', '${key}.on', this.checked)">
+                    onchange="updateComfyValue('${safeId(nodeId)}', '${safeId(key)}.on', this.checked)">
                 
-                <button onclick="removePowerLoraSlot('${nodeId}', '${key}', this)" 
+                <button onclick="removePowerLoraSlot('${safeId(nodeId)}', '${safeId(key)}', this)" 
                     style="background:rgba(244,67,54,0.2); color:#f44336; border:1px solid rgba(244,67,54,0.3); width:24px; height:24px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:4px;">
                     <i data-lucide="trash-2" size="14"></i>
                 </button>
             </div>
         </div>
 
-        <select onchange="updateComfyValue('${nodeId}', '${key}.lora', this.value)" style="margin-bottom:8px;">
+        <select onchange="updateComfyValue('${safeId(nodeId)}', '${safeId(key)}.lora', this.value)" style="margin-bottom:8px;">
             ${options}
         </select>
 
         <div class="row" style="justify-content:space-between">
             <label>Strength</label>
-            <span id="val_${nodeId}_${key}" style="font-family:monospace; font-size:10px; color:var(--accent-primary)">${data.strength}</span>
+            <span id="${valId}" style="font-family:monospace; font-size:10px; color:var(--accent-primary)">${escapeHtmlAttr(data.strength)}</span>
         </div>
-        <input type="range" class="orange-slider" min="0" max="2" step="0.1" value="${data.strength}"
-            oninput="document.getElementById('val_${nodeId}_${key}').innerText = this.value; updateComfyValue('${nodeId}', '${key}.strength', this.value)">
+        <input type="range" class="orange-slider" min="0" max="2" step="0.1" value="${escapeHtmlAttr(data.strength)}"
+            oninput="document.getElementById('${valId}').innerText = this.value; updateComfyValue('${safeId(nodeId)}', '${safeId(key)}.strength', this.value)">
     `;
     
     container.appendChild(div);
 }
 
-function removePowerLoraSlot(nodeId, key, btn) {
-    if(!confirm("Delete this LoRA slot?")) return;
+async function removePowerLoraSlot(nodeId, key, btn) {
+    if (!(await window.appConfirm("Delete this LoRA slot?", { title: 'Delete LoRA Slot', okText: 'DELETE', danger: true }))) return;
     
     // 1. Update Memory: Remove the key from the node inputs
     const node = comfyLoadedWorkflow[nodeId];
@@ -619,11 +625,12 @@ function createComfySampler(parent, nodeId, inputs, title) {
     const wrapper = document.createElement('div');
     wrapper.className = 'glass-box node-group';
     
-    const state = getCollapseClass('node_' + nodeId);
+    const collapseKey = 'node_' + safeId(nodeId);
+    const state = getCollapseClass(collapseKey);
 
     wrapper.innerHTML = `
-        <div class="row" onclick="toggleCollapse(this, 'node_${nodeId}')" style="cursor:pointer; justify-content:space-between; margin-bottom:10px;">
-            <div class="node-header" style="margin:0;"><span>🎛️ ${title}</span> <span style="opacity:0.5">#${nodeId}</span></div>
+        <div class="row" onclick="toggleCollapse(this, '${collapseKey}')" style="cursor:pointer; justify-content:space-between; margin-bottom:10px;">
+            <div class="node-header" style="margin:0;"><span>🎛️ ${escapeHtmlAttr(title)}</span> <span style="opacity:0.5">#${escapeHtmlAttr(nodeId)}</span></div>
             <i data-lucide="chevron-down" size="14"></i>
         </div>
         <div class="col ${state}"></div>
@@ -651,21 +658,23 @@ function createComfyText(parent, nodeId, inputs, title) {
     wrapper.className = 'glass-box node-group';
     wrapper.style.borderLeftColor = color;
     
-    const state = getCollapseClass('node_' + nodeId);
+    const collapseKey = 'node_' + safeId(nodeId);
+    const state = getCollapseClass(collapseKey);
+    const textId = `in_${safeId(nodeId)}_text`;
 
     wrapper.innerHTML = `
-        <div class="row" onclick="toggleCollapse(this, 'node_${nodeId}')" style="cursor:pointer; justify-content:space-between; margin-bottom:10px;">
+        <div class="row" onclick="toggleCollapse(this, '${collapseKey}')" style="cursor:pointer; justify-content:space-between; margin-bottom:10px;">
             <div class="node-header" style="margin:0; color:${color}">
-                <span>${isNeg ? '🛡️ NEGATIVE' : '✨ PROMPT'}</span> <span style="opacity:0.5">#${nodeId}</span>
+                <span>${isNeg ? '🛡️ NEGATIVE' : '✨ PROMPT'}</span> <span style="opacity:0.5">#${escapeHtmlAttr(nodeId)}</span>
             </div>
             <i data-lucide="chevron-down" size="14"></i>
         </div>
         <div class="col ${state}">
-            <textarea id="in_${nodeId}_text" rows="${isNeg ? 2 : 5}" oninput="updateComfyValue('${nodeId}', 'text', this.value)">${inputs.text}</textarea>
+            <textarea id="${textId}" rows="${isNeg ? 2 : 5}" oninput="updateComfyValue('${safeId(nodeId)}', 'text', this.value)">${escapeHtmlAttr(inputs.text)}</textarea>
         </div>
     `;
     parent.appendChild(wrapper);
-    comfyInputMap[`in_${nodeId}_text`] = { nodeId, field: 'text' };
+    comfyInputMap[textId] = { nodeId, field: 'text' };
 }
 
 // --- NEW: COLLAPSIBLE RESOLUTION ---
@@ -673,11 +682,12 @@ function createComfyResolution(parent, nodeId, inputs, title) {
     const wrapper = document.createElement('div');
     wrapper.className = 'glass-box node-group';
     
-    const state = getCollapseClass('node_' + nodeId);
+    const collapseKey = 'node_' + safeId(nodeId);
+    const state = getCollapseClass(collapseKey);
 
     wrapper.innerHTML = `
-        <div class="row" onclick="toggleCollapse(this, 'node_${nodeId}')" style="cursor:pointer; justify-content:space-between; margin-bottom:10px;">
-            <div class="node-header" style="margin:0;"><span>📐 RESOLUTION</span> <span style="opacity:0.5">#${nodeId}</span></div>
+        <div class="row" onclick="toggleCollapse(this, '${collapseKey}')" style="cursor:pointer; justify-content:space-between; margin-bottom:10px;">
+            <div class="node-header" style="margin:0;"><span>📐 RESOLUTION</span> <span style="opacity:0.5">#${escapeHtmlAttr(nodeId)}</span></div>
             <i data-lucide="chevron-down" size="14"></i>
         </div>
         <div class="col ${state}"></div>
@@ -696,56 +706,60 @@ function createComfyImageUpload(parent, nodeId, inputs, title) {
     wrapper.className = 'glass-box node-group';
     wrapper.style.padding = '10px';
 
-    const inputId = `file_${nodeId}`;
-    const thumbId = `thumb_${nodeId}`;
-    const labelId = `label_${nodeId}`;
+    const safeNodeId = safeId(nodeId);
+    const inputId = `file_${safeNodeId}`;
+    const thumbId = `thumb_${safeNodeId}`;
+    const labelId = `label_${safeNodeId}`;
+    const placeholderId = `placeholder_${safeNodeId}`;
+    const statusId = `status_${safeNodeId}`;
     const currentImgName = inputs.image || "No image selected";
     const currentImgUrl = inputs.image ? `http://${comfyHost}/view?filename=${inputs.image}&type=input` : '';
     const displayStyle = currentImgUrl ? 'display:block;' : 'display:none;';
 
-    const state = getCollapseClass('node_' + nodeId);
+    const collapseKey = 'node_' + safeNodeId;
+    const state = getCollapseClass(collapseKey);
 
     wrapper.innerHTML = `
-        <div class="row" onclick="toggleCollapse(this, 'node_${nodeId}')" style="cursor:pointer; justify-content:space-between; margin-bottom:10px;">
-            <div class="node-header" style="margin:0;"><span>🖼️ INPUT IMAGE</span> <span style="opacity:0.5">#${nodeId}</span></div>
+        <div class="row" onclick="toggleCollapse(this, '${collapseKey}')" style="cursor:pointer; justify-content:space-between; margin-bottom:10px;">
+            <div class="node-header" style="margin:0;"><span>🖼️ INPUT IMAGE</span> <span style="opacity:0.5">#${escapeHtmlAttr(nodeId)}</span></div>
             <i data-lucide="chevron-down" size="14"></i>
         </div>
         
         <div class="col ${state}">
             <div style="background:rgba(0,0,0,0.3); border-radius:8px; margin-bottom:10px; overflow:hidden; min-height:120px; display:flex; align-items:center; justify-content:center; border:1px solid var(--border-color);">
-                <img id="${thumbId}" src="${currentImgUrl}" style="width:100%; height:auto; max-height:250px; object-fit:contain; ${displayStyle}" onerror="this.style.display='none'">
-                <div id="placeholder_${nodeId}" style="color:var(--text-muted); font-size:10px; ${currentImgUrl ? 'display:none' : 'display:block'}">
+                <img id="${thumbId}" src="${escapeHtmlAttr(currentImgUrl)}" style="width:100%; height:auto; max-height:250px; object-fit:contain; ${displayStyle}" onerror="this.style.display='none'">
+                <div id="${placeholderId}" style="color:var(--text-muted); font-size:10px; ${currentImgUrl ? 'display:none' : 'display:block'}">
                     <i data-lucide="image" size="24" style="opacity:0.5; margin-bottom:5px;"></i><br>NO IMAGE
                 </div>
             </div>
 
-            <input type="file" id="${inputId}" accept="image/*" class="hidden" onchange="uploadComfyImage('${nodeId}', '${inputId}')">
+            <input type="file" id="${inputId}" accept="image/*" class="hidden" onchange="uploadComfyImage('${safeNodeId}', '${inputId}')">
             
             <div class="row" style="background:var(--bg-input); padding:8px; border-radius:6px; margin-bottom:8px; align-items:center;">
                 <i data-lucide="file" size="12" style="color:var(--text-muted); margin-right:6px;"></i>
-                <span id="${labelId}" style="font-size:11px; font-family:monospace; color:var(--text-main); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${currentImgName}</span>
+                <span id="${labelId}" style="font-size:11px; font-family:monospace; color:var(--text-main); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtmlAttr(currentImgName)}</span>
             </div>
 
             <div class="row" style="gap:8px;">
                 <button class="btn-small" onclick="document.getElementById('${inputId}').click()" style="flex:2; background:rgba(255,255,255,0.1);">
                     <i data-lucide="upload" size="12" style="margin-right:4px;"></i> UPLOAD
                 </button>
-                <button class="btn-small" onclick="startComfyMasking('${nodeId}')" style="flex:1; background:var(--accent-secondary); color:white;" title="Mask/Edit">
+                <button class="btn-small" onclick="startComfyMasking('${safeNodeId}')" style="flex:1; background:var(--accent-secondary); color:white;" title="Mask/Edit">
                     <i data-lucide="brush" size="12"></i>
                 </button>
-                <button class="btn-small" onclick="clearComfyImage('${nodeId}')" style="flex:0 0 32px; background:rgba(244,67,54,0.2); color:#f44336; padding:0; display:flex; align-items:center; justify-content:center; border:1px solid rgba(244,67,54,0.3);" title="Clear Image">
+                <button class="btn-small" onclick="clearComfyImage('${safeNodeId}')" style="flex:0 0 32px; background:rgba(244,67,54,0.2); color:#f44336; padding:0; display:flex; align-items:center; justify-content:center; border:1px solid rgba(244,67,54,0.3);" title="Clear Image">
                     <i data-lucide="x" size="14"></i>
                 </button>
             </div>
-            <div id="status_${nodeId}" style="font-size:9px; color:var(--text-muted); margin-top:5px; text-align:right;"></div>
+            <div id="${statusId}" style="font-size:9px; color:var(--text-muted); margin-top:5px; text-align:right;"></div>
         </div>
     `;
     
     parent.appendChild(wrapper);
 }
 
-function clearComfyImage(nodeId) {
-    if(!confirm("Clear this image?")) return;
+async function clearComfyImage(nodeId) {
+    if (!(await window.appConfirm("Clear this image?", { title: 'Clear Image', okText: 'CLEAR', danger: true }))) return;
 
     // 1. Update Memory (Clear input)
     updateComfyValue(nodeId, 'image', '');
@@ -768,24 +782,24 @@ function clearComfyImage(nodeId) {
 }
 
 function addComfySlider(parent, nodeId, field, label, val, min, max, step) {
-    const uid = `in_${nodeId}_${field}`;
+    const uid = `in_${safeId(nodeId)}_${safeId(field)}`;
     const div = document.createElement('div');
     div.className = 'col';
     div.style.marginBottom = "8px";
     div.innerHTML = `
         <div class="row" style="justify-content:space-between">
-            <label>${label}</label>
-            <span id="val_${uid}" style="font-family:monospace; font-size:10px; color:var(--accent-primary)">${val}</span>
+            <label>${escapeHtmlAttr(label)}</label>
+            <span id="val_${uid}" style="font-family:monospace; font-size:10px; color:var(--accent-primary)">${escapeHtmlAttr(val)}</span>
         </div>
-        <input type="range" class="orange-slider" id="${uid}" min="${min}" max="${max}" step="${step}" value="${val}"
-            oninput="document.getElementById('val_${uid}').innerText = this.value; updateComfyValue('${nodeId}', '${field}', this.value)">
+        <input type="range" class="orange-slider" id="${uid}" min="${escapeHtmlAttr(min)}" max="${escapeHtmlAttr(max)}" step="${escapeHtmlAttr(step)}" value="${escapeHtmlAttr(val)}"
+            oninput="document.getElementById('val_${uid}').innerText = this.value; updateComfyValue('${safeId(nodeId)}', '${safeId(field)}', this.value)">
     `;
     parent.appendChild(div);
     comfyInputMap[uid] = { nodeId, field };
 }
 
 function addComfySeed(parent, nodeId, field, val) {
-    const uid = `in_${nodeId}_${field}`;
+    const uid = `in_${safeId(nodeId)}_${safeId(field)}`;
     const div = document.createElement('div');
     div.className = 'col';
     div.innerHTML = `
@@ -793,7 +807,7 @@ function addComfySeed(parent, nodeId, field, val) {
             <label>SEED</label>
             <button class="btn-icon" style="width:20px; height:20px;" onclick="randomizeComfySeed('${uid}')"><i data-lucide="dices" size="12"></i></button>
         </div>
-        <input type="number" id="${uid}" value="${val}" onchange="updateComfyValue('${nodeId}', '${field}', this.value)">
+        <input type="number" id="${uid}" value="${escapeHtmlAttr(val)}" onchange="updateComfyValue('${safeId(nodeId)}', '${safeId(field)}', this.value)">
     `;
     parent.appendChild(div);
     comfyInputMap[uid] = { nodeId, field, type: 'int' };
@@ -898,14 +912,14 @@ async function uploadComfyImage(nodeId, inputId) {
         if (labelSpan) labelSpan.innerText = data.name;
 
     } catch (e) {
-        alert("Upload Failed: " + e);
+        await window.appAlert("Upload Failed: " + e, { title: 'Upload Failed', danger: true });
         if(statusSpan) statusSpan.innerText = "ERROR";
     }
 }
 
 async function queueComfyPrompt() {
     if (!comfySocket || comfySocket.readyState !== WebSocket.OPEN) {
-        alert("Not Connected!");
+        await window.appAlert("Not Connected!");
         return;
     }
 
@@ -945,7 +959,7 @@ async function queueComfyPrompt() {
         
         if(window.lucide) lucide.createIcons();
     } catch (e) {
-        alert("Failed to queue: " + e);
+        await window.appAlert("Failed to queue: " + e, { title: 'Queue Failed', danger: true });
         isComfyGenerating = false;
         // Reset button on error
         btn.disabled = false;
@@ -1009,7 +1023,7 @@ function handleComfyMessage(event) {
                     div.className = 'gallery-item';
                     
                     div.innerHTML = `
-                        <img src="${finalUrl}">
+                        <img src="${escapeHtmlAttr(finalUrl)}">
                         <div class="gallery-tag">OUTPUT ${gallery.children.length + 1}</div>
                     `;
                     
@@ -1149,7 +1163,6 @@ function viewComfyImage(url) {
 }
 
 function forceComfyDownload(url) {
-    const filename = "comfy_" + new Date().getTime() + ".png";
     const xhr = new XMLHttpRequest();
     xhr.open('GET', url, true);
     xhr.responseType = 'blob';
@@ -1160,34 +1173,38 @@ function forceComfyDownload(url) {
 
             // FIX: Check if we are native (Android)
             const isNative = window.Capacitor && window.Capacitor.isNative;
+            const reader = new FileReader();
 
             if (isNative && typeof saveToMobileGallery === 'function') {
                 // 1. Convert Blob to Base64
-                const reader = new FileReader();
                 reader.onloadend = function() {
                     // 2. Pass to your existing utils.js helper
-                    saveToMobileGallery(reader.result);
+                    saveToMobileGallery(reader.result, 'comfy');
                 }
                 reader.readAsDataURL(blob);
             } else {
-                // Fallback: Standard Web Browser Download
-                const blobUrl = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.style.display = 'none';
-                a.href = blobUrl;
-                a.download = filename;
-                document.body.appendChild(a);
-                a.click();
-                
-                setTimeout(() => {
-                    document.body.removeChild(a);
-                    window.URL.revokeObjectURL(blobUrl);
-                }, 100);
+                // Fallback: browser download, named via buildOutputFileName().
+                reader.onloadend = async function() {
+                    const filename = await buildOutputFileName(reader.result, 'comfy');
+                    const blobUrl = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.style.display = 'none';
+                    a.href = blobUrl;
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+
+                    setTimeout(() => {
+                        document.body.removeChild(a);
+                        window.URL.revokeObjectURL(blobUrl);
+                    }, 100);
+                }
+                reader.readAsDataURL(blob);
             }
         }
     };
     
-    xhr.onerror = () => alert("Download Error: Check Connection or CORS");
+    xhr.onerror = async () => await window.appAlert("Download Error: Check Connection or CORS", { title: 'Download Error', danger: true });
     xhr.send();
 }
 
@@ -1349,8 +1366,8 @@ async function renderTemplateList() {
             // We pre-render the checkmark but hide it if not selected
             div.innerHTML = `
                 <div class="tmpl-info">
-                    <span class="tmpl-name">${tmpl.name}</span>
-                    <span style="font-size:9px; color:var(--text-muted);">${tmpl.date}</span>
+                    <span class="tmpl-name">${escapeHtmlAttr(tmpl.name)}</span>
+                    <span style="font-size:9px; color:var(--text-muted);">${escapeHtmlAttr(tmpl.date)}</span>
                 </div>
                 <div class="tmpl-check ${isSelected ? '' : 'hidden'}">
                     <i data-lucide="check-circle" size="14" style="color:var(--error);"></i>
@@ -1367,7 +1384,7 @@ async function renderTemplateList() {
 }
 
 // 5. Handle Click (Selection or Load)
-function handleTmplClick(event, tmpl) {
+async function handleTmplClick(event, tmpl) {
     if (isTmplSelectionMode) {
         // Zero-Jitter Selection Logic
         const row = event.currentTarget;
@@ -1402,7 +1419,7 @@ function handleTmplClick(event, tmpl) {
             
             closeComfyTemplateModal();
         } catch (e) {
-            alert("Error loading template: " + e.message);
+            await window.appAlert("Error loading template: " + e.message, { title: 'Template Load Failed', danger: true });
         }
     }
 }
@@ -1445,10 +1462,10 @@ function updateTmplStats() {
 }
 
 // 8. Delete Selected
-function deleteSelectedTemplates() {
+async function deleteSelectedTemplates() {
     if (selectedTemplates.size === 0) return;
     
-    if (confirm(`Delete ${selectedTemplates.size} selected templates?`)) {
+    if (await window.appConfirm(`Delete ${selectedTemplates.size} selected templates?`, { title: 'Delete Templates', okText: 'DELETE', danger: true })) {
         const tx = db.transaction(["comfy_templates"], "readwrite");
         const store = tx.objectStore("comfy_templates");
         
@@ -1465,8 +1482,8 @@ function deleteSelectedTemplates() {
 }
 
 // 9. Wipe everything
-function clearAllTemplates() {
-    if (confirm("Delete ALL saved templates? This cannot be undone.")) {
+async function clearAllTemplates() {
+    if (await window.appConfirm("Delete ALL saved templates? This cannot be undone.", { title: 'Clear All Templates', okText: 'DELETE ALL', danger: true })) {
         const tx = db.transaction(["comfy_templates"], "readwrite");
         tx.objectStore("comfy_templates").clear();
         tx.oncomplete = () => {
@@ -1522,13 +1539,13 @@ async function importMultipleTemplates(event) {
 
 let comfyBaseImage = null; // Stores the clean, original image without orange lines
 
-function startComfyMasking(nodeId) {
+async function startComfyMasking(nodeId) {
     // 1. Get the image filename from the node
     const node = comfyLoadedWorkflow[nodeId];
     const currentImageName = node.inputs.image;
     
     if (!currentImageName) {
-        alert("Please upload a base image first!");
+        await window.appAlert("Please upload a base image first!");
         return;
     }
 
@@ -1545,6 +1562,9 @@ function startComfyMasking(nodeId) {
     
     document.getElementById('img-input-container').classList.add('hidden');
     document.getElementById('canvasWrapper').classList.remove('hidden');
+    if (typeof updateInpResultsAreaVisibility === 'function') updateInpResultsAreaVisibility();
+    // Makes canvasWrapper visible independently of setInpaintTopMode().
+    if (typeof syncThumbOnlySliderPosition === 'function') syncThumbOnlySliderPosition('brushSize');
 
     // 5. Create the "APPLY MASK" Toolbar
     let comfyBar = document.getElementById('comfy-mask-bar');
@@ -1645,6 +1665,7 @@ function cancelComfyMasking() {
     document.getElementById('canvasWrapper').classList.add('hidden');
     // Show the original "Upload Box"
     document.getElementById('img-input-container').classList.remove('hidden');
+    if (typeof updateInpResultsAreaVisibility === 'function') updateInpResultsAreaVisibility();
 
     // 5. Switch back to Comfy Tab
     if(typeof switchTab === 'function') switchTab('comfy');
@@ -1652,7 +1673,7 @@ function cancelComfyMasking() {
 
 async function finishComfyMasking() {
     if (!comfyBaseImage) {
-        alert("Error: Base image lost.");
+        await window.appAlert("Error: Base image lost.", { title: 'Error', danger: true });
         return;
     }
 
@@ -1718,7 +1739,7 @@ async function finishComfyMasking() {
             // 6. Cleanup & Reset Canvas
             cancelComfyMasking(); 
         } catch (e) {
-            alert("Upload Failed: " + e.message);
+            await window.appAlert("Upload Failed: " + e.message, { title: 'Upload Failed', danger: true });
             if (btn) btn.innerText = oldText;
         }
     }, 'image/png');

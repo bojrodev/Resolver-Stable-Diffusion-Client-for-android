@@ -39,6 +39,10 @@
 }
 
 :root {
+    --row-gap: 10px; /* the gap every .row uses - also feeds .under-generate below */
+    /* QUEUE (.btn-secondary) and GENERATE (.btn-main) padding / border. Shared with .under-generate's arithmetic below, which depends on them. */
+    --cta-pad: 16px;
+    --cta-border: 1px;
     /* --- DARK MODE (DEFAULT - SDXL) --- */
     --bg-app: #0f0518;            /* Deep dark background */
     --bg-panel: #1a1a20;          /* Slightly lighter panel */
@@ -104,6 +108,49 @@
     --border-color: #3b1e2e;
 }
 
+/* --- ANIMA MODE OVERRIDES --- */
+[data-mode="anima"] {
+    --bg-app: #03120a;             /* Deep Green Background */
+    --bg-panel: #0a1f14;           /* Dark Green Panel */
+    
+    --accent-primary: #00c853;     /* Darker Neon Green - better contrast with white text */
+    --accent-secondary: #00a344;   /* Deeper Green */
+    --accent-glow: rgba(0, 200, 83, 0.4);
+    --accent-gradient: linear-gradient(135deg, #00c853, #00a344);
+    --accent-primary-rgb: 0, 200, 83;
+    
+    --border-color: #1e3b26;
+}
+
+/* --- KREA MODE OVERRIDES --- */
+[data-mode="krea"] {
+    --bg-app: #0d0518;             /* Deep Violet Background */
+    --bg-panel: #180f28;           /* Dark Purple Panel */
+    
+    --accent-primary: #b026ff;     /* Neon Purple */
+    --accent-secondary: #d500f9;   /* Neon Magenta */
+    --accent-glow: rgba(176, 38, 255, 0.4);
+    --accent-gradient: linear-gradient(135deg, #b026ff, #d500f9);
+    --accent-primary-rgb: 176, 38, 255;
+    
+    --border-color: #2e1e3b;
+}
+
+/* Hides the prompt/negative boxes' default text until boot.js has restored the saved value. visibility:hidden keeps the layout space; boot.js removes body.prompts-loading. */
+body.prompts-loading #xl_prompt, body.prompts-loading #xl_neg,
+body.prompts-loading #flux_prompt,
+body.prompts-loading #qwen_prompt, body.prompts-loading #qwen_neg,
+body.prompts-loading #anima_prompt, body.prompts-loading #anima_neg,
+body.prompts-loading #krea_prompt, body.prompts-loading #krea_neg,
+body.prompts-loading #inp_prompt, body.prompts-loading #inp_neg {
+    visibility: hidden;
+}
+
+/* Likewise hides the app content (not the body, so the dark background shows) until boot.js is ready, so un-rendered icons and default-collapsed sections don't flash. */
+body.app-loading .container {
+    visibility: hidden;
+}
+
 /* --- LIGHT MODE OVERRIDES --- */
 [data-theme="light"] {
     --bg-app: #f2f2f7;            /* iOS Light Gray */
@@ -138,6 +185,24 @@
     -webkit-tap-highlight-color: transparent; /* Remove blue tap box on Android */
 }
 
+/* Hides the native scrollbar thumb everywhere in the app; scrolling is unaffected. */
+* {
+    scrollbar-width: none; /* Firefox / Gecko-based engines */
+}
+*::-webkit-scrollbar {
+    display: none; /* Chrome/Safari/Android WebView */
+}
+
+/* Disabled buttons ignore pointer events, so they can't show a pressed state. */
+/* touch-action: manipulation, so taps dispatch immediately without waiting for a double-tap-zoom. */
+button, [onclick], .dock-item, .model-picker-trigger {
+    touch-action: manipulation;
+}
+
+button:disabled, .btn-icon:disabled, .btn-small:disabled, .btn-main:disabled {
+    pointer-events: none;
+}
+
 body {
     background-color: var(--bg-app);
     color: var(--text-main);
@@ -153,6 +218,22 @@ body {
     overflow-x: hidden; /* Invisible border system: stage 1 */
     overscroll-behavior-y: none; /* Prevent pull-to-refresh on mobile web app */
     transition: background-color 0.3s ease, color 0.3s ease;
+    /* No long-press text selection in the app's interface, except inside editable fields. */
+    -webkit-user-select: none;
+    user-select: none;
+}
+
+input, textarea, select, [contenteditable="true"] {
+    -webkit-user-select: text;
+    user-select: text;
+}
+
+/* Applied while a picker/browser modal is open so the page behind can't scroll. Body is the app's only scroll container. */
+body.scroll-locked {
+    overflow-y: hidden;
+    /* Fixes the body in place while a modal is open, so the keyboard can't scroll the page behind it. top is set by lockBodyScroll() (utils.js) and restored on unlock; width:100% stops body collapsing. */
+    position: fixed;
+    width: 100%;
 }
 
 /* Canvas Fix: Ensure drawing doesn't scroll the page */
@@ -164,6 +245,8 @@ canvas {
 
 /* Utilities */
 .hidden { display: none !important; }
+/* Separate from .hidden: used by the Show ADetailer/ControlNet settings, while setInpaintTopMode() (editor.js) toggles .hidden on the same elements. */
+.feature-hidden { display: none !important; }
 
 /* INVISIBLE BORDER SYSTEM: Strictly constrains width for tablets and phones */
 .container { 
@@ -177,8 +260,29 @@ canvas {
     overflow-x: hidden; /* Invisible border system: stage 2 */
 }
 
-.row { display: flex; gap: 10px; align-items: center; width: 100%; }
+.row { display: flex; gap: var(--row-gap, 10px); align-items: center; width: 100%; }
 .col { display: flex; flex-direction: column; gap: 5px; flex: 1; }
+
+/* Batch Size / Batch Count / Seed row: one label over the two narrow batch boxes. The group is as wide as its label, so the Batch Count box ends where the label does and the seed box gets the remaining width. */
+.batch-group { flex: 0 0 auto; min-width: 0; }
+.batch-group label { white-space: nowrap; }
+/* The input row adds nothing to the group's own width: it stretches to the label's. */
+.batch-group .row { width: 0; min-width: 100%; }
+.batch-group .row input { flex: 1 1 0; min-width: 0; width: 0; }
+
+/* Abort / Clear View under the GENERATE button, each half its width. Width is calculated from the same variables as the real buttons: (W - 2.5*gap - pad - 2*border) / 3, so it tracks them at any screen width. Below about 340px the left edge drifts slightly off GENERATE's; both tabs still match. nowrap and tight padding stop "CLEAR VIEW" wrapping. */
+.under-generate {
+    flex: 0 0 calc((100% - 2.5 * var(--row-gap, 10px) - var(--cta-pad, 16px) - 2 * var(--cta-border, 1px)) / 3);
+    white-space: nowrap;
+    padding-left: 4px !important;
+    padding-right: 4px !important;
+}
+
+/* Lets a long VAE/Text Encoder filename shrink and ellipsise instead of pushing its column out of bounds: flex items default to min-width:auto. Targeted at columns containing these trigger buttons rather than changing .col globally. */
+.col:has(.model-picker-trigger) { min-width: 0; }
+
+/* At CFG 1 the negative prompt has no effect: it is visually flagged as inert but remains editable. */
+.neg-prompt-inert { color: var(--text-muted) !important; }
 .mb-5 { margin-bottom: 5px; }
 .c-p { color: var(--accent-primary); font-weight: bold; }
 .c-s { color: var(--accent-secondary); font-weight: bold; }
@@ -306,6 +410,11 @@ input:focus, select:focus, textarea:focus {
     background: var(--bg-input-focus);
 }
 
+::placeholder {
+    color: var(--text-muted);
+    opacity: 1;
+}
+
 /* --- THE PREMIUM GLOWING TOGGLE (BOJRO-SWITCH) --- */
 .bojro-switch {
     appearance: none;
@@ -356,7 +465,9 @@ input[readonly], textarea[readonly] {
     -webkit-appearance: none;
     -moz-appearance: none;
     appearance: none;
-    width: 100%;
+    /* Width and margin allow for the 18px thumb's half-width on each side, so it stays on-screen at both ends of the track. */
+    width: calc(100% - 18px);
+    margin: 0 9px;
     height: 4px;
     background: var(--border-color);
     border-radius: 2px;
@@ -370,11 +481,113 @@ input[readonly], textarea[readonly] {
     border-radius: 50%;
     background: var(--accent-primary);
     cursor: pointer;
-    box-shadow: 0 0 10px rgba(var(--accent-primary-rgb), 0.5);
-    transition: transform 0.1s;
+    /* No glow at rest; it appears only while the ball is touched (:active, and .slider-fake-thumb.dragging::after for thumb-only sliders). */
+    transition: transform 0.1s, box-shadow 0.15s;
 }
 .orange-slider::-webkit-slider-thumb:active {
     transform: scale(1.2);
+    box-shadow: 0 0 10px rgba(var(--accent-primary-rgb), 0.5);
+}
+
+/* Thumb-only sliders (Mask Blur, Padding, Denoising): the native thumb is hidden and the input made inert, with a separate .slider-fake-thumb element (positioned and dragged by thumbOnlySlider.js) receiving touches. The input stays in the DOM as the source of truth. Scoped by its own class rather than .orange-slider. */
+.thumb-only-slider {
+    pointer-events: none;
+}
+.thumb-only-slider::-webkit-slider-thumb {
+    opacity: 0;
+}
+.thumb-only-slider::-moz-range-thumb {
+    opacity: 0;
+}
+.slider-fake-thumb-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+    /* The wrapper fills the row (flex:1), as a bare input would. */
+    flex: 1;
+    min-width: 0;
+}
+/* The visible dot stays 18px (drawn by ::after); the element itself is a 36px invisible touch target. */
+.slider-fake-thumb {
+    position: absolute;
+    top: 50%;
+    width: 36px;
+    height: 36px;
+    transform: translate(-50%, -50%);
+    pointer-events: auto;
+    touch-action: none;
+    cursor: pointer;
+}
+.slider-fake-thumb::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--accent-primary);
+    /* No glow at rest (see .orange-slider::-webkit-slider-thumb above). */
+    transform: translate(-50%, -50%);
+    transition: transform 0.1s, box-shadow 0.15s;
+}
+.slider-fake-thumb.dragging::after {
+    transform: translate(-50%, -50%) scale(1.2);
+    box-shadow: 0 0 10px rgba(var(--accent-primary-rgb), 0.5);
+}
+
+/* ControlNet Weight / Guidance sliders (rangeslider.js) use the shared .slider-fake-thumb. The track is inset 9px each side and the ball sits at 9px + p * (width - 18px), where p is the --p custom property, so it is correct as soon as a hidden section is shown. */
+.cn-slider-col {
+    flex: 1 1 100%;
+    min-width: 0;
+}
+.cn-slider-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+}
+.cn-slider-val {
+    font-family: monospace;
+    color: var(--text-muted);
+    font-size: 10px;
+}
+.cn-slider-wrap {
+    position: relative;
+    height: 30px;
+}
+.cn-slider-track {
+    position: absolute;
+    left: 9px;
+    right: 9px;
+    top: 50%;
+    height: 4px;
+    transform: translateY(-50%);
+    background: var(--border-color);
+    border-radius: 2px;
+}
+/* The highlighted stretch between Guidance's two balls. */
+.cn-slider-fill {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: calc(var(--p1, 0) * 100%);
+    right: calc((1 - var(--p2, 1)) * 100%);
+    background: var(--accent-primary);
+    border-radius: 2px;
+}
+.cn-slider-wrap .slider-fake-thumb {
+    left: calc(9px + (100% - 18px) * var(--p, 0));
+}
+/* The original number inputs stay in the DOM as the source of truth but are never shown. */
+.cn-slider-source {
+    display: none !important;
+}
+/* A row holding a full-width slider wraps, and each visible child gets its own line. */
+.cn-slider-row {
+    flex-wrap: wrap;
+}
+.cn-slider-row > * {
+    flex: 1 1 100%;
 }
 
 /* =========================================
@@ -392,7 +605,7 @@ input[readonly], textarea[readonly] {
     cursor: pointer;
     flex-shrink: 0;
     text-transform: uppercase;
-    transition: all 0.2s active;
+    transition: all 0.2s ease;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -400,6 +613,7 @@ input[readonly], textarea[readonly] {
 }
 
 .btn-small:active {
+    transition: none;
     transform: scale(0.96);
     background: var(--btn-bg-hover);
 }
@@ -420,9 +634,9 @@ input[readonly], textarea[readonly] {
 /* Secondary Action Button (Queue) */
 .btn-secondary {
     background: var(--bg-panel);
-    border: 1px solid var(--border-color);
+    border: var(--cta-border) solid var(--border-color);
     color: var(--text-main);
-    padding: 16px;
+    padding: var(--cta-pad);
     font-weight: 800;
     border-radius: var(--radius-md);
     cursor: pointer;
@@ -445,7 +659,7 @@ input[readonly], textarea[readonly] {
     background: var(--accent-gradient) !important;
     color: #ffffff !important; /* Ensure text is white */
     border: none !important;
-    padding: 16px !important;
+    padding: var(--cta-pad) !important;
     font-size: 14px !important;
     font-weight: 900 !important;
     font-family: 'Orbitron', sans-serif !important;
@@ -464,6 +678,7 @@ input[readonly], textarea[readonly] {
 }
 
 .btn-main:active, #genBtn:active, button[onclick="saveConfiguration()"]:active {
+    transition: none;
     transform: translateY(2px);
     box-shadow: 0 2px 5px var(--accent-glow) !important;
 }
@@ -591,6 +806,7 @@ input[readonly], textarea[readonly] {
 .btn-icon {
     width: 40px;
     height: 40px;
+    flex-shrink: 0;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -599,20 +815,23 @@ input[readonly], textarea[readonly] {
     color: var(--text-main);
     border-radius: 50%;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: all 0.1s;
 }
 
 .btn-icon:active {
+    /* Presses react instantly; the base rule's 0.2s governs the fade back. Same for .btn-small, .btn-main and .dock-item below. */
+    transition: none;
     background: var(--accent-primary);
     color: var(--text-inverse);
     border-color: var(--accent-primary);
 }
 
 .glass-icon {
-    background: rgba(255,255,255,0.1);
+    background: rgba(0,0,0,0.55);
     backdrop-filter: blur(5px);
-    border: 1px solid rgba(255,255,255,0.2);
+    border: 1px solid rgba(255,255,255,0.25);
     color: white;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.4);
 }
 
 /* =========================================
@@ -628,6 +847,22 @@ input[readonly], textarea[readonly] {
     z-index: 100;
     padding-bottom: env(safe-area-inset-bottom);
     pointer-events: none;
+}
+
+.app-toast {
+    background: rgba(12, 12, 15, 0.95);
+    border: 1px solid var(--accent-primary);
+    color: var(--text-main);
+    padding: 12px 22px;
+    border-radius: 24px;
+    font-size: 14px;
+    font-weight: 600;
+    text-align: center;
+    max-width: 100%;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.5);
+    opacity: 0;
+    transform: translateY(10px);
+    transition: opacity 0.25s ease, transform 0.25s ease;
 }
 
 /* --- NOTIFICATION BADGE (Added Fix) --- */
@@ -678,12 +913,37 @@ input[readonly], textarea[readonly] {
     color: var(--text-muted);
     border-radius: 18px;
     cursor: pointer;
-    transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    transition: color 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275),
+                transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
     min-width: 0; /* Important for flex scaling */
     position: relative;
 }
 
-.dock-item i { transition: 0.2s; width: 22px; height: 22px; }
+/* The selected-tab highlight's background and box-shadow live on ::before and are animated via opacity, so the transition is compositor-only. */
+.dock-item::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    /* inherit, so the overlay's radius matches .dock-item at every width (it becomes a circle under 380px). */
+    border-radius: inherit;
+    pointer-events: none;
+    background: var(--text-main);
+    box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+    opacity: 0;
+    transition: opacity 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    z-index: 0;
+}
+.dock-item.active::before {
+    opacity: 1;
+}
+/* No separate :active state on dock items; only the ::before animation above. */
+.dock-item > * {
+    /* Targets every direct child rather than by tag, since lucide replaces <i> with <svg>. Keeps the icon positioned above ::before. */
+    position: relative;
+    z-index: 2;
+}
+
+.dock-item i { transition: color 0.2s; width: 22px; height: 22px; }
 .dock-item span {
     font-size: 9px;
     font-weight: 800;
@@ -695,10 +955,9 @@ input[readonly], textarea[readonly] {
 }
 
 .dock-item.active {
-    background: var(--text-main); /* High contrast active state */
+    /* background/box-shadow live on .dock-item::before above. */
     color: var(--bg-app);         /* Inverse text color */
     transform: translateY(-8px) scale(1.1);
-    box-shadow: 0 5px 15px rgba(0,0,0,0.2);
 }
 
 /* FIX: Shrink Navbar and hide labels on extremely small devices */
@@ -721,6 +980,14 @@ input[readonly], textarea[readonly] {
     box-shadow: var(--shadow-soft);
 }
 
+/* A box nested inside another settings box (External Tunnel Links, Cloudflare, inside Connection): keeps its coloured border but drops the outer box's shadow/margin/fill. */
+.glass-box.cfg-subbox {
+    background: transparent;
+    box-shadow: none;
+    margin-bottom: 12px;
+}
+.glass-box.cfg-subbox:last-child { margin-bottom: 0; }
+
 /* Mode Switcher (Tabs) */
 .mode-switcher {
     display: flex;
@@ -728,7 +995,7 @@ input[readonly], textarea[readonly] {
     border-radius: var(--radius-md);
     padding: 4px;
     border: 1px solid var(--border-color);
-    margin-bottom: 15px;
+    margin-bottom: 10px;
 }
 
 .mode-btn {
@@ -741,13 +1008,19 @@ input[readonly], textarea[readonly] {
     color: var(--text-muted);
     cursor: pointer;
     transition: all 0.2s;
+    border: 1px solid transparent;
+}
+
+.mode-switcher.compact .mode-btn {
+    padding-left: 4px;
+    padding-right: 4px;
 }
 
 .mode-btn.active {
     background: var(--bg-app);
     color: var(--accent-primary);
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    border: 1px solid var(--border-color);
+    border-color: var(--border-color);
 }
 
 /* =========================================
@@ -769,7 +1042,7 @@ input[readonly], textarea[readonly] {
 .indicator.err { background: var(--error); }
 
 /* Resolution Grid */
-#resGrid {
+#resGrid-xl, #resGrid-flux, #resGrid-qwen, #resGrid-anima, .res-grid {
     display: grid;
     grid-template-columns: 1fr repeat(5, 1.2fr);
     gap: 6px;
@@ -810,9 +1083,14 @@ input[readonly], textarea[readonly] {
 }
 
 .res-switch:active {
-    background: var(--accent-primary);
-    color: #000;
+    transform: scale(0.96);
+    background: var(--btn-bg-hover);
+}
+
+/* Persistent highlight for the preset matching the mode's current width/height; mirrors the crop editor's preset highlight (renderEditorRatioPresets(), editor.js). */
+.res-switch.active-ratio {
     border-color: var(--accent-primary);
+    color: var(--accent-primary);
 }
 
 /* Toggle Option (Inpaint) */
@@ -830,6 +1108,39 @@ input[readonly], textarea[readonly] {
     background: var(--accent-primary);
     color: #000;
     border-color: var(--accent-primary);
+}
+
+.ad-pass-chip {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 6px 8px;
+    border-radius: 8px;
+    background: var(--bg-input);
+    color: var(--text-muted);
+    font-size: 15px;
+    font-weight: bold;
+    cursor: pointer;
+    border: 1px solid var(--border-color);
+    flex: 1;
+    min-height: 30px;
+}
+.ad-pass-chip.active {
+    border-color: var(--accent-primary);
+    color: var(--text-main);
+    background: rgba(255, 152, 0, 0.08);
+}
+.ad-pass-num {
+    line-height: 1;
+    pointer-events: none;
+}
+.ad-pass-chip input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--accent-primary);
+    margin: 0;
 }
 
 /* =========================================
@@ -879,6 +1190,18 @@ input[readonly], textarea[readonly] {
     cursor: grab;
 }
 
+.q-details {
+    flex: 1;
+    min-width: 0;
+    text-align: left;
+}
+
+.q-meta {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 /* Gallery Grid */
 #savedGalleryGrid {
     display: grid;
@@ -898,11 +1221,27 @@ input[readonly], textarea[readonly] {
 
 /* Selection Tick (Added back for functionality) */
 .gal-tick {
-    background: var(--accent-primary);
-    border-radius: 50%;
-    padding: 2px;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+    /* The tick icon wrapper only positions the icon; colour comes from currentColor (the per-mode accent), via the icon's stroke set in loadGallery()/engine.js. */
+    color: var(--accent-primary);
     z-index: 10;
+}
+
+/* DELETE ALL's disabled look matches the ABORT buttons. Toggled via the disabled attribute in loadGallery(). */
+#galClearAllBtn:disabled {
+    color: var(--text-muted);
+    border-color: var(--border-color);
+    background: transparent;
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* The ControlNet control-image trash icon is red when an image is loaded and grey when not (Inpaint and img2img share the class). */
+.cn-clear-btn:disabled {
+    color: var(--text-muted);
+    border-color: var(--border-color);
+    background: transparent;
+    opacity: 0.5;
+    cursor: not-allowed;
 }
 
 .gen-result {
@@ -929,11 +1268,23 @@ input[readonly], textarea[readonly] {
     flex-direction: column;
 }
 
+/* The model/module picker has a higher z-index so it opens above other modals (e.g. Add/Edit Pairing), like #saac-img-modal above. */
+#modelPickerModal {
+    z-index: 300;
+}
+
+/* Modals with text inputs are anchored to the top rather than centred, so the keyboard and varying content height don't push them out of view. Covers loraConfigModal, styleEditorModal and llmModal (Magic Prompt) as well as the pickers. */
+#loraModal, #img2imgPresetModal, #styleModal, #saacModal, #loraConfigModal, #styleEditorModal, #llmModal {
+    justify-content: flex-start;
+    padding-top: 40px;
+}
+
 .modal-content {
     background: var(--bg-app);
-    width: 90%;
+    width: calc(100% - 20px);
     max-width: 500px;
     max-height: 85%;
+    margin: 10px auto;
     border-radius: var(--radius-lg);
     padding: 20px;
     display: flex;
@@ -947,8 +1298,10 @@ input[readonly], textarea[readonly] {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    width: 100%;
+    box-sizing: border-box;
     margin-bottom: 15px;
-    padding-bottom: 10px;
+    padding: 10px 15px;
     border-bottom: 1px solid var(--border-color);
 }
 
@@ -956,19 +1309,23 @@ input[readonly], textarea[readonly] {
     margin: 0;
     color: var(--accent-primary);
     text-transform: uppercase;
+    /* One title size for every popup/modal. The generic picker (modelPickerTitle) covers checkpoint, sampler, scheduler, upscaler, ADetailer, ControlNet, VRAM Profile and Low Bits; other modals and appConfirm/appAlert share it. Inline font-sizes were removed separately. */
+    font-size: 16px;
 }
 
 .close-btn {
     background: var(--btn-bg);
     border: 1px solid var(--border-color);
     border-radius: 50%;
-    width: 32px; height: 32px;
+    min-width: 36px;
+    min-height: 36px;
     color: var(--text-main);
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
     font-size: 18px;
+    flex-shrink: 0;
 }
 
 .notice-board-modal {
@@ -1067,8 +1424,8 @@ input[readonly], textarea[readonly] {
     display: flex;
     gap: 8px;
     overflow-x: auto;
-    padding: 0 4px 10px 4px; /* Space for scrollbar/touch */
-    margin-bottom: 10px;
+    padding: 4px 4px 8px 4px; /* Space for scrollbar/touch */
+    margin: 12px 0; /* Symmetric spacing between search box above and LoRA list below */
     white-space: nowrap;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none; /* Hide scrollbar Firefox */
@@ -1099,11 +1456,35 @@ input[readonly], textarea[readonly] {
     transform: scale(0.95);
 }
 
+.lora-refresh-btn {
+    /* Same padding and font-size as .folder-chip so the height matches; aspect-ratio makes it square. */
+    padding: 8px;
+    font-size: 11px;
+    aspect-ratio: 1;
+    background: rgba(var(--accent-primary-rgb), 0.1);
+    color: var(--accent-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    cursor: pointer;
+    transition: all 0.2s;
+    /* folder-chips-row has an inline 12px margin plus 4px top padding: 16px before the chips start. */
+    align-self: flex-start;
+    margin-top: 16px;
+}
+
+.lora-refresh-btn:active {
+    transform: scale(0.95);
+}
+
 .folder-chip.active {
     background: var(--accent-primary);
     color: #000; /* Contrast text */
     border-color: var(--accent-primary);
-    font-weight: 800;
+    /* Not bolder than the base .folder-chip (600), so tapping a chip doesn't change its width and reflow the row. */
     box-shadow: 0 2px 8px rgba(var(--accent-primary-rgb), 0.3);
 }
 
@@ -1205,9 +1586,7 @@ input[readonly], textarea[readonly] {
     font-size: 13px;
     font-weight: 600;
     color: var(--text-main);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    /* Wraps long LoRA names onto a second line instead of truncating. */
     margin-bottom: 2px;
 }
 
@@ -1219,6 +1598,100 @@ input[readonly], textarea[readonly] {
 }
 .lora-item-row.active .lora-item-meta {
     color: var(--accent-primary);
+}
+
+/*
+ * --- CUSTOM CHECKPOINT PICKER ---
+ * Replaces the native <select> UI with an in-app modal matching the app's style (mirrors .lora-item-row): selected state, a bold primary line and a muted subtitle.
+ */
+.model-picker-trigger {
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    color: var(--text-main);
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    width: 100%;
+    /* The trigger button takes the remaining space (flex:1, min-width:0) so long filenames ellipsise whether it sits in a .col or directly in a .row beside a fixed-width label (Krea/Qwen). */
+    flex: 1;
+    min-width: 0;
+    /* min-height keeps every trigger at its populated height before its value has loaded. */
+    min-height: 38px;
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    transition: border 0.2s, background 0.2s;
+}
+.model-picker-trigger:active {
+    border-color: var(--accent-primary);
+    background: var(--bg-input-focus);
+}
+/* ControlNet's Resize Mode box matches the height of Weight's <input> next to it (scoped to this kind only). */
+button[data-kind="cn-resize-mode"] {
+    padding: 12px;
+}
+.model-picker-trigger-primary {
+    font-size: 14px;
+    color: var(--text-main);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.model-picker-trigger-subtitle {
+    font-size: 10px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.model-item-group-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin: 16px 4px 8px;
+}
+.model-item-group-label:first-child {
+    margin-top: 0;
+}
+.model-item-row {
+    background: var(--bg-panel);
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    transition: all 0.2s;
+    cursor: pointer;
+}
+.model-item-row.active {
+    border-color: var(--accent-primary);
+    background: rgba(255, 152, 0, 0.05);
+}
+.model-item-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-main);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.model-item-row.active .model-item-name {
+    color: var(--accent-primary);
+}
+.model-item-subtitle {
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .lora-btn-action {
@@ -1238,26 +1711,28 @@ input[readonly], textarea[readonly] {
     color: var(--text-main);
 }
 
-.lora-btn-toggle {
-    width: 44px;
-    height: 44px;
+.lora-star-toggle-stack {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    flex-shrink: 0;
+}
+
+.lora-btn-star {
+    width: 36px;
+    height: 36px;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: var(--btn-bg);
-    border: 1px solid var(--border-color);
-    border-radius: 50%; /* Circular button */
-    color: var(--text-main);
     cursor: pointer;
-    flex-shrink: 0;
-    transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    background: none;
+    border: none;
+    border-radius: 50%;
+    transition: color 0.2s, background 0.2s;
 }
-
-.lora-item-row.active .lora-btn-toggle {
-    background: var(--accent-primary);
-    color: #000; /* Contrast icon color */
-    border-color: var(--accent-primary);
-    transform: rotate(360deg); /* Nice spin effect on activation */
+.lora-btn-star:active {
+    background: var(--bg-input);
 }
 
 /* =========================================
@@ -1280,9 +1755,17 @@ input[readonly], textarea[readonly] {
 }
 
 .lightbox-img {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
     max-width: 100%;
     max-height: 100%;
     object-fit: contain;
+    pointer-events: none;
+    will-change: transform;
+    backface-visibility: hidden;
 }
 
 .lightbox-controls {
@@ -1297,38 +1780,7 @@ input[readonly], textarea[readonly] {
     z-index: 205;
 }
 
-.nav-arrow {
-    position: absolute;
-    top: 50%;
-    transform: translateY(-50%);
-    background: rgba(255,255,255,0.2);
-    color: white;
-    border: none;
-    padding: 15px;
-    border-radius: 50%;
-    cursor: pointer;
-    z-index: 201;
-    backdrop-filter: blur(4px);
-}
-.nav-arrow.left { left: 10px; }
-.nav-arrow.right { right: 10px; }
-
 /* Upload Box */
-#uploadBox {
-    border: 2px dashed var(--border-color);
-    background: var(--bg-panel);
-    border-radius: var(--radius-md);
-    padding: 40px;
-    text-align: center;
-    cursor: pointer;
-    transition: 0.2s;
-    color: var(--text-muted);
-}
-#uploadBox:active {
-    border-color: var(--accent-primary);
-    background: var(--bg-input);
-}
-
 /* Spinner */
 .spinner {
     width: 30px;
@@ -1340,6 +1792,10 @@ input[readonly], textarea[readonly] {
     margin: 20px auto;
     display: none;
 }
+/* "Hide Loading Circle" (Settings > Interface): hides only the two spinners above the results galleries while generating (main tabs, and Inpaint/img2img/Upscale). Scoped by id since .spinner is used elsewhere. !important overrides engine.js's inline display. Off by default. */
+body.hide-gen-spinner #loadingSpinner,
+body.hide-gen-spinner #inpLoadingSpinner { display: none !important; }
+
 /* Utility class for icon spin inside button */
 .spin {
     animation: spin 1s linear infinite;
@@ -1795,12 +2251,11 @@ button[onclick*="setComfyLoraStrength"] {
    SAAC GRID REFINEMENT
    ========================================= */
 
-#saacGrid {
+#saacCardsGrid {
     display: grid !important;
     grid-template-columns: repeat(3, 1fr) !important;
     grid-auto-rows: minmax(135px, auto) !important; 
     gap: 12px !important;
-    padding: 15px !important;
     align-content: start !important;
 }
 
@@ -1949,30 +2404,231 @@ button[onclick*="setComfyLoraStrength"] {
     display: block;
 }
 
-/* Ensure all modal headers respect internal padding and don't overflow */
-.modal-header {
-    width: 100%;
-    box-sizing: border-box !important;
-    padding: 10px 15px !important;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-}
 
-/* Increase the hit-area of the close button for mobile thumbs */
-.close-btn {
-    min-width: 36px;
-    min-height: 36px;
+/* Analyzer tab (analyzer.js): settings and LoRA chips, and collapsible prompt text. A chip is a button; tapping copies its value. */
+.ana-chips {
     display: flex;
-    align-items: center;
-    justify-content: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.ana-chip {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1px;
+    max-width: 100%;
+    padding: 6px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--text-main);
+    font: inherit;
+    text-align: left;
     cursor: pointer;
-    flex-shrink: 0; /* Prevents button from being squashed */
+    -webkit-tap-highlight-color: transparent;
+    transition: border-color 0.15s, background 0.15s;
+}
+.ana-chip:active {
+    border-color: var(--accent-primary);
+}
+.ana-chip-key {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+}
+.ana-chip-val {
+    font-size: 13px;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+/* Brief confirmation after a copy, alongside the toast. */
+.ana-chip.ana-chip-copied {
+    border-color: var(--accent-primary);
+    background: rgba(var(--accent-primary-rgb), 0.12);
+}
+/* LoRA chips: installed, missing, or not known (no server answer yet). */
+.ana-chip-lora.lora-installed {
+    border-color: var(--accent-primary);
+}
+.ana-chip-lora.lora-missing {
+    border-color: #f44336;
+}
+.ana-chip-lora.lora-missing .ana-chip-key {
+    color: #f44336;
+}
+/* Collapsed prompt text: about four lines, fading out, with a toggle. */
+.ana-text.ana-collapsed {
+    max-height: 68px;
+    overflow: hidden;
+    position: relative;
+}
+.ana-text.ana-collapsed::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 24px;
+    background: linear-gradient(to bottom, transparent, var(--bg-panel, #1c1c20));
+    pointer-events: none;
+}
+.ana-more-btn {
+    margin-top: 6px;
+    padding: 2px 0;
+    background: none;
+    border: none;
+    color: var(--accent-primary);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    cursor: pointer;
 }
 
-/* Force the modal content to never touch the extreme screen edges */
-.modal-content {
-    width: calc(100% - 20px) !important;
+/* Analyzer "Send image to" buttons: the same outlined look as the "Use In" buttons (renderUseInButtons(), engine.js). */
+.ana-send-btn {
+    /* Sized by their text plus a minimum padding, with spare row width shared equally. The row never wraps; padding and type size step down on narrower phones. */
+    flex: 1 1 auto;
+    min-width: 0;
+    white-space: nowrap;
+    padding: 10px 12px;
+    background: var(--bg-panel);
+    border: 1px solid var(--accent-primary);
+    color: var(--accent-primary);
+}
+.ana-send-btn:disabled {
+    opacity: 0.5;
+}
+
+/* "Use In" / "Send image to": a little room between each label and its buttons. */
+#anaUseInBlock > label,
+#anaSendBlock > label {
+    margin-bottom: 8px;
+}
+
+/* Analyzer sticky action bar (analyzer.js). Fixed to the top of the screen, visible only on the Analyzer, once the image has scrolled off, and if switched on in Config > Interface (off by default). */
+.ana-sticky {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    /* Below the modal layer (.modal is 200) so modals cover it. */
+    z-index: 150;
+    background: var(--bg-app);
+    border-bottom: 1px solid var(--border-color);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+.ana-sticky-inner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
     max-width: 500px;
-    margin: 10px auto !important;
+    margin: 0 auto;
+    padding: calc(8px + env(safe-area-inset-top, 0px)) 14px 8px;
+}
+.ana-sticky-thumb {
+    width: 40px;
+    height: 40px;
+    flex-shrink: 0;
+    object-fit: cover;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    cursor: pointer;
+}
+.ana-sticky-btn {
+    flex: 1 1 auto;
+    padding: 10px 12px;
+    background: var(--bg-panel);
+    border: 1px solid var(--accent-primary);
+    color: var(--accent-primary);
+}
+.ana-sticky-menu {
+    max-width: 500px;
+    margin: 0 auto;
+    padding: 0 14px 12px;
+    display: flex;
+    /* Wrapping and gap are set with the Send row's, in the rule near the end of this file ("stay on ONE line"). */
+}
+
+/* The Send row and the sticky bar's panels stay on ONE line. */
+#anaSendButtons,
+.ana-sticky-menu {
+    flex-wrap: nowrap;
+    gap: 8px;
+}
+@media (max-width: 420px) {
+    .ana-send-btn {
+        padding: 10px 10px;
+        font-size: 10.5px;
+    }
+}
+@media (max-width: 370px) {
+    .ana-send-btn {
+        padding: 10px 8px;
+        font-size: 10px;
+    }
+}
+/* Only below any phone that exists would it fail to fit; let it wrap there rather than clip. */
+@media (max-width: 335px) {
+    #anaSendButtons,
+    .ana-sticky-menu {
+        flex-wrap: wrap;
+    }
+}
+
+/* Analyzer history sheet (analyzerhistory.js) */
+.ana-history-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    overflow-y: auto;
+    max-height: 62vh;
+    padding: 4px 2px 2px;
+}
+.ana-history-tile {
+    position: relative;
+    aspect-ratio: 1;
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+    background: var(--bg-panel);
+    cursor: pointer;
+}
+.ana-history-tile img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+.ana-history-age {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    padding: 14px 6px 4px;
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: #fff;
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.75), transparent);
+}
+.ana-history-del {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    font-size: 16px;
+    line-height: 1;
+    color: #f44336;
+}
+.ana-history-empty {
+    grid-column: 1 / -1;
+    padding: 30px 10px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 12px;
 }
