@@ -3,10 +3,14 @@ package com.resolver.client;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.net.Uri;
 import android.os.PowerManager;
 import android.provider.Settings;
 
+import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
@@ -19,6 +23,71 @@ import java.util.concurrent.TimeUnit;
 
 @CapacitorPlugin(name = "ResolverService")
 public class ResolverServicePlugin extends Plugin {
+
+    // Registered in load() and unregistered in handleOnDestroy().
+    private ConnectivityManager.NetworkCallback networkCallback;
+
+    @Override
+    public void load() {
+        super.load();
+        ConnectivityManager cm = (ConnectivityManager) getContext().getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (cm == null) return;
+        networkCallback = new ConnectivityManager.NetworkCallback() {
+            @Override
+            public void onCapabilitiesChanged(Network network, NetworkCapabilities capabilities) {
+                notifyListeners("networkTypeChanged", currentNetworkTypeResult());
+            }
+            @Override
+            public void onLost(Network network) {
+                notifyListeners("networkTypeChanged", currentNetworkTypeResult());
+            }
+        };
+        // Tracks the system's active network, the same one getNetworkType() reads.
+        cm.registerDefaultNetworkCallback(networkCallback);
+    }
+
+    @Override
+    protected void handleOnDestroy() {
+        super.handleOnDestroy();
+        if (networkCallback != null) {
+            ConnectivityManager cm = (ConnectivityManager) getContext().getSystemService(Context.CONNECTIVITY_SERVICE);
+            if (cm != null) {
+                try {
+                    cm.unregisterNetworkCallback(networkCallback);
+                } catch (IllegalArgumentException e) {
+                    // Already unregistered or never registered.
+                }
+            }
+            networkCallback = null;
+        }
+    }
+
+    // Returns "wifi", "cellular", "ethernet", "other", "none" (no active network) or "unknown".
+    // Cellular generations are not distinguished; Live Preview only needs Wi-Fi or not.
+    private String getCurrentNetworkTypeString() {
+        ConnectivityManager cm = (ConnectivityManager) getContext().getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (cm == null) return "unknown";
+        Network network = cm.getActiveNetwork();
+        if (network == null) return "none";
+        NetworkCapabilities caps = cm.getNetworkCapabilities(network);
+        if (caps == null) return "unknown";
+        if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) return "wifi";
+        if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) return "cellular";
+        if (caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) return "ethernet";
+        return "other";
+    }
+
+    private JSObject currentNetworkTypeResult() {
+        JSObject ret = new JSObject();
+        ret.put("type", getCurrentNetworkTypeString());
+        return ret;
+    }
+
+    // One-off check, for before any networkTypeChanged event has fired.
+    @PluginMethod()
+    public void getNetworkType(PluginCall call) {
+        call.resolve(currentNetworkTypeResult());
+    }
 
     @PluginMethod()
     public void updateProgress(PluginCall call) {

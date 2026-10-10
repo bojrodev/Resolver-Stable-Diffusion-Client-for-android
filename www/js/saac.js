@@ -45,6 +45,30 @@ window.SaacManager = {
         });
     },
 
+    // Whether the character database is already cached on-device.
+    hasCachedDb: async function() {
+        try {
+            const cached = await this.loadFromCache();
+            return !!cached;
+        } catch (e) {
+            return false;
+        }
+    },
+
+    // Deletes the cached database from disk (used by "Reset App Configuration").
+    clearCache: async function() {
+        this.imgDb = null;
+        this.isLoaded = false;
+        try {
+            const db = await this.getDb();
+            if (!db) return;
+            const tx = db.transaction(this.STORE_NAME, 'readwrite');
+            tx.objectStore(this.STORE_NAME).delete('exact_db');
+        } catch (e) {
+            console.error("SAAC cache clear failed:", e);
+        }
+    },
+
     // --- CORE LOGIC ---
     init: async function() {
         if(this.isLoaded) return;
@@ -151,6 +175,7 @@ window.SaacManager = {
     open: async function() {
         if(!this.isLoaded) await this.init();
         document.getElementById('saacModal')?.classList.remove('hidden');
+        if (typeof lockBodyScroll === 'function') lockBodyScroll();
         const success = await this.loadImages();
         if (success) this.render();
     },
@@ -161,33 +186,56 @@ window.SaacManager = {
             this.currentXhr = null;
         }
         document.getElementById('saacModal')?.classList.add('hidden'); 
+        if (typeof unlockBodyScroll === 'function') unlockBodyScroll();
     },
 
     render: function() {
-        const grid = document.getElementById('saacGrid');
-        if(!grid) return;
+        // #saacGrid scrolls; #saacCardsGrid inside it is the CSS grid; the infinite-scroll trigger is a sibling after the grid.
+        const scrollContainer = document.getElementById('saacGrid');
+        if(!scrollContainer) return;
+        // downloadDb() replaces #saacGrid's contents, so rebuild the structure here.
+        let cardsGrid = document.getElementById('saacCardsGrid');
+        if (!cardsGrid) {
+            scrollContainer.innerHTML = '';
+            cardsGrid = document.createElement('div');
+            cardsGrid.id = 'saacCardsGrid';
+            scrollContainer.appendChild(cardsGrid);
+        }
         const q = document.getElementById('saacSearch')?.value.toLowerCase() || '';
+        const clearBtn = document.getElementById('saacSearchClear');
+        if (clearBtn) clearBtn.classList.toggle('hidden', !q);
         let filtered = q ? this.data.filter(c => 
             c.name.toLowerCase().includes(q) || c.tag.toLowerCase().includes(q)
         ) : [...this.data];
+        // Characters already in the prompt first, alphabetical within each group.
+        const prompt = document.getElementById('xl_prompt')?.value || '';
+        filtered.sort((a, b) => {
+            const aActive = prompt.includes(a.tag);
+            const bActive = prompt.includes(b.tag);
+            if (aActive && !bActive) return -1;
+            if (!aActive && bActive) return 1;
+            return a.name.localeCompare(b.name);
+        });
         this.filteredData = filtered;
-        grid.innerHTML = "";
+        cardsGrid.innerHTML = "";
+        document.getElementById('saac-trigger')?.remove();
         this.displayedCount = 0;
         const trigger = document.createElement('div');
         trigger.id = 'saac-trigger';
-        trigger.style.gridColumn = '1 / span 3';
-        grid.appendChild(trigger);
+        // 1px rather than 0, which some browsers never report as intersecting.
+        trigger.style.height = '1px';
+        // A sibling of cardsGrid, in normal flow after it.
+        scrollContainer.appendChild(trigger);
         this.renderMore();
         if(this.observer) this.observer.disconnect();
         this.observer = new IntersectionObserver(e => {
             if(e[0].isIntersecting && this.displayedCount < this.filteredData.length) this.renderMore();
-        }, { root: grid });
+        }, { root: scrollContainer });
         this.observer.observe(trigger);
     },
 
     renderMore: function() {
-        const grid = document.getElementById('saacGrid');
-        const trigger = document.getElementById('saac-trigger');
+        const cardsGrid = document.getElementById('saacCardsGrid');
         const batch = this.filteredData.slice(this.displayedCount, this.displayedCount + this.BATCH_SIZE);
         const prompt = document.getElementById('xl_prompt')?.value || '';
         const frag = document.createDocumentFragment();
@@ -209,7 +257,8 @@ window.SaacManager = {
             card.onclick = () => this.toggle(c);
             frag.appendChild(card);
         });
-        grid.insertBefore(frag, trigger);
+        // Append only; the trigger is outside this grid.
+        cardsGrid.appendChild(frag);
         this.displayedCount += batch.length;
     },
 
@@ -220,7 +269,8 @@ window.SaacManager = {
         if(v.includes(c.tag)) {
             v = v.replace(new RegExp(`(${c.tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*,?\\s*)`,'gi'), '');
         } else {
-            v = v ? `${c.tag}, ${v}` : c.tag;
+            // New tags are appended after the existing prompt.
+            v = v ? `${v}, ${c.tag}` : c.tag;
         }
         el.value = v.replace(/^[\s,]+|[\s,]+$/g, '').replace(/,\s*,/g, ',');
         this.render(); 
@@ -241,4 +291,12 @@ window.SaacManager = {
     closeImage: function() { 
         document.getElementById('saac-img-modal')?.classList.remove('active'); 
     }
+};
+
+// As clearLoraSearch() (lora.js): don't refocus the field on clear.
+window.clearSaacSearch = function() {
+    const searchEl = document.getElementById('saacSearch');
+    if (!searchEl) return;
+    searchEl.value = '';
+    window.SaacManager.render();
 };

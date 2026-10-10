@@ -24,6 +24,10 @@ public class MainActivity extends BridgeActivity {
             WebSettings settings = this.bridge.getWebView().getSettings();
             settings.setJavaScriptCanOpenWindowsAutomatically(true);
             settings.setCacheMode(WebSettings.LOAD_NO_CACHE);
+
+            // Hide the WebView's native scroll indicator (CSS cannot reach it).
+            this.bridge.getWebView().setVerticalScrollBarEnabled(false);
+            this.bridge.getWebView().setHorizontalScrollBarEnabled(false);
         }
     }
 
