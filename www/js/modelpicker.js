@@ -109,7 +109,7 @@ window.openModelPicker = function(trigger) {
     if (MODULE_PICKER_KIND_TO_FIELD[kind] && !selectId.startsWith('modulePair') && window.isModulePairsEnabled && window.isModulePairsEnabled()) {
         const usePreferredRow = document.createElement('div');
         usePreferredRow.className = 'model-item-row' + (usingPreferred ? ' active' : '');
-        usePreferredRow.style.cssText = 'color:var(--accent-primary); font-weight:600; border-bottom:1px solid var(--border-color);';
+        usePreferredRow.style.cssText = 'color:var(--accent-primary); font-weight:600;';
         const nameEl = document.createElement('div');
         nameEl.className = 'model-item-name';
         nameEl.textContent = `Use preferred ${MODULE_PICKER_KIND_LABEL[kind]}`;

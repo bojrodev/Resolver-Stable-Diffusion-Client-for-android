@@ -93,9 +93,7 @@ try {
         if (batchCountEl) batchCountEl.value = '1';
         if (seedEl) seedEl.value = '-1';
     });
-    const inpBatchSizeEl = document.getElementById('inp_batch_size');
     const inpBatchCountEl = document.getElementById('inp_batch_count');
-    if (inpBatchSizeEl) inpBatchSizeEl.value = '1';
     if (inpBatchCountEl) inpBatchCountEl.value = '1';
 } catch (e) {
     console.error("Immediate Batch Size/Count/Seed reset failed:", e);

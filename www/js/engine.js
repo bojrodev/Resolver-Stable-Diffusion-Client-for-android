@@ -376,8 +376,7 @@ function buildJobFromUIRaw() {
             return null;
         }
 
-        // Batch Size in the UI is sent as n_iter (API batch_size is always 1): real tensor batching breaks Kontext/img2img-conditioned models (shape mismatch against a size-1 reference embedding).
-        const uiBatchSize = parseInt(document.getElementById('inp_batch_size').value) || 1;
+        // Batch Count is sent as n_iter (API batch_size is always 1): real tensor batching breaks Kontext/img2img-conditioned models (shape mismatch against a size-1 reference embedding).
         const uiBatchCount = parseInt(document.getElementById('inp_batch_count').value) || 1;
         payload = {
             "prompt": prompt,
@@ -390,7 +389,7 @@ function buildJobFromUIRaw() {
             "sampler_name": document.getElementById('inp_sampler').value,
             "scheduler": document.getElementById('inp_scheduler').value,
             "batch_size": 1,
-            "n_iter": uiBatchSize * uiBatchCount,
+            "n_iter": uiBatchCount,
             "save_images": true,
             // Opt out of a grid explicitly in the payload.
             "do_not_save_grid": true

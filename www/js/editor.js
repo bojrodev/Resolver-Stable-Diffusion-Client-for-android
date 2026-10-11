@@ -1051,13 +1051,13 @@ window.setInpaintMode = function(mode) {
     try { localStorage.setItem('bojro_inp_mask_mode', mode); } catch (e) {}
 }
 
-// Switches between mask-based Inpaint and whole-image img2img (no mask). They share the image and canvas, but Prompt, Negative, Generation Params and Denoising Strength are saved and restored separately per mode. Batch Size/Count are excluded (resetPerGenerationFieldsOnBoot(), boot.js).
+// Switches between mask-based Inpaint and whole-image img2img (no mask). They share the image and canvas, but Prompt, Negative, Generation Params and Denoising Strength are saved and restored separately per mode. Batch Count is excluded (resetPerGenerationFieldsOnBoot(), boot.js).
 const INPAINT_SHARED_STATE_FIELDS = ['inp_prompt', 'inp_neg', 'inp_steps', 'inp_cfg', 'inp_sampler', 'inp_scheduler', 'denoisingStrength'];
 
 // Fallback defaults per mode, used only when nothing is saved.
 const INPAINT_MODE_DEFAULTS = {
-    inpaint: { inp_prompt: 'original', inp_neg: 'bad quality, blur', inp_steps: '25', inp_cfg: '7', denoisingStrength: '0.75', inp_batch_size: '1', inp_batch_count: '1' },
-    img2img: { inp_prompt: '', inp_neg: 'bad quality, blur', inp_steps: '25', inp_cfg: '7', denoisingStrength: '0.5', inp_batch_size: '1', inp_batch_count: '1' }
+    inpaint: { inp_prompt: 'original', inp_neg: 'bad quality, blur', inp_steps: '25', inp_cfg: '7', denoisingStrength: '0.75', inp_batch_count: '1' },
+    img2img: { inp_prompt: '', inp_neg: 'bad quality, blur', inp_steps: '25', inp_cfg: '7', denoisingStrength: '0.5', inp_batch_count: '1' }
 };
 
 function saveInpaintModeState(mode) {
@@ -1067,7 +1067,7 @@ function saveInpaintModeState(mode) {
     });
 }
 
-// Persists every field here (steps/cfg/sampler/scheduler/denoising/batch size/count) as it changes, not only on mode-switch/preset events. Reads currentInpaintTopMode since the fields are shared. No-op on Upscale.
+// Persists every field here (steps/cfg/sampler/scheduler/denoising/batch count) as it changes, not only on mode-switch/preset events. Reads currentInpaintTopMode since the fields are shared. No-op on Upscale.
 function saveCurrentInpaintModeStateLive() {
     if (typeof currentInpaintTopMode !== 'undefined' && currentInpaintTopMode) {
         saveInpaintModeState(currentInpaintTopMode);
