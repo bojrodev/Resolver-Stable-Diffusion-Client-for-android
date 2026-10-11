@@ -1954,6 +1954,82 @@ body.hide-gen-spinner #inpLoadingSpinner { display: none !important; }
     width: 100%;
 }
 
+/* Architecture accents for the model visibility controls in CFG. */
+#view-cfg .cfg-theme-general {
+    --cfg-theme-accent: var(--accent-primary, #ff9800);
+    --cfg-theme-secondary: var(--accent-secondary, var(--cfg-theme-accent));
+    --cfg-theme-rgb: var(--accent-primary-rgb, 255, 152, 0);
+}
+
+#view-cfg .cfg-theme-xl {
+    --cfg-theme-accent: #ff9800;
+    --cfg-theme-secondary: #ff5722;
+    --cfg-theme-rgb: 255, 152, 0;
+}
+
+#view-cfg .cfg-theme-anima {
+    --cfg-theme-accent: #00c853;
+    --cfg-theme-secondary: #00a344;
+    --cfg-theme-rgb: 0, 200, 83;
+}
+
+#view-cfg .cfg-theme-qwen,
+#view-cfg .cfg-theme-neo {
+    --cfg-theme-accent: #ff007f;
+    --cfg-theme-secondary: #ff4081;
+    --cfg-theme-rgb: 255, 0, 127;
+}
+
+#view-cfg .cfg-theme-flux {
+    --cfg-theme-accent: #00e5ff;
+    --cfg-theme-secondary: #2979ff;
+    --cfg-theme-rgb: 0, 229, 255;
+}
+
+#view-cfg .cfg-theme-krea {
+    --cfg-theme-accent: #b026ff;
+    --cfg-theme-secondary: #d500f9;
+    --cfg-theme-rgb: 176, 38, 255;
+}
+
+/* Keep the accent on the outer section card and flatten its inner wrappers. */
+#view-cfg .cfg-card {
+    box-sizing: border-box;
+    padding: 16px;
+    margin-bottom: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-left: 3.5px solid var(--cfg-theme-accent, var(--accent-primary));
+    border-radius: 14px;
+    background: var(--bg-panel, #141418);
+    transition: box-shadow 0.2s ease;
+}
+
+#view-cfg .cfg-card .cfg-accordion-header,
+#view-cfg .cfg-card .cfg-accordion-content,
+#view-cfg .cfg-card .cfg-accordion-content .row {
+    border: none !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+#view-cfg .cfg-card .cfg-subbox {
+    padding: 0;
+    margin-bottom: 12px;
+}
+
+#view-cfg .cfg-model-toggle label {
+    color: var(--cfg-theme-accent);
+}
+
+#view-cfg .cfg-model-toggle input[type="checkbox"] {
+    accent-color: var(--cfg-theme-accent);
+}
+
+#view-cfg .cfg-card:hover,
+#view-cfg .cfg-card:focus-within {
+    box-shadow: 0 0 10px rgba(var(--cfg-theme-rgb), 0.2);
+}
+
 /* Section Header Matching */
 #view-cfg .grp-header span {
     font-size: 11px;

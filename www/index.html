@@ -8320,12 +8320,12 @@
         <div id="view-cfg" class="hidden">
             <div class="col" style="gap: 0;">
 
-                <div class="glass-box">
-                    <div class="row" onclick="toggleGeneric('cfg-connection', 'arr-cfg-connection', 'bojro_vis_cfg_connection')" style="justify-content:space-between; cursor:pointer; margin-bottom:5px;">
+                <div class="glass-box cfg-card cfg-theme-general">
+                    <div class="row cfg-accordion-header" onclick="toggleGeneric('cfg-connection', 'arr-cfg-connection', 'bojro_vis_cfg_connection')" style="justify-content:space-between; cursor:pointer; margin-bottom:5px;">
                         <label style="cursor:pointer;"><i data-lucide="globe" width="20" height="20"></i> CONNECTION</label>
                         <i id="arr-cfg-connection" data-lucide="chevron-down" width="14" height="14" style="transition: transform 0.2s;"></i>
                     </div>
-                    <div id="cfg-connection" class="col" style="gap: 12px; padding: 10px 0;">
+                    <div id="cfg-connection" class="col cfg-accordion-content" style="gap: 14px; padding: 0;">
                         <div class="row" style="justify-content: space-between; align-items: center; padding: 0 5px;">
                             <label for="cfgModeSwitch" style="margin: 0; color: var(--text-main); font-size: 13px;">Connection Mode</label>
                             <div class="row" style="width:auto; gap:10px; align-items: center;">
@@ -8362,7 +8362,7 @@
                         </div>
 
                         <div id="container-external" class="hidden">
-                            <div class="glass-box cfg-subbox" style="border: 1px solid var(--accent-primary);">
+                            <div class="glass-box cfg-subbox">
                                 <label style="color:var(--accent-primary);"><i data-lucide="link" width="12" height="12"></i> EXTERNAL TUNNEL LINKS</label>
                                 <p style="font-size: 10px; color: var(--text-muted); margin-bottom: 15px;">
                                     Enter the full public URL for each service (e.g., https://my-app.ngrok-free.app).
@@ -8379,7 +8379,7 @@
                                     </div>
                                 </div>
                             </div>
-                            <div class="glass-box cfg-subbox" style="border: 1px solid #f48fb1;">
+                            <div class="glass-box cfg-subbox">
                                 <div class="row" style="justify-content:space-between; align-items:center;">
                                     <label for="cfgCloudflareSwitch" style="color:#f48fb1; font-weight:900;"><i data-lucide="shield-check" width="14" height="14"></i> CLOUDFLARE ZERO TRUST</label>
                                     <input type="checkbox" id="cfgCloudflareSwitch" class="bojro-switch" onchange="toggleCloudflareUI(); saveConfiguration();">
@@ -8404,12 +8404,12 @@
                         </div>
                     </div>
                 </div>
-                <div class="glass-box">
-                    <div class="row" onclick="toggleGeneric('cfg-interface', 'arr-cfg-interface', 'bojro_vis_cfg_interface')" style="justify-content:space-between; cursor:pointer; margin-bottom:5px;">
+                <div class="glass-box cfg-card cfg-theme-general">
+                    <div class="row cfg-accordion-header" onclick="toggleGeneric('cfg-interface', 'arr-cfg-interface', 'bojro_vis_cfg_interface')" style="justify-content:space-between; cursor:pointer; margin-bottom:5px;">
                         <label style="cursor:pointer;"><i data-lucide="layout" width="20" height="20"></i> INTERFACE</label>
                         <i id="arr-cfg-interface" data-lucide="chevron-down" width="14" height="14" style="transition: transform 0.2s;"></i>
                     </div>
-                    <div id="cfg-interface" class="col" style="gap: 12px; padding: 10px 0;">
+                    <div id="cfg-interface" class="col cfg-accordion-content" style="gap: 14px; padding: 0;">
                         <div class="row" style="justify-content: space-between; align-items: center; padding: 0 5px;">
                             <label for="cfgAnalyzerStickyBarSwitch" style="margin: 0; color: var(--text-main); font-size: 13px;">Analyzer Sticky Bar</label>
                             <input type="checkbox" id="cfgAnalyzerStickyBarSwitch" class="bojro-switch" onchange="toggleAnalyzerStickyBar()">
@@ -8437,25 +8437,25 @@
                         <label style="margin: 5px 0 0; padding: 0 5px;"><i data-lucide="layout" width="14" height="14"></i> INTERFACE TABS</label>
                         <div class="col" style="gap: 15px; padding: 5px 0 0;">
                             <div class="row" style="justify-content: space-around;">
-                                <div class="col" style="align-items: center;">
+                                <div class="col cfg-model-toggle cfg-theme-xl" style="align-items: center;">
                                     <label for="cfgShowXl" style="margin-bottom:8px;">SDXL</label>
                                     <input type="checkbox" id="cfgShowXl" class="bojro-switch" checked onchange="saveModelVisibility()">
                                 </div>
-                                <div class="col" style="align-items: center;">
+                                <div class="col cfg-model-toggle cfg-theme-anima" style="align-items: center;">
                                     <label for="cfgShowAnima" style="margin-bottom:8px;">ANIMA</label>
                                     <input type="checkbox" id="cfgShowAnima" class="bojro-switch" checked onchange="saveModelVisibility()">
                                 </div>
-                                <div class="col" style="align-items: center;">
+                                <div class="col cfg-model-toggle cfg-theme-qwen" style="align-items: center;">
                                     <label for="cfgShowQwen" style="margin-bottom:8px;">QWEN</label>
                                     <input type="checkbox" id="cfgShowQwen" class="bojro-switch" checked onchange="saveModelVisibility()">
                                 </div>
                             </div>
                             <div class="row" style="justify-content: space-around;">
-                                <div class="col" style="align-items: center;">
+                                <div class="col cfg-model-toggle cfg-theme-flux" style="align-items: center;">
                                     <label for="cfgShowFlux" style="margin-bottom:8px;">FLUX</label>
                                     <input type="checkbox" id="cfgShowFlux" class="bojro-switch" checked onchange="saveModelVisibility()">
                                 </div>
-                                <div class="col" style="align-items: center;">
+                                <div class="col cfg-model-toggle cfg-theme-krea" style="align-items: center;">
                                     <label for="cfgShowKrea" style="margin-bottom:8px;">KREA</label>
                                     <input type="checkbox" id="cfgShowKrea" class="bojro-switch" checked onchange="saveModelVisibility()">
                                 </div>
@@ -8467,12 +8467,12 @@
                         </div>
                     </div>
                 </div>
-                <div class="glass-box">
-                    <div class="row" onclick="toggleGeneric('cfg-generation', 'arr-cfg-generation', 'bojro_vis_cfg_generation')" style="justify-content:space-between; cursor:pointer; margin-bottom:5px;">
+                <div class="glass-box cfg-card cfg-theme-general">
+                    <div class="row cfg-accordion-header" onclick="toggleGeneric('cfg-generation', 'arr-cfg-generation', 'bojro_vis_cfg_generation')" style="justify-content:space-between; cursor:pointer; margin-bottom:5px;">
                         <label style="cursor:pointer;"><i data-lucide="sliders-horizontal" width="20" height="20"></i> GENERATION</label>
                         <i id="arr-cfg-generation" data-lucide="chevron-down" width="14" height="14" style="transition: transform 0.2s;"></i>
                     </div>
-                    <div id="cfg-generation" class="col" style="gap: 12px; padding: 10px 0;">
+                    <div id="cfg-generation" class="col cfg-accordion-content" style="gap: 14px; padding: 0;">
                         <div class="row" style="justify-content: space-between; align-items: center; padding: 0 5px;">
                             <label for="cfgShowLivePreviewSwitch" style="margin: 0; color: var(--text-main); font-size: 13px;">Show Live Preview Toggle</label>
                             <input type="checkbox" id="cfgShowLivePreviewSwitch" class="bojro-switch" onchange="toggleLivePreviewButtonVisibility()">
@@ -8503,12 +8503,12 @@
                         </div>
                     </div>
                 </div>
-                <div class="glass-box">
-                    <div class="row" onclick="toggleGeneric('cfg-models', 'arr-cfg-models', 'bojro_vis_cfg_models')" style="justify-content:space-between; cursor:pointer; margin-bottom:5px;">
+                <div class="glass-box cfg-card cfg-theme-general">
+                    <div class="row cfg-accordion-header" onclick="toggleGeneric('cfg-models', 'arr-cfg-models', 'bojro_vis_cfg_models')" style="justify-content:space-between; cursor:pointer; margin-bottom:5px;">
                         <label style="cursor:pointer;"><i data-lucide="boxes" width="20" height="20"></i> MODELS</label>
                         <i id="arr-cfg-models" data-lucide="chevron-down" width="14" height="14" style="transition: transform 0.2s;"></i>
                     </div>
-                    <div id="cfg-models" class="col" style="gap: 12px; padding: 10px 0;">
+                    <div id="cfg-models" class="col cfg-accordion-content" style="gap: 14px; padding: 0;">
                         <div class="row" style="justify-content: space-between; align-items: center; padding: 0 5px;">
                             <label for="cfgModulePairsEnabled" style="margin: 0; color: var(--text-main); font-size: 13px;">Enable Module Pairing</label>
                             <input type="checkbox" id="cfgModulePairsEnabled" class="bojro-switch" onchange="toggleModulePairsEnabled()">
@@ -8527,12 +8527,12 @@
                         </div>
                     </div>
                 </div>
-                <div class="glass-box">
-                    <div class="row" onclick="toggleGeneric('cfg-extensions', 'arr-cfg-extensions', 'bojro_vis_cfg_extensions')" style="justify-content:space-between; cursor:pointer; margin-bottom:5px;">
+                <div class="glass-box cfg-card cfg-theme-general">
+                    <div class="row cfg-accordion-header" onclick="toggleGeneric('cfg-extensions', 'arr-cfg-extensions', 'bojro_vis_cfg_extensions')" style="justify-content:space-between; cursor:pointer; margin-bottom:5px;">
                         <label style="cursor:pointer;"><i data-lucide="puzzle" width="20" height="20"></i> EXTENSIONS</label>
                         <i id="arr-cfg-extensions" data-lucide="chevron-down" width="14" height="14" style="transition: transform 0.2s;"></i>
                     </div>
-                    <div id="cfg-extensions" class="col" style="gap: 12px; padding: 10px 0;">
+                    <div id="cfg-extensions" class="col cfg-accordion-content" style="gap: 14px; padding: 0;">
                         <div class="row" style="justify-content: space-between; align-items: center; padding: 0 5px;">
                             <label for="cfgShowAdetailerSdxlAnimaSwitch" style="margin: 0; color: var(--text-main); font-size: 13px;">Show ADetailer [SDXL/Anima]</label>
                             <input type="checkbox" id="cfgShowAdetailerSdxlAnimaSwitch" class="bojro-switch" onchange="toggleAdetailerSectionVisibilitySdxlAnima()">
@@ -8555,12 +8555,12 @@
                         </div>
                     </div>
                 </div>
-                <div class="glass-box">
-                    <div class="row" onclick="toggleGeneric('cfg-experimental', 'arr-cfg-experimental', 'bojro_vis_cfg_experimental')" style="justify-content:space-between; cursor:pointer; margin-bottom:5px;">
+                <div class="glass-box cfg-card cfg-theme-general">
+                    <div class="row cfg-accordion-header" onclick="toggleGeneric('cfg-experimental', 'arr-cfg-experimental', 'bojro_vis_cfg_experimental')" style="justify-content:space-between; cursor:pointer; margin-bottom:5px;">
                         <label style="cursor:pointer; color: var(--accent-primary);"><i data-lucide="flask-conical" width="20" height="20"></i> EXPERIMENTAL</label>
                         <i id="arr-cfg-experimental" data-lucide="chevron-down" width="14" height="14" style="transition: transform 0.2s;"></i>
                     </div>
-                    <div id="cfg-experimental" class="col" style="gap: 12px; padding: 10px 0;">
+                    <div id="cfg-experimental" class="col cfg-accordion-content" style="gap: 14px; padding: 0;">
                         <div class="row" style="justify-content: space-between; align-items: center; padding: 0 5px;">
                             <label for="cfgUpscaleExpSwitch" style="margin: 0; color: var(--text-main); font-size: 13px;">Additional Upscale Features</label>
                             <input type="checkbox" id="cfgUpscaleExpSwitch" class="bojro-switch" onchange="toggleUpscaleExpFeatures()">
@@ -8580,12 +8580,12 @@
                     </div>
                 </div>
 
-                <div class="glass-box">
-                    <div class="row" onclick="toggleGeneric('cfg-sys', 'arr-cfg-sys', 'bojro_vis_cfg_sys')" style="justify-content:space-between; cursor:pointer; margin-bottom:5px;">
+                <div class="glass-box cfg-card cfg-theme-general">
+                    <div class="row cfg-accordion-header" onclick="toggleGeneric('cfg-sys', 'arr-cfg-sys', 'bojro_vis_cfg_sys')" style="justify-content:space-between; cursor:pointer; margin-bottom:5px;">
                         <label style="cursor:pointer;"><i data-lucide="smartphone" width="20" height="20"></i> SYSTEM SETTINGS</label>
                         <i id="arr-cfg-sys" data-lucide="chevron-down" width="14" height="14" style="transition: transform 0.2s;"></i>
                     </div>
-                    <div id="cfg-sys" class="col" style="gap: 12px; padding: 10px 0;">
+                    <div id="cfg-sys" class="col cfg-accordion-content" style="gap: 14px; padding: 0;">
                         <button onclick="requestBatteryPerm()" class="btn-small" style="width: 100%; color: #00e676; border-color: rgba(0, 230, 118, 0.3); background: rgba(0, 230, 118, 0.05);">
                             <i data-lucide="battery-charging" width="20" height="20" style="vertical-align: -2px; margin-right: 6px;"></i> IGNORE BATTERY OPTIMIZATIONS
                         </button>
