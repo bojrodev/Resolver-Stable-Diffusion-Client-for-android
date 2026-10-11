@@ -833,6 +833,9 @@ window.generateLlmPrompt = async function() {
 const CONTROLNET_MODES = ['inp', 'img2img', 'xl', 'flux', 'qwen', 'anima', 'krea'];
 
 async function fetchControlNetOptions() {
+    const controlNetHost = typeof HOST === 'string' ? HOST.trim() : '';
+    if (!controlNetHost || controlNetHost.toLowerCase() === 'link first' || !isEngineConnected) return;
+
     const units = [0, 1, 2];
     const moduleEls = CONTROLNET_MODES.flatMap(m => units.map(u => document.getElementById(`${m}_cn_${u}_module`))).filter(Boolean);
     const modelEls = CONTROLNET_MODES.flatMap(m => units.map(u => document.getElementById(`${m}_cn_${u}_model`))).filter(Boolean);
@@ -885,8 +888,6 @@ async function fetchControlNetOptions() {
         });
     } catch (e) {
         console.warn("ControlNet options fetch failed (extension may not be installed):", e);
-        // Surfaces a failure to fetch the ControlNet lists in the console instead of staying silent (a stuck "Loading..." placeholder could otherwise be sent as a model name; see buildControlNetScriptPayload()).
-        if (Toast) Toast.show({ text: 'ControlNet options failed to load', duration: 'short' });
     }
 }
 
