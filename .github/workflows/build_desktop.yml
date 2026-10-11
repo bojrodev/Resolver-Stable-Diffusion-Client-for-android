@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Target Release Tag (leave blank to target latest tag or default v6.0.0)'
+        description: 'Target Release Tag (leave blank to attach to the latest release)'
         required: false
         default: ''
         type: string
@@ -30,8 +30,6 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -58,25 +56,28 @@ jobs:
           path: desktop_server/BojroDevPower-v6-win64.zip
           if-no-files-found: error
 
-      - name: Determine Target Release Tag
-        id: target_tag
+      - name: Attach zip to existing GitHub Release
+        if: ${{ github.event_name == 'release' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/') }}
         shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_TAG: ${{ inputs.release_tag }}
         run: |
-          if [ -n "${{ inputs.release_tag }}" ]; then
-            echo "TAG_NAME=${{ inputs.release_tag }}" >> $GITHUB_ENV
-          elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
-            echo "TAG_NAME=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+          if [ -n "$INPUT_TAG" ]; then
+            TARGET_TAG="$INPUT_TAG"
+          elif [ "${{ github.event_name }}" = "release" ]; then
+            TARGET_TAG="${{ github.event.release.tag_name }}"
+          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            TARGET_TAG="${GITHUB_REF#refs/tags/}"
           else
-            LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v6.0.0")
-            echo "TAG_NAME=${LATEST_TAG}" >> $GITHUB_ENV
+            # Query GitHub CLI for the latest published release tag
+            TARGET_TAG=$(gh release view --json tagName -q .tagName)
           fi
 
-      - name: Attach archive to GitHub Release
-        if: ${{ github.event_name == 'release' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ env.TAG_NAME }}
-          files: desktop_server/BojroDevPower-v6-win64.zip
-          make_latest: "true"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          if [ -z "$TARGET_TAG" ]; then
+            echo "Error: No existing release found on GitHub."
+            exit 1
+          fi
+
+          echo "Uploading BojroDevPower-v6-win64.zip to existing release: $TARGET_TAG"
+          gh release upload "$TARGET_TAG" desktop_server/BojroDevPower-v6-win64.zip --clobber
