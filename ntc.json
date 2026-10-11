@@ -1,8 +1,8 @@
 {
-  "id": "v2.6-announcement-2",
-  "title": "Advanced Mode Integration completed",
-  "message": "A massive patch from contributor Bungles (Oliver Lufti) is deployed",
+  "id": "Important Takeways",
+  "title": "Focusing on comfyui",
+  "message": "The app got serious features thanks to bungles, and I am dropping the work on forge for now.Therefore, I am gonna focus on comfyui. I will still support forge, but I will not be working on it for now, until or unless, maintainer of forge neo messes with the code and makes it incompatible with the app.",
   "type": "info",
-  "date": "2026-10-10",
+  "date": "2026-10-11",
   "active": true
 }
