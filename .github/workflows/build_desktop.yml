@@ -1,9 +1,21 @@
-name: Build Desktop App
+name: Build Desktop App v6
 
 on:
+  push:
+    branches:
+      - "main"
+      - "dev"
+    tags:
+      - "v*"
   release:
-    types: [published, created, released]
+    types: [published]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Target Release Tag (leave blank to target latest tag or default v6.0.0)'
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: write
@@ -16,40 +28,55 @@ jobs:
         working-directory: ./desktop_server
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-        cache: 'pip'
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: desktop_server/requirements.txt
 
-    - name: Install Dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pyinstaller
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
 
-    - name: Build EXE
-      # --onefile: Bundles everything into a single .exe
-      # --noconsole: Hides the black command window
-      # --name: Sets your specific filename
-      run: |
-        pyinstaller --onefile --noconsole --name "BojroPowerv5portable" --icon="app.ico" --add-data "app.ico;." main.py
+      - name: Build onedir application
+        run: pyinstaller --noconfirm --onedir --windowed --icon="app.ico" --add-data "app.ico;." main.py
 
-    # 1. ALWAYS upload as a downloadable artifact (for manual builds/testing)
-    - name: Upload Artifact for Testing
-      uses: actions/upload-artifact@v4
-      with:
-        name: BojroPowerv5portable
-        path: desktop_server/dist/BojroPowerv5portable.exe
+      - name: Create release archive
+        run: Compress-Archive -Path .\dist\main -DestinationPath .\BojroDevPower-v6-win64.zip -Force
 
-    # 2. ONLY upload to Release if this was triggered by a Tag (Publishing a Release)
-    - name: Upload to Release
-      uses: softprops/action-gh-release@v1
-      if: startsWith(github.ref, 'refs/tags/')
-      with:
-        files: desktop_server/dist/BojroPowerv5portable.exe
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BojroDevPower-v6-win64
+          path: desktop_server/BojroDevPower-v6-win64.zip
+          if-no-files-found: error
+
+      - name: Determine Target Release Tag
+        id: target_tag
+        shell: bash
+        run: |
+          if [ -n "${{ inputs.release_tag }}" ]; then
+            echo "TAG_NAME=${{ inputs.release_tag }}" >> $GITHUB_ENV
+          elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            echo "TAG_NAME=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+          else
+            LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v6.0.0")
+            echo "TAG_NAME=${LATEST_TAG}" >> $GITHUB_ENV
+          fi
+
+      - name: Attach archive to GitHub Release
+        if: ${{ github.event_name == 'release' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG_NAME }}
+          files: desktop_server/BojroDevPower-v6-win64.zip
+          make_latest: "true"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
