@@ -1581,16 +1581,13 @@ window.exportImg2imgPresets = async function() {
         const isNative = window.Capacitor && window.Capacitor.isNative;
         if (isNative && window.Capacitor.Plugins.Filesystem) {
             const Filesystem = window.Capacitor.Plugins.Filesystem;
-            try {
-                await Filesystem.mkdir({ path: 'Resolver', directory: 'DOCUMENTS', recursive: false });
-            } catch (e) {}
             await Filesystem.writeFile({
-                path: `Resolver/${fileName}`,
+                path: fileName,
                 data: json,
                 directory: 'DOCUMENTS',
                 encoding: 'utf8'
             });
-            if (Toast) Toast.show({ text: 'Saved to Documents/Resolver', duration: 'long' });
+            if (Toast) Toast.show({ text: 'Saved to Documents', duration: 'long' });
         } else {
             const blob = new Blob([json], { type: 'application/json' });
             const url = URL.createObjectURL(blob);

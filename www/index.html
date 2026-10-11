@@ -8027,6 +8027,10 @@
                             <label>Upscaler 2 Visibility</label>
                             <input type="number" id="upscale_upscaler_2_visibility" value="0" step="0.05" min="0" max="1" oninput="localStorage.setItem('bojro_upscaler2_visibility', this.value)">
                         </div>
+                        <div class="row" style="justify-content:space-between; margin-bottom:15px;">
+                            <label for="upscale_copy_metadata">Copy Metadata from Source</label>
+                            <input type="checkbox" id="upscale_copy_metadata" class="bojro-switch" onchange="try { localStorage.setItem('bojro_upscale_copy_metadata', this.checked ? '1' : '0'); } catch (e) {}">
+                        </div>
 
                         <div id="upscaleExpFields" class="hidden">
                             <div class="col" style="margin-bottom:10px;">
@@ -8409,6 +8413,10 @@
                         <div class="row" style="justify-content: space-between; align-items: center; padding: 0 5px;">
                             <label for="cfgAnalyzerStickyBarSwitch" style="margin: 0; color: var(--text-main); font-size: 13px;">Analyzer Sticky Bar</label>
                             <input type="checkbox" id="cfgAnalyzerStickyBarSwitch" class="bojro-switch" onchange="toggleAnalyzerStickyBar()">
+                        </div>
+                        <div class="row" style="justify-content: space-between; align-items: center; padding: 0 5px;">
+                            <label for="cfgGalleryBadgesSwitch" style="margin: 0; color: var(--text-main); font-size: 13px;">Gallery Badges</label>
+                            <input type="checkbox" id="cfgGalleryBadgesSwitch" class="bojro-switch" checked onchange="toggleGalleryBadges()">
                         </div>
                         <div class="row" style="justify-content: space-between; align-items: center; padding: 0 5px;">
                             <label for="cfgHideDevPowerSwitch" style="margin: 0; color: var(--text-main); font-size: 13px;">Hide Dev Power</label>

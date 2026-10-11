@@ -129,6 +129,8 @@ window.openEditorFromFile = function(e) {
 
     // Read the original file's embedded prompt/negative now, since PROCEED re-encodes the image and drops PNG text chunks (see inpSourceMetadata, globals.js). Held as a pending promise and committed by applyEditorChanges(), so backing out leaves the loaded image's metadata alone.
     editorPendingMetadataPromise = readImportablePromptsFromBlob(file);
+    editorPendingTextChunksPromise = readPngTextChunks(file);
+    editorPendingBadges = null;
 
     // Opened immediately, before the file is read (as editCurrentFs(), engine.js), so the underlying page can't flash.
     const editorCanvasEl = document.getElementById('editorCanvas');
@@ -561,6 +563,10 @@ window.applyEditorChanges = async function() {
         // Commit the metadata captured when this image entered the editor (inpSourceMetadata, globals.js) together with its image. Unconditional, so a path that captured none leaves null rather than the previous image's prompts. Awaited, since the read is async.
         inpSourceMetadata = editorPendingMetadataPromise ? await editorPendingMetadataPromise : null;
         editorPendingMetadataPromise = null;
+        inpSourceTextChunks = editorPendingTextChunksPromise ? await editorPendingTextChunksPromise : null;
+        upscaleSourceBadges = editorPendingBadges;
+        editorPendingBadges = null;
+        editorPendingTextChunksPromise = null;
     } finally {
         if (proceedBtn) {
             proceedBtn.textContent = originalBtnText;
@@ -812,6 +818,10 @@ window.clearInpaintImage = function() {
     // Belongs to the image just cleared - see inpSourceMetadata (globals.js).
     inpSourceMetadata = null;
     editorPendingMetadataPromise = null;
+    inpSourceTextChunks = null;
+    upscaleSourceBadges = null;
+    editorPendingBadges = null;
+    editorPendingTextChunksPromise = null;
 
     if (mainCtx && mainCanvas) mainCtx.clearRect(0, 0, mainCanvas.width, mainCanvas.height);
     if (mainCanvas) mainCanvas.style.backgroundImage = 'none';

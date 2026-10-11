@@ -69,6 +69,12 @@ function loadConnectionConfig() {
     const updateNoticesSwitch = document.getElementById('cfgUpdateNoticesSwitch');
     if (updateNoticesSwitch) updateNoticesSwitch.checked = localStorage.getItem('bojroUpdateNoticesOff') !== 'true';
 
+    // Gallery Badges switch.
+    const galleryBadgesOff = localStorage.getItem('bojroGalleryBadgesOff') === 'true';
+    const galleryBadgesSwitch = document.getElementById('cfgGalleryBadgesSwitch');
+    if (galleryBadgesSwitch) galleryBadgesSwitch.checked = !galleryBadgesOff;
+    document.body.classList.toggle('hide-gallery-badges', galleryBadgesOff);
+
     // Hide Loading Circle: off/absent (the default) means the circle shows.
     const hideGenSpinner = localStorage.getItem('bojroHideGenSpinner') === 'true';
     const hideGenSpinnerSwitch = document.getElementById('cfgHideGenSpinnerSwitch');
@@ -768,6 +774,12 @@ window.toggleBatchGridLimit = function() {
 window.toggleUpdateNotices = function() {
     const isOn = document.getElementById('cfgUpdateNoticesSwitch').checked;
     localStorage.setItem('bojroUpdateNoticesOff', isOn ? 'false' : 'true');
+}
+// Gallery Badges switch (stored as the OFF state).
+window.toggleGalleryBadges = function() {
+    const isOn = document.getElementById('cfgGalleryBadgesSwitch').checked;
+    localStorage.setItem('bojroGalleryBadgesOff', isOn ? 'false' : 'true');
+    document.body.classList.toggle('hide-gallery-badges', !isOn);
 }
 window.toggleGenSpinnerHidden = function() {
     const isChecked = document.getElementById('cfgHideGenSpinnerSwitch').checked;

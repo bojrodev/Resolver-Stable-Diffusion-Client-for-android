@@ -160,6 +160,14 @@
         }
     }
 
+    // Re-measures the prompt boxes; they size to 0 when the image is analysed while the tab is hidden.
+    window.refreshAnalyzerTextSizing = function () {
+        ['anaMetaPos', 'anaMetaNeg'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el && el.value && el.offsetParent !== null) setUpCollapsible(id);
+        });
+    };
+
     window.toggleAnaCollapse = function (textareaId) {
         const wrap = document.getElementById(textareaId + 'Wrap');
         const btn = document.getElementById(textareaId + 'Toggle');

@@ -300,8 +300,14 @@ function normalizeDedupeMode(mode) {
     return mode === 'img2img' ? 'inp' : mode;
 }
 
-// Tag-style modes whose prompt and negative boxes get a closing comma on blur or Generate (SDXL and Anima); not the natural-language modes or img2img/Inpaint.
+// Modes whose prompt boxes get a closing comma: SDXL and Anima, and Inpaint/img2img with an SDXL or Anima checkpoint.
 const AUTO_COMMA_MODES = ['xl', 'anima'];
+function usesAutoComma(realMode) {
+    if (AUTO_COMMA_MODES.includes(realMode)) return true;
+    if (realMode !== 'inp') return false;
+    const checkpoint = document.getElementById('inp_modelSelect')?.value;
+    return !!(checkpoint && window.LoraManager && AUTO_COMMA_MODES.includes(window.LoraManager.detectCheckpointArchitecture(checkpoint)));
+}
 
 // Adds ", " to a box with content that doesn't end in a comma (the ending LoRAs and styles leave, withTrailingComma(), utils.js). An empty box stays empty. Returns true if it changed anything.
 function ensureTrailingCommaOn(el) {
@@ -318,7 +324,7 @@ window.dedupePromptTagsOnBlur = function(mode, field) {
     const realMode = normalizeDedupeMode(mode);
     const el = document.getElementById(`${realMode}_${field}`);
     const removed = removeDuplicateTagsFrom(el);
-    const commaAdded = AUTO_COMMA_MODES.includes(realMode) && ensureTrailingCommaOn(el);
+    const commaAdded = usesAutoComma(realMode) && ensureTrailingCommaOn(el);
     if (removed > 0 || commaAdded) {
         if (field === 'prompt') { savePrompt(realMode); } else { saveNegativePrompt(realMode); }
         if (realMode === 'inp' && typeof saveCurrentInpaintModeStateLive === 'function') saveCurrentInpaintModeStateLive();
@@ -334,7 +340,7 @@ window.dedupePromptTagsForMode = function(mode) {
     const negEl = document.getElementById(`${realMode}_neg`);
     const removedPrompt = removeDuplicateTagsFrom(promptEl);
     const removedNeg = removeDuplicateTagsFrom(negEl);
-    const autoComma = AUTO_COMMA_MODES.includes(realMode);
+    const autoComma = usesAutoComma(realMode);
     const commaPrompt = autoComma && ensureTrailingCommaOn(promptEl);
     const commaNeg = autoComma && ensureTrailingCommaOn(negEl);
     const total = removedPrompt + removedNeg;

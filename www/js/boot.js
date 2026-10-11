@@ -66,6 +66,14 @@ try {
     console.error("Immediate Upscaler 2 Visibility restore failed:", e);
 }
 
+// Restore Upscale's Copy Metadata from Source switch (off by default).
+try {
+    const copyMetaEl = document.getElementById('upscale_copy_metadata');
+    if (copyMetaEl) copyMetaEl.checked = localStorage.getItem('bojro_upscale_copy_metadata') === '1';
+} catch (e) {
+    console.error("Immediate Upscale Copy Metadata restore failed:", e);
+}
+
 // Restore Upscale's Scale Factor (BY FACTOR mode).
 try {
     const savedUpscaleFactor = localStorage.getItem('bojro_upscale_factor');

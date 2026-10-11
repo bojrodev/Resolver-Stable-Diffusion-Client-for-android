@@ -137,6 +137,13 @@ let sourceImageB64 = null; // The final cropped image string - shared by Inpaint
 let inpSourceMetadata = null;
 // The same read for the image open in the editor but not yet committed (a promise PROCEED can await).
 let editorPendingMetadataPromise = null;
+// Source PNG text chunks, for Copy Metadata from Source.
+let inpSourceTextChunks = null;
+// Gallery badges of the image loaded into the Upscaler.
+let upscaleSourceBadges = null;
+// Pending badges for the image open in the editor.
+let editorPendingBadges = null;
+let editorPendingTextChunksPromise = null;
 let isDrawing = false;
 // Cached once per stroke (startPaint()).
 let currentStrokeBrushSize = 40;

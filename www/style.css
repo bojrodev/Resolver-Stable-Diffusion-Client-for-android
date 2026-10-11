@@ -1226,6 +1226,49 @@ input[readonly], textarea[readonly] {
     z-index: 10;
 }
 
+/* Gallery badges and selection-mode circle. */
+.gal-badges {
+    position: absolute;
+    left: 5px;
+    bottom: 9px; /* 5px inset + the 4px inline-image gap under the thumb */
+    display: flex;
+    gap: 2px;
+    max-width: calc(100% - 10px);
+    pointer-events: none;
+}
+body.hide-gallery-badges .gal-badges {
+    display: none;
+}
+.gal-badge {
+    padding: 2px 4px;
+    border-radius: 5px;
+    background: rgba(0, 0, 0, 0.55);
+    color: #fff;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.3px;
+    line-height: 1.3;
+}
+.gal-select-ring {
+    display: none;
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    width: 22px;
+    height: 22px;
+    box-sizing: border-box;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.35);
+    border: 2px solid rgba(255, 255, 255, 0.85);
+    pointer-events: none;
+}
+#savedGalleryGrid.selecting .gal-select-ring {
+    display: block;
+}
+#savedGalleryGrid.selecting .gal-selected .gal-select-ring {
+    display: none;
+}
+
 /* DELETE ALL's disabled look matches the ABORT buttons. Toggled via the disabled attribute in loadGallery(). */
 #galClearAllBtn:disabled {
     color: var(--text-muted);

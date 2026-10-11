@@ -310,20 +310,44 @@ async function extractSeedFromDataUrl(base64Data) {
     return null;
 }
 
-async function buildOutputFileName(base64Data, prefix = 'bojro') {
+// `tag` is appended to the name (Upscale: the scale); `seedOverride` replaces the image's seed.
+async function buildOutputFileName(base64Data, prefix = 'bojro', tag = '', seedOverride = null) {
     const now = new Date();
     const dateStr = `${String(now.getFullYear()).slice(-2)}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
     let suffix = String(Date.now());
-    const seed = await extractSeedFromDataUrl(base64Data);
+    const seed = seedOverride !== null && seedOverride !== undefined ? seedOverride : await extractSeedFromDataUrl(base64Data);
     // A resolved seed is never -1 (extractSeedFromDataUrl() excludes it).
     if (seed !== null) suffix = seed;
-    return `${prefix}_${dateStr}_${suffix}.png`;
+    return `${prefix}_${dateStr}_${suffix}${tag ? '_' + tag : ''}.png`;
 }
 
-async function saveToMobileGallery(base64Data, prefix = 'bojro') {
+let resolverSaveQueue = Promise.resolve();
+
+// fileName, or fileName with " (n)" if it already exists in Documents/Resolver.
+async function uniqueResolverFileName(fileName) {
+    const exists = async (name) => {
+        try {
+            await Filesystem.stat({ path: `Resolver/${name}`, directory: 'DOCUMENTS' });
+            return true;
+        } catch (e) {
+            return false;
+        }
+    };
+    if (!(await exists(fileName))) return fileName;
+    const dot = fileName.lastIndexOf('.');
+    const stem = dot > 0 ? fileName.slice(0, dot) : fileName;
+    const ext = dot > 0 ? fileName.slice(dot) : '';
+    for (let n = 1; n < 1000; n++) {
+        const candidate = `${stem} (${n})${ext}`;
+        if (!(await exists(candidate))) return candidate;
+    }
+    return fileName;
+}
+
+async function saveToMobileGallery(base64Data, prefix = 'bojro', tag = '', seedOverride = null) {
     try {
         const isNative = window.Capacitor && window.Capacitor.isNative;
-        const fileName = await buildOutputFileName(base64Data, prefix);
+        const fileName = await buildOutputFileName(base64Data, prefix, tag, seedOverride);
         if (isNative) {
             const cleanBase64 = base64Data.split(',')[1];
             try {
@@ -333,11 +357,17 @@ async function saveToMobileGallery(base64Data, prefix = 'bojro') {
                     recursive: false
                 });
             } catch (e) {}
-            await Filesystem.writeFile({
-                path: `Resolver/${fileName}`,
-                data: cleanBase64,
-                directory: 'DOCUMENTS'
+            // Queued so same-name saves get distinct names.
+            const run = resolverSaveQueue.then(async () => {
+                const finalName = await uniqueResolverFileName(fileName);
+                await Filesystem.writeFile({
+                    path: `Resolver/${finalName}`,
+                    data: cleanBase64,
+                    directory: 'DOCUMENTS'
+                });
             });
+            resolverSaveQueue = run.catch(() => {});
+            await run;
             if (Toast) await Toast.show({
                 text: 'Image saved',
                 duration: 'short',
@@ -429,17 +459,18 @@ function generateThumbnail(base64) {
 let imageSaveChain = Promise.resolve();
 let imageSavesPending = 0;
 let IMAGE_SAVE_TIMEOUT_MS = 15000;
-function saveImageToDBInBackground(base64) {
+// `upscale` ({scale, seed}) marks an Upscale result; `badges` lists its gallery badges.
+function saveImageToDBInBackground(base64, upscale = null, badges = null) {
     imageSavesPending++;
     const saved = imageSaveChain.then(() => Promise.race([
-        saveImageToDB(base64),
+        saveImageToDB(base64, upscale, badges),
         new Promise(resolve => setTimeout(() => resolve(null), IMAGE_SAVE_TIMEOUT_MS))
     ])).catch(() => null);
     imageSaveChain = saved.then(() => { imageSavesPending--; });
     return saved;
 }
 
-function saveImageToDB(base64) {
+function saveImageToDB(base64, upscale = null, badges = null) {
     return new Promise(async (resolve) => {
         // Anything that can throw here (e.g. db.transaction() on a closed connection) must resolve to null itself: an exception in an async executor leaves the promise unsettled and would stall the save queue.
         try {
@@ -455,7 +486,9 @@ function saveImageToDB(base64) {
                 data: base64,
                 // null (not the full image) when generation failed; loadGallery() falls back to item.data.
                 thumbnail: thumbnail,
-                date: new Date().toLocaleString()
+                date: new Date().toLocaleString(),
+                ...(upscale ? { upscale } : {}),
+                ...(badges && badges.length ? { badges } : {})
             });
             req.onsuccess = (e) => {
                 resolve(e.target.result);
@@ -906,6 +939,168 @@ async function readImportablePromptsFromBlob(blob) {
         return extractImportablePrompts(await readPngMetadata(blob));
     } catch (e) {
         return null;
+    }
+}
+
+// --- PNG text chunks (Copy Metadata from Source) ---
+
+let _crc32Table = null;
+function crc32Bytes(bytes) {
+    if (!_crc32Table) {
+        _crc32Table = new Uint32Array(256);
+        for (let n = 0; n < 256; n++) {
+            let c = n;
+            for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+            _crc32Table[n] = c >>> 0;
+        }
+    }
+    let crc = 0xFFFFFFFF;
+    for (let i = 0; i < bytes.length; i++) crc = _crc32Table[(crc ^ bytes[i]) & 0xFF] ^ (crc >>> 8);
+    return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+
+function pngChunkBytes(type, data) {
+    const out = new Uint8Array(12 + data.length);
+    const view = new DataView(out.buffer);
+    view.setUint32(0, data.length);
+    for (let i = 0; i < 4; i++) out[4 + i] = type.charCodeAt(i);
+    out.set(data, 8);
+    view.setUint32(8 + data.length, crc32Bytes(out.subarray(4, 8 + data.length)));
+    return out;
+}
+
+const PNG_SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10];
+const PNG_TEXT_CHUNK_TYPES = ['tEXt', 'iTXt', 'zTXt'];
+
+// Lists the chunks before the first IDAT, or null if not a PNG.
+async function scanPngHead(blob) {
+    const head = new Uint8Array(await blob.slice(0, 4 * 1024 * 1024).arrayBuffer());
+    if (head.length < 33 || !PNG_SIGNATURE.every((b, i) => head[i] === b)) return null;
+    const view = new DataView(head.buffer);
+    const chunks = [];
+    let width = 0, height = 0, off = 8;
+    while (off + 12 <= head.length) {
+        const len = view.getUint32(off);
+        const type = String.fromCharCode(head[off + 4], head[off + 5], head[off + 6], head[off + 7]);
+        if (type === 'IDAT') return { width, height, idatOffset: off, chunks, head };
+        if (off + 12 + len > head.length) return null;
+        if (type === 'IHDR') { width = view.getUint32(off + 8); height = view.getUint32(off + 12); }
+        chunks.push({ type, start: off, end: off + 12 + len });
+        off += 12 + len;
+    }
+    return null;
+}
+
+// A PNG's tEXt / iTXt / zTXt chunks as [{type, data}], or null.
+async function readPngTextChunks(blob) {
+    try {
+        const scan = await scanPngHead(blob);
+        if (!scan) return null;
+        const out = [];
+        for (const c of scan.chunks) {
+            if (!PNG_TEXT_CHUNK_TYPES.includes(c.type)) continue;
+            out.push({ type: c.type, data: scan.head.slice(c.start + 8, c.end - 4) });
+        }
+        return out.length ? out : null;
+    } catch (e) {
+        return null;
+    }
+}
+
+// The seed in the "parameters" chunk, or null.
+function seedFromTextChunks(chunks) {
+    try {
+        for (const chunk of chunks || []) {
+            const data = chunk.data;
+            const keyEnd = data.indexOf(0);
+            if (keyEnd < 0 || new TextDecoder('latin1').decode(data.subarray(0, keyEnd)) !== 'parameters') continue;
+            let textStart;
+            if (chunk.type === 'tEXt') {
+                textStart = keyEnd + 1;
+            } else if (chunk.type === 'iTXt' && data[keyEnd + 1] === 0) {
+                let p = data.indexOf(0, keyEnd + 3);
+                if (p >= 0) p = data.indexOf(0, p + 1);
+                if (p < 0) continue;
+                textStart = p + 1;
+            } else {
+                continue;
+            }
+            const text = new TextDecoder(chunk.type === 'iTXt' ? 'utf-8' : 'latin1').decode(data.subarray(textStart));
+            const m = text.match(/Seed:\s*(-?\d+)/);
+            if (m && m[1] !== '-1') return m[1];
+        }
+    } catch (e) {}
+    return null;
+}
+
+// Sets the last "Size: WxH" in a "parameters" chunk.
+function patchParametersChunkSize(chunk, width, height) {
+    try {
+        const data = chunk.data;
+        const keyEnd = data.indexOf(0);
+        if (keyEnd < 0) return chunk;
+        if (new TextDecoder('latin1').decode(data.subarray(0, keyEnd)) !== 'parameters') return chunk;
+        let textStart, utf8;
+        if (chunk.type === 'tEXt') {
+            textStart = keyEnd + 1; utf8 = false;
+        } else if (chunk.type === 'iTXt') {
+            if (data[keyEnd + 1] !== 0) return chunk;
+            let p = keyEnd + 3;
+            p = data.indexOf(0, p); if (p < 0) return chunk;
+            p = data.indexOf(0, p + 1); if (p < 0) return chunk;
+            textStart = p + 1; utf8 = true;
+        } else {
+            return chunk;
+        }
+        const text = new TextDecoder(utf8 ? 'utf-8' : 'latin1').decode(data.subarray(textStart));
+        const re = /Size: *\d+ *x *\d+/g;
+        let last = null, m;
+        while ((m = re.exec(text)) !== null) last = m;
+        if (!last) return chunk;
+        const patched = text.slice(0, last.index) + `Size: ${width}x${height}` + text.slice(last.index + last[0].length);
+        let textBytes;
+        if (utf8) {
+            textBytes = new TextEncoder().encode(patched);
+        } else {
+            textBytes = new Uint8Array(patched.length);
+            for (let i = 0; i < patched.length; i++) textBytes[i] = patched.charCodeAt(i) & 0xFF;
+        }
+        const out = new Uint8Array(textStart + textBytes.length);
+        out.set(data.subarray(0, textStart), 0);
+        out.set(textBytes, textStart);
+        return { type: chunk.type, data: out };
+    } catch (e) {
+        return chunk;
+    }
+}
+
+// Replaces a PNG's text chunks with `chunks`, with Size set to the PNG's size.
+async function embedPngTextChunks(dataUrl, chunks) {
+    try {
+        if (!chunks || !chunks.length) return dataUrl;
+        const blob = await (await fetch(dataUrl)).blob();
+        const scan = await scanPngHead(blob);
+        if (!scan || !scan.width || !scan.height) return dataUrl;
+        const parts = [scan.head.slice(0, 8)];
+        for (const c of scan.chunks) {
+            if (PNG_TEXT_CHUNK_TYPES.includes(c.type)) continue;
+            parts.push(scan.head.slice(c.start, c.end));
+        }
+        for (const ch of chunks) {
+            const patched = patchParametersChunkSize(ch, scan.width, scan.height);
+            parts.push(pngChunkBytes(patched.type, patched.data));
+        }
+        parts.push(blob.slice(scan.idatOffset));
+        const outBlob = new Blob(parts, { type: 'image/png' });
+        return await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(outBlob);
+        });
+    } catch (e) {
+        console.error('Embedding source metadata failed:', e);
+        return dataUrl;
     }
 }
 

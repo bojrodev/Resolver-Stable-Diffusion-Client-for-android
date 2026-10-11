@@ -1265,7 +1265,7 @@ async function sendSeedFromResultImage(img) {
 
 // Long-pressing a result in the Inpaint / img2img / Upscale tab sends it to the Upscaler, replacing the loaded image.
 function sendResultToUpscaler(img) {
-    return sendImageToUpscaler(img.src);
+    return sendImageToUpscaler(img.src, img.dataset.badges ? img.dataset.badges.split(',') : null);
 }
 
 // Runs onLongPress after a long press on a result thumbnail, and suppresses the click that follows so the fullscreen viewer doesn't also open.
@@ -1367,6 +1367,16 @@ async function syncJobServerOptions(job, serverOpts) {
         if (storedBits !== null) { try { await postOption({ "forge_unet_storage_dtype": storedBits }); } catch (e2) {} }
         if (back) { try { await postOption({ "forge_additional_modules": back }); } catch (e3) {} }
     }
+}
+
+// Gallery badges for a job: HR, INP, AD, CN (main ControlNet only).
+function galleryBadgesFor(job) {
+    const badges = [];
+    if (job.payload && job.payload.enable_hr) badges.push('HR');
+    if (job.payload && job.payload.alwayson_scripts && job.payload.alwayson_scripts.ADetailer) badges.push('AD');
+    if (job.payload && job.payload.alwayson_scripts && Object.keys(job.payload.alwayson_scripts).some(k => k.toLowerCase() === 'controlnet')) badges.push('CN');
+    if (job.mode === 'inp') badges.push('INP');
+    return badges;
 }
 
 async function runJob(job, isBatch = false) {
@@ -1881,14 +1891,16 @@ async function runJob(job, isBatch = false) {
             const expectedImages = (job.payload.batch_size || 1) * (job.payload.n_iter || 1);
 
             // Shown first; the History save (saveImageToDBInBackground(), utils.js) runs behind it.
+            const jobBadges = galleryBadgesFor(job);
             const addResult = (finalB64, isGrid) => {
-                const saved = saveImageToDBInBackground(finalB64);
+                const saved = saveImageToDBInBackground(finalB64, null, isGrid ? null : jobBadges);
 
                 const img = document.createElement('img');
                 img.src = finalB64;
                 img.className = 'gen-result';
                 img.loading = "lazy";
                 img.dataset.dbId = '';
+                if (!isGrid && jobBadges.length) img.dataset.badges = jobBadges.join(',');
                 if (isGrid) img.dataset.grid = '1';
                 saved.then(newId => { img.dataset.dbId = newId != null ? String(newId) : ''; });
                 img.onclick = async () => {
@@ -2020,8 +2032,31 @@ window.loadGallery = function() {
             tick.style.position = 'absolute';
             tick.style.top = '5px';
             tick.style.right = '5px';
+            // Selection-mode circle.
+            const ring = document.createElement('div');
+            ring.className = 'gal-select-ring';
             container.appendChild(img);
+            container.appendChild(ring);
             container.appendChild(tick);
+            // Gallery badges: HR, INP, AD, CN, UP.
+            const badgeNames = [...(item.badges || []), ...(item.upscale ? ['UP'] : [])];
+            const badgeOrder = ['HR', 'INP', 'AD', 'CN', 'UP'];
+            if (badgeNames.length) {
+                const badgeRow = document.createElement('div');
+                badgeRow.className = 'gal-badges';
+                badgeOrder.filter(n => badgeNames.includes(n)).forEach(n => {
+                    const b = document.createElement('div');
+                    b.className = 'gal-badge gal-badge-' + n.toLowerCase();
+                    b.textContent = n;
+                    badgeRow.appendChild(b);
+                });
+                container.appendChild(badgeRow);
+            }
+            // Keeps a selection across page changes.
+            if (isSelectionMode && selectedImageIds.has(item.id)) {
+                tick.classList.remove('hidden');
+                container.classList.add('gal-selected');
+            }
             container.dataset.id = item.id;
             newContent.appendChild(container);
         });
@@ -2056,6 +2091,7 @@ window.toggleGallerySelectionMode = function() {
         btn.style.background = "var(--accent-primary)";
         btn.style.color = "white";
         delBtn.classList.remove('hidden');
+        document.getElementById('savedGalleryGrid')?.classList.add('selecting');
         
         // HIDE Delete All button to save space
         if(clearBtn) clearBtn.style.display = 'none';
@@ -2066,7 +2102,9 @@ window.toggleGallerySelectionMode = function() {
         delBtn.classList.add('hidden');
         
         selectedImageIds.clear();
+        document.getElementById('savedGalleryGrid')?.classList.remove('selecting');
         document.querySelectorAll('.gal-tick').forEach(t => t.classList.add('hidden'));
+        document.querySelectorAll('#savedGalleryGrid .gal-selected').forEach(c => c.classList.remove('gal-selected'));
         updateDeleteBtn();
         
         // SHOW Delete All button again
@@ -2079,9 +2117,11 @@ window.toggleSelectionForId = function(id, container) {
     if (selectedImageIds.has(id)) {
         selectedImageIds.delete(id);
         tick.classList.add('hidden');
+        container.classList.remove('gal-selected');
     } else {
         selectedImageIds.add(id);
         tick.classList.remove('hidden');
+        container.classList.add('gal-selected');
     }
     updateDeleteBtn();
 }
@@ -2111,10 +2151,18 @@ window.deleteSelectedImages = async function() {
 
 // Starts reading the prompt/negative from an image's PNG metadata for the editor to commit on PROCEED (see inpSourceMetadata, globals.js). Shared by the viewer's edit button (editCurrentFs) and the Analyzer's "Send image to" row (analyzer.js).
 function startEditorMetadataCapture(src) {
+    editorPendingBadges = null;
     // Same capture as openEditorFromFile() (editor.js): the canvas re-encode on PROCEED would otherwise discard the metadata. src can be a data: or blob: URL.
     editorPendingMetadataPromise = (async () => {
         try {
             return await readImportablePromptsFromBlob(await (await fetch(src)).blob());
+        } catch (e) {
+            return null;
+        }
+    })();
+    editorPendingTextChunksPromise = (async () => {
+        try {
+            return await readPngTextChunks(await (await fetch(src)).blob());
         } catch (e) {
             return null;
         }
@@ -2167,7 +2215,7 @@ function showEditorWithImage(src) {
 }
 
 // Loads an image straight into the shared source image (as PROCEED would, without the crop step) and opens the Upscale panel. Everything is loaded and decoded before the tab changes, so the switch itself is instant with nothing flashing.
-async function sendImageToUpscaler(src) {
+async function sendImageToUpscaler(src, badges = null) {
     if (!src) return false;
     let dataUrl = src;
     let img;
@@ -2187,6 +2235,10 @@ async function sendImageToUpscaler(src) {
         startEditorMetadataCapture(dataUrl);
         inpSourceMetadata = editorPendingMetadataPromise ? await editorPendingMetadataPromise : null;
         editorPendingMetadataPromise = null;
+        inpSourceTextChunks = editorPendingTextChunksPromise ? await editorPendingTextChunksPromise : null;
+        editorPendingTextChunksPromise = null;
+        // Badges carried into the upscale.
+        upscaleSourceBadges = badges;
         const previewImg = document.getElementById('upscalePreviewImg');
         if (previewImg) {
             previewImg.src = dataUrl;
@@ -2226,6 +2278,10 @@ window.editCurrentFs = function() {
     if (!src) return;
 
     startEditorMetadataCapture(src);
+    // Badges carried into an upscale.
+    const viewed = currentGalleryImages[currentGalleryIndex];
+    const viewedBadges = viewed ? (viewed.badges || (viewed.domElement && viewed.domElement.dataset.badges ? viewed.domElement.dataset.badges.split(',') : null)) : null;
+    editorPendingBadges = viewedBadges && viewedBadges.length ? [...viewedBadges] : null;
 
     // 1. Close the Lightbox
     window.closeFsModal();
@@ -2346,6 +2402,15 @@ window.runUpscaleJob = async function() {
             image: sourceImageB64.split(',')[1]
         };
 
+        // Scale for the file name: the factor, or the width ratio in TO SIZE mode.
+        const scaleValue = payload.resize_mode === 1 && editorTargetW
+            ? payload.upscaling_resize_w / editorTargetW
+            : payload.upscaling_resize;
+        const upscaleScaleTag = String(parseFloat((Number(scaleValue) || 0).toFixed(2)));
+        // Source seed for the file name.
+        const upscaleSourceSeed = seedFromTextChunks(inpSourceTextChunks);
+        const jobBadges = upscaleSourceBadges;
+
         localStorage.setItem('bojro_upscale_upscaler_1', upscaler1);
         localStorage.setItem('bojro_upscale_upscaler_2', upscaler2);
 
@@ -2363,14 +2428,22 @@ window.runUpscaleJob = async function() {
         clearTimeout(upscalePollTimeout);
         if (lastKnownTotal !== null && btn) btn.innerText = `Step ${lastKnownTotal} / ${lastKnownTotal}`;
 
-        const finalB64 = "data:image/png;base64," + data.image;
+        let finalB64 = "data:image/png;base64," + data.image;
+        // Copy Metadata from Source.
+        if (document.getElementById('upscale_copy_metadata')?.checked && inpSourceTextChunks) {
+            finalB64 = await embedPngTextChunks(finalB64, inpSourceTextChunks);
+        }
         // Shown first, saved behind it - see saveImageToDBInBackground(), utils.js.
-        const saved = saveImageToDBInBackground(finalB64);
+        const upscaleInfo = { scale: upscaleScaleTag, seed: upscaleSourceSeed };
+        const saved = saveImageToDBInBackground(finalB64, upscaleInfo, jobBadges);
 
         const img = document.createElement('img');
         img.src = finalB64;
         img.className = 'gen-result';
         img.loading = "lazy";
+        img.dataset.upscaleScale = upscaleInfo.scale;
+        if (jobBadges && jobBadges.length) img.dataset.badges = jobBadges.join(',');
+        if (upscaleInfo.seed) img.dataset.upscaleSeed = upscaleInfo.seed;
         img.dataset.dbId = '';
         saved.then(newId => { img.dataset.dbId = newId != null ? String(newId) : ''; });
         img.onclick = async () => {
@@ -2380,7 +2453,8 @@ window.runUpscaleJob = async function() {
             const items = allImgs.map(el => ({
                 id: el.dataset.dbId ? parseInt(el.dataset.dbId) : null,
                 data: el.src,
-                domElement: el
+                domElement: el,
+                upscale: el.dataset.upscaleScale ? { scale: el.dataset.upscaleScale, seed: el.dataset.upscaleSeed || null } : null
             }));
             window.openFullscreen(items, allImgs.indexOf(img));
         };
@@ -2389,7 +2463,7 @@ window.runUpscaleJob = async function() {
         else resultGal.appendChild(img);
 
         const autoDl = document.getElementById('autoDlCheck');
-        if (autoDl && autoDl.checked) saveToMobileGallery(finalB64);
+        if (autoDl && autoDl.checked) saveToMobileGallery(finalB64, 'bojro', upscaleScaleTag, upscaleSourceSeed);
         // Sends a completion notification for Upscale jobs (only fires while backgrounded).
         await sendCompletionNotification("Upscale Complete: Image Ready");
     } catch (e) {
@@ -2821,7 +2895,9 @@ window.finishDeleteAction = function(item) {
 
 window.downloadCurrent = function() {
     const src = document.getElementById('fsImage').src;
-    saveToMobileGallery(src);
+    // Upscale results keep their scale and seed in the name.
+    const upscale = currentGalleryImages[currentGalleryIndex]?.upscale;
+    saveToMobileGallery(src, 'bojro', upscale ? upscale.scale : '', upscale ? upscale.seed : null);
 }
 
 // Closing returns to the page the viewed image belongs to (only when opened from the paginated grid).
@@ -2847,6 +2923,7 @@ window.analyzeCurrentFs = async () => {
     }
     window.switchTab('ana');
     window.closeFsModal();
+    if (typeof refreshAnalyzerTextSizing === 'function') refreshAnalyzerTextSizing();
     // Scrolls to the top, again on the next frame once the tab has laid out.
     window.scrollTo({ top: 0, behavior: 'instant' });
     requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'instant' }));
