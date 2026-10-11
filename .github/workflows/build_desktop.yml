@@ -23,13 +23,12 @@ permissions:
 jobs:
   build-windows:
     runs-on: windows-latest
-    defaults:
-      run:
-        working-directory: ./desktop_server
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -42,12 +41,15 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
+        working-directory: ./desktop_server
 
       - name: Build onedir application
         run: pyinstaller --noconfirm --onedir --windowed --icon="app.ico" --add-data "app.ico;." main.py
+        working-directory: ./desktop_server
 
       - name: Create release archive
         run: Compress-Archive -Path .\dist\main -DestinationPath .\BojroDevPower-v6-win64.zip -Force
+        working-directory: ./desktop_server
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
@@ -56,7 +58,8 @@ jobs:
           path: desktop_server/BojroDevPower-v6-win64.zip
           if-no-files-found: error
 
-      - name: Attach zip to existing GitHub Release
+      - name: Determine Target Release Tag
+        id: get_tag
         if: ${{ github.event_name == 'release' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/') }}
         shell: bash
         env:
@@ -64,20 +67,28 @@ jobs:
           INPUT_TAG: ${{ inputs.release_tag }}
         run: |
           if [ -n "$INPUT_TAG" ]; then
-            TARGET_TAG="$INPUT_TAG"
+            TAG="$INPUT_TAG"
           elif [ "${{ github.event_name }}" = "release" ]; then
-            TARGET_TAG="${{ github.event.release.tag_name }}"
+            TAG="${{ github.event.release.tag_name }}"
           elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            TARGET_TAG="${GITHUB_REF#refs/tags/}"
+            TAG="${GITHUB_REF#refs/tags/}"
           else
-            # Query GitHub CLI for the latest published release tag
-            TARGET_TAG=$(gh release view --json tagName -q .tagName)
+            TAG=$(gh release list --limit 1 --json tagName -q '.[0].tagName' 2>/dev/null || echo "")
           fi
 
-          if [ -z "$TARGET_TAG" ]; then
-            echo "Error: No existing release found on GitHub."
+          if [ -z "$TAG" ]; then
+            echo "Error: No published GitHub release found to attach artifact."
             exit 1
           fi
 
-          echo "Uploading BojroDevPower-v6-win64.zip to existing release: $TARGET_TAG"
-          gh release upload "$TARGET_TAG" desktop_server/BojroDevPower-v6-win64.zip --clobber
+          echo "target_tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Target release tag: $TAG"
+
+      - name: Attach zip to GitHub Release
+        if: ${{ github.event_name == 'release' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/') }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.get_tag.outputs.target_tag }}
+          files: desktop_server/BojroDevPower-v6-win64.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
