@@ -1,7 +1,7 @@
 {
-  "id": "Sadness Shared",
-  "title": "A Failed Attempt",
-  "message": "I developed the app as a 17-year-old boy who was interested in running generations on PC efficiently by sending commands from mobile. I made a basic page, then added generation parameters, and so on. I worked on it solo until it satisfied all my wishes. I never thought it would ever grow this much—so much so that even I am having a difficult time navigating through the sea of code. After Bungle's patch, I feel like the app is now fulfilled and completed; ComfyUI works pretty well too. So, I thought I should transpile this full codebase to Kotlin. Since I'm seventeen, I don't have any bank accounts, cards, or anything else. Also, my country doesn't use USD, and I can't afford to buy AI subscriptions either. Even if I could, it would take months to rebuild the full codebase in my opinion. It must be mentioned that no AI can even hold the context to map out the whole index file anyway, let alone other files. Also, DOMs are not easy to transpile. The main reason for this sob story is: I am extremely sorry, but I won't be able to provide a better native Android Kotlin experience to you guys anytime soon. You'll have to deal with this WebView for now. Cheers, and I'll be delivering quality-of-life updates and bug fixes in this WebView!",
+  "id": "BojroPowerv6 Release",
+  "title": "The wake machine is up.",
+  "message": "I just released the Bojrodev power v6 portable zip on the latest release. Feel free to check it out.",
   "type": "info",
   "date": "2026-10-13",
   "active": true
