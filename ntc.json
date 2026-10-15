@@ -1,8 +1,8 @@
 {
-  "id": "BojroPowerv6 Release",
-  "title": "The wake machine is up.",
-  "message": "I just released the Bojrodev power v6 portable zip on the latest release. Feel free to check it out.",
+  "id": "Bugfix",
+  "title": "ComfyUi inpaint bug is fixed.",
+  "message": "I just released a bugfix for comfyui!",
   "type": "info",
-  "date": "2026-10-13",
+  "date": "2026-10-16",
   "active": true
 }
