@@ -1539,10 +1539,71 @@ async function importMultipleTemplates(event) {
 
 let comfyBaseImage = null; // Stores the clean, original image without orange lines
 
+// Injects a scoped style rule once so non-canvas controls inside #view-inp hide cleanly during Comfy masking
+function ensureComfyMaskingStyles() {
+    if (document.getElementById('comfy-mask-isolation-style')) return;
+    const style = document.createElement('style');
+    style.id = 'comfy-mask-isolation-style';
+    style.textContent = `
+        #view-inp.comfy-mode-active .comfy-isolated-hidden {
+            display: none !important;
+        }
+    `;
+    document.head.appendChild(style);
+}
+
+// Hides all Forge/WebUI form sections inside #view-inp & #canvasWrapper, keeping only the Comfy bar, canvas, and brush tools
+function isolateComfyMaskingDOM(isolate) {
+    ensureComfyMaskingStyles();
+    const viewInp = document.getElementById('view-inp');
+    const canvasWrap = document.getElementById('canvasWrapper');
+    if (!viewInp || !canvasWrap) return;
+
+    if (!isolate) {
+        viewInp.querySelectorAll('.comfy-isolated-hidden').forEach(el => {
+            el.classList.remove('comfy-isolated-hidden');
+        });
+        return;
+    }
+
+    const comfyBar = document.getElementById('comfy-mask-bar');
+    const paintCanvas = document.getElementById('paintCanvas');
+    const brushControls = document.getElementById('inpaintOnlyControls');
+
+    // 1. Hide top INPAINT / IMG2IMG / UPSCALE switcher and upscale wrapper
+    const topSwitcher = document.getElementById('inpTopModeSwitcher');
+    if (topSwitcher) topSwitcher.classList.add('comfy-isolated-hidden');
+    const upscaleWrap = document.getElementById('upscaleWrapper');
+    if (upscaleWrap) upscaleWrap.classList.add('comfy-isolated-hidden');
+
+    // 2. Hide any direct child of #view-inp that isn't #canvasWrapper
+    Array.from(viewInp.children).forEach(child => {
+        if (child !== canvasWrap) {
+            child.classList.add('comfy-isolated-hidden');
+        }
+    });
+
+    // 3. Inside #canvasWrapper, keep ONLY #comfy-mask-bar, the canvas box, and #inpaintOnlyControls (DRAW/ERASE + BRUSH SIZE)
+    Array.from(canvasWrap.children).forEach(child => {
+        const isComfyBar = (child === comfyBar);
+        const hasCanvas = paintCanvas && (child === paintCanvas || child.contains(paintCanvas));
+        const hasBrushTools = brushControls && (child === brushControls || child.contains(brushControls));
+
+        if (!isComfyBar && !hasCanvas && !hasBrushTools) {
+            child.classList.add('comfy-isolated-hidden');
+        }
+    });
+
+    // 4. Force brush tools visible even if user was previously in img2img or upscale mode
+    if (brushControls) brushControls.classList.remove('hidden');
+    const maskToolBtns = document.getElementById('maskToolButtons');
+    if (maskToolBtns) maskToolBtns.classList.remove('hidden');
+}
+
 async function startComfyMasking(nodeId) {
     // 1. Get the image filename from the node
-    const node = comfyLoadedWorkflow[nodeId];
-    const currentImageName = node.inputs.image;
+    const node = comfyLoadedWorkflow ? comfyLoadedWorkflow[nodeId] : null;
+    const currentImageName = node && node.inputs ? node.inputs.image : null;
     
     if (!currentImageName) {
         await window.appAlert("Please upload a base image first!");
@@ -1552,21 +1613,12 @@ async function startComfyMasking(nodeId) {
     // 2. Set Global Flags
     isComfyMaskingMode = true;
     comfyMaskTargetNodeId = nodeId;
+    if (typeof activeEditorMode !== 'undefined') activeEditorMode = 'mask';
 
     // 3. Switch to the Inpaint Tab
-    if(typeof switchTab === 'function') switchTab('inp');
+    if (typeof switchTab === 'function') switchTab('inp');
     
-    // 4. UI Hacking: Hide normal buttons
-    const view = document.getElementById('view-inp');
-    view.classList.add('comfy-mode-active'); 
-    
-    document.getElementById('img-input-container').classList.add('hidden');
-    document.getElementById('canvasWrapper').classList.remove('hidden');
-    if (typeof updateInpResultsAreaVisibility === 'function') updateInpResultsAreaVisibility();
-    // Makes canvasWrapper visible independently of setInpaintTopMode().
-    if (typeof syncThumbOnlySliderPosition === 'function') syncThumbOnlySliderPosition('brushSize');
-
-    // 5. Create the "APPLY MASK" Toolbar
+    // 4. Create the "APPLY MASK" Toolbar if needed
     let comfyBar = document.getElementById('comfy-mask-bar');
     if (!comfyBar) {
         comfyBar = document.createElement('div');
@@ -1575,8 +1627,6 @@ async function startComfyMasking(nodeId) {
         comfyBar.style.cssText = "margin-top:10px; background:var(--accent-secondary); border:1px solid var(--accent-primary);";
         comfyBar.innerHTML = `
             <div class="row" style="justify-content:space-between; align-items:center;">
-                
-                <!-- NEW MODE SWITCHER IN THE TOP BAR -->
                 <div class="row" style="width:auto; gap:10px; align-items:center;">
                     <label style="color:white; font-weight:900; margin:0;"><i data-lucide="brush"></i> EDIT:</label>
                     <div class="row" style="width:auto; gap:4px; background:rgba(0,0,0,0.3); padding:4px; border-radius:6px;">
@@ -1586,7 +1636,6 @@ async function startComfyMasking(nodeId) {
                     </div>
                 </div>
 
-                <!-- APPLY/CANCEL BUTTONS -->
                 <div class="row" style="width:auto; gap:10px;">
                     <button class="btn-small" onclick="cancelComfyMasking()" style="background:rgba(0,0,0,0.2); color:white; border:none;">CANCEL</button>
                     <button class="btn-small" onclick="finishComfyMasking()" style="background:white; color:var(--accent-secondary); font-weight:900; border:none;">APPLY</button>
@@ -1598,77 +1647,125 @@ async function startComfyMasking(nodeId) {
     }
     comfyBar.classList.remove('hidden');
 
+    // Reset mode toggle UI to MASK
+    if (typeof setCanvasMode === 'function') setCanvasMode('mask');
+    if (typeof setBrushMode === 'function') setBrushMode('draw');
+
+    // 5. Isolate Comfy Masking UI (hides Prompt, LoRA, Negative, Params, Generate, etc.)
+    const view = document.getElementById('view-inp');
+    view.classList.add('comfy-mode-active');
+    document.getElementById('img-input-container').classList.add('hidden');
+    document.getElementById('canvasWrapper').classList.remove('hidden');
+    isolateComfyMaskingDOM(true);
+
+    if (typeof updateInpResultsAreaVisibility === 'function') updateInpResultsAreaVisibility();
+    if (typeof syncThumbOnlySliderPosition === 'function') syncThumbOnlySliderPosition('brushSize');
+
     // 6. Load the Image
-    const imageUrl = `http://${comfyHost}/view?filename=${currentImageName}&type=input`;
+    const imageUrl = `http://${comfyHost}/view?filename=${encodeURIComponent(currentImageName)}&type=input&t=${Date.now()}`;
     const img = new Image();
     img.crossOrigin = "Anonymous";
     img.src = imageUrl;
     
     img.onload = () => {
-        // STORE THE CLEAN IMAGE GLOBALLLY
         comfyBaseImage = img;
 
         const canvas = document.getElementById('paintCanvas');
         const ctx = canvas.getContext('2d');
         
-        // Resize canvases
+        if (typeof resetPaintZoom === 'function') resetPaintZoom();
+
+        // Resize visual canvas and set CSS background (required by editor.js's strokeLayerCanvas rendering)
         canvas.width = img.width;
         canvas.height = img.height;
+        canvas.style.backgroundImage = `url("${imageUrl}")`;
+        canvas.style.backgroundSize = "100% 100%";
+        canvas.style.touchAction = 'none';
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
         
-        // Update Globals for the engine
         if (typeof mainCanvas !== 'undefined') {
             mainCanvas = canvas;
             mainCtx = ctx;
         }
+
+        // Resize & clear strokeLayerCanvas so strokes align and don't wipe the image
+        if (typeof strokeLayerCanvas !== 'undefined' && strokeLayerCanvas) {
+            strokeLayerCanvas.width = img.width;
+            strokeLayerCanvas.height = img.height;
+            strokeLayerCtx.clearRect(0, 0, strokeLayerCanvas.width, strokeLayerCanvas.height);
+        }
         
-        // Draw image on the visual canvas (for user to see)
-        ctx.drawImage(img, 0, 0);
-        
-        // SETUP THE MASK CANVAS (The invisible one)
-        // This is where the magic happens. We clear it to transparent.
-        // Your engine.js will draw strokes here when you drag your finger.
+        // Resize & clear maskCanvas to transparent
         if (typeof maskCanvas !== 'undefined' && maskCanvas) {
             maskCanvas.width = img.width;
             maskCanvas.height = img.height;
             const mCtx = maskCanvas.getContext('2d');
-            mCtx.clearRect(0,0, maskCanvas.width, maskCanvas.height);
+            mCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+        }
+
+        // Reset undo history for this Comfy edit session
+        if (typeof historyStates !== 'undefined' && typeof BLANK_HISTORY_MARKER !== 'undefined') {
+            if (typeof revokeHistoryState === 'function') historyStates.forEach(revokeHistoryState);
+            historyStates = [BLANK_HISTORY_MARKER];
         }
         
-        if(window.lucide) lucide.createIcons();
+        if (window.lucide) lucide.createIcons();
+    };
+
+    img.onerror = async () => {
+        await window.appAlert("Could not load image from ComfyUI server. Make sure ComfyUI is connected.", { title: 'Image Load Error', danger: true });
+        cancelComfyMasking();
     };
 }
 
-function cancelComfyMasking() {
+function cancelComfyMasking(stayOnCurrentTab = false) {
     isComfyMaskingMode = false;
     comfyMaskTargetNodeId = null;
-    comfyBaseImage = null; // Clear memory
+    comfyBaseImage = null;
     
-    // 1. Remove the special CSS class
-    document.getElementById('view-inp').classList.remove('comfy-mode-active');
+    // 1. Remove Comfy isolation classes & hide toolbar
+    const viewInp = document.getElementById('view-inp');
+    if (viewInp) viewInp.classList.remove('comfy-mode-active');
+    isolateComfyMaskingDOM(false);
     
-    // 2. Hide the Comfy Toolbar
     const bar = document.getElementById('comfy-mask-bar');
-    if(bar) bar.classList.add('hidden');
+    if (bar) bar.classList.add('hidden');
     
-    // 3. CLEAN THE CANVAS
+    // 2. Clean the canvases
     const canvas = document.getElementById('paintCanvas');
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
+    if (canvas) {
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        canvas.style.backgroundImage = 'none';
+    }
+    if (typeof strokeLayerCanvas !== 'undefined' && strokeLayerCanvas) {
+        strokeLayerCtx.clearRect(0, 0, strokeLayerCanvas.width, strokeLayerCanvas.height);
+    }
     if (typeof maskCanvas !== 'undefined' && maskCanvas) {
         const mCtx = maskCanvas.getContext('2d');
         mCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
     }
 
-    // 4. RESET UI STATE (Fix for the "Giant Black Image")
-    // Hide the canvas wrapper
-    document.getElementById('canvasWrapper').classList.add('hidden');
-    // Show the original "Upload Box"
-    document.getElementById('img-input-container').classList.remove('hidden');
+    // 3. Restore normal INP tab state (restores upload box if no sourceImageB64, or restores loaded INP image)
+    const hasNormalInpImage = (typeof sourceImageB64 !== 'undefined' && !!sourceImageB64);
+    const topSwitcher = document.getElementById('inpTopModeSwitcher');
+    if (topSwitcher) topSwitcher.classList.toggle('hidden', !hasNormalInpImage);
+
+    if (hasNormalInpImage && typeof resetInpaintCanvas === 'function') {
+        resetInpaintCanvas();
+    }
+    if (typeof setInpaintTopMode === 'function' && typeof currentInpaintTopMode !== 'undefined') {
+        setInpaintTopMode(currentInpaintTopMode);
+    } else {
+        document.getElementById('canvasWrapper')?.classList.add('hidden');
+        document.getElementById('img-input-container')?.classList.remove('hidden');
+    }
     if (typeof updateInpResultsAreaVisibility === 'function') updateInpResultsAreaVisibility();
 
-    // 5. Switch back to Comfy Tab
-    if(typeof switchTab === 'function') switchTab('comfy');
+    // 4. Switch back to Comfy Tab unless caller requested staying on current tab
+    if (!stayOnCurrentTab && typeof switchTab === 'function') {
+        switchTab('comfy');
+    }
 }
 
 async function finishComfyMasking() {
@@ -1686,16 +1783,15 @@ async function finishComfyMasking() {
     // 2. Draw the clean base image first
     ctx.drawImage(comfyBaseImage, 0, 0);
 
-    // 3. Apply Compositing based on Mode
-    if (typeof maskCanvas !== 'undefined' && maskCanvas) {
+    // 3. Apply Compositing based on Mode (strokeLayerCanvas has clean alpha cutouts for both draw & erase)
+    const layerSource = (typeof strokeLayerCanvas !== 'undefined' && strokeLayerCanvas) ? strokeLayerCanvas : maskCanvas;
+    if (layerSource) {
         if (typeof activeEditorMode !== 'undefined' && activeEditorMode === 'paint') {
-            // PAINT MODE: Bake drawn RGB colors on top
             ctx.globalCompositeOperation = 'source-over';
         } else {
-            // MASK MODE: Punch transparent holes
             ctx.globalCompositeOperation = 'destination-out';
         }
-        ctx.drawImage(maskCanvas, 0, 0);
+        ctx.drawImage(layerSource, 0, 0);
     }
 
     // 4. Export composite image to Blob
@@ -1705,8 +1801,6 @@ async function finishComfyMasking() {
         if (btn) btn.innerText = "UPLOADING...";
 
         const formData = new FormData();
-        
-        // Dynamically name the file based on the operation
         const prefix = (typeof activeEditorMode !== 'undefined' && activeEditorMode === 'paint') ? 'paint' : 'mask';
         const filename = `${prefix}_edit_${Date.now()}.png`;
         
@@ -1725,18 +1819,18 @@ async function finishComfyMasking() {
             
             const thumbImg = document.getElementById(`thumb_${comfyMaskTargetNodeId}`);
             const labelSpan = document.getElementById(`label_${comfyMaskTargetNodeId}`);
+            const placeholder = document.getElementById(`placeholder_${comfyMaskTargetNodeId}`);
             
             if (thumbImg) {
-                thumbImg.src = `http://${comfyHost}/view?filename=${data.name}&type=input&t=${Date.now()}`;
+                thumbImg.src = `http://${comfyHost}/view?filename=${encodeURIComponent(data.name)}&type=input&t=${Date.now()}`;
                 thumbImg.style.display = 'block';
             }
-            if (labelSpan) {
-                labelSpan.innerText = data.name; 
-            }
+            if (placeholder) placeholder.style.display = 'none';
+            if (labelSpan) labelSpan.innerText = data.name; 
             
             if (btn) btn.innerText = oldText;
             
-            // 6. Cleanup & Reset Canvas
+            // 6. Cleanup & Return to Comfy Tab
             cancelComfyMasking(); 
         } catch (e) {
             await window.appAlert("Upload Failed: " + e.message, { title: 'Upload Failed', danger: true });
