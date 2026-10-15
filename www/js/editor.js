@@ -693,7 +693,7 @@ function initMainCanvas() {
 
     mainCanvas.addEventListener('touchstart', (e) => {
         // Let native scroll handle it (see updateCanvasTouchBehavior()).
-        if (currentInpaintTopMode === 'img2img') return;
+        if (currentInpaintTopMode === 'img2img' && !(typeof isComfyMaskingMode !== 'undefined' && isComfyMaskingMode)) return;
         e.preventDefault();
         blurActiveTextField();
         if (e.touches.length === 2) {
@@ -727,7 +727,7 @@ function initMainCanvas() {
         passive: false
     });
     mainCanvas.addEventListener('touchmove', (e) => {
-        if (currentInpaintTopMode === 'img2img') return;
+        if (currentInpaintTopMode === 'img2img' && !(typeof isComfyMaskingMode !== 'undefined' && isComfyMaskingMode)) return;
         e.preventDefault();
         if (e.touches.length === 2 && paintPinchStartDist > 0) {
             const dist = getPaintTouchDist(e.touches[0], e.touches[1]);
@@ -763,7 +763,7 @@ function initMainCanvas() {
         passive: false
     });
     mainCanvas.addEventListener('touchend', (e) => {
-        if (currentInpaintTopMode === 'img2img') return;
+        if (currentInpaintTopMode === 'img2img' && !(typeof isComfyMaskingMode !== 'undefined' && isComfyMaskingMode)) return;
         e.preventDefault();
         if (e.touches.length < 2) paintPinchStartDist = 0;
         if (e.touches.length === 0) {
@@ -783,7 +783,7 @@ function initMainCanvas() {
     });
     // As editorCanvas's touchcancel: reset isDrawing and paintPinchStartDist after an interrupted gesture.
     mainCanvas.addEventListener('touchcancel', () => {
-        if (currentInpaintTopMode === 'img2img') return;
+        if (currentInpaintTopMode === 'img2img' && !(typeof isComfyMaskingMode !== 'undefined' && isComfyMaskingMode)) return;
         // An interrupted gesture isn't a completed tap: discard a pending paint.
         if (pendingPaintTimer) {
             clearTimeout(pendingPaintTimer);
@@ -813,6 +813,12 @@ function blurActiveTextField() {
 // FIX: Set image as background instead of drawing it (allows real erasing)
 // Clears the loaded Inpaint image and returns to the upload screen (without NEW IMAGE's file picker on top).
 window.clearInpaintImage = function() {
+    // If the X button was clicked during ComfyUI masking, exit Comfy mode cleanly
+    if (typeof isComfyMaskingMode !== 'undefined' && isComfyMaskingMode && typeof cancelComfyMasking === 'function') {
+        cancelComfyMasking(true); // true = stay on INP tab and show the Upload Image box
+        return;
+    }
+
     sourceImageB64 = null;
     editorImage = null;
     // Belongs to the image just cleared - see inpSourceMetadata (globals.js).
@@ -837,6 +843,11 @@ window.clearInpaintImage = function() {
             for (let u = 0; u <= 2; u++) clearControlNetImage(mode, u);
         });
     }
+
+    // Ensure no leftover Comfy classes block the upload container
+    const viewInp = document.getElementById('view-inp');
+    if (viewInp) viewInp.classList.remove('comfy-mode-active');
+    if (typeof isolateComfyMaskingDOM === 'function') isolateComfyMaskingDOM(false);
 
     document.getElementById('inpTopModeSwitcher').classList.add('hidden');
     // Clearing the image keeps the current sub-mode: re-apply its visibility rules via currentInpaintTopMode.
@@ -889,7 +900,7 @@ function resetInpaintCanvas() {
 }
 
 function startPaint(e) {
-    if (currentInpaintTopMode === 'img2img') return; // no mask painting in img2img mode
+    if (currentInpaintTopMode === 'img2img' && !(typeof isComfyMaskingMode !== 'undefined' && isComfyMaskingMode)) return; // no mask painting in img2img mode
     isDrawing = true;
     // Cached once for the whole stroke (see globals.js).
     currentStrokeBrushSize = document.getElementById('brushSize').value;
@@ -926,6 +937,7 @@ function painting(e) {
     const y = (clientY - rect.top) * scaleY;
 
     const size = currentStrokeBrushSize;
+    const strokeAlpha = (typeof isComfyMaskingMode !== 'undefined' && isComfyMaskingMode && typeof activeEditorMode !== 'undefined' && activeEditorMode === 'paint') ? 1.0 : 0.5;
 
     maskCtx.lineWidth = size;
     maskCtx.lineCap = 'round';
@@ -942,7 +954,7 @@ function painting(e) {
         strokeLayerCtx.stroke();
 
         mainCtx.clearRect(0, 0, mainCanvas.width, mainCanvas.height);
-        mainCtx.globalAlpha = 0.5;
+        mainCtx.globalAlpha = strokeAlpha;
         mainCtx.drawImage(strokeLayerCanvas, 0, 0);
         mainCtx.globalAlpha = 1;
 
@@ -962,7 +974,7 @@ function painting(e) {
         strokeLayerCtx.globalCompositeOperation = 'source-over';
 
         mainCtx.clearRect(0, 0, mainCanvas.width, mainCanvas.height);
-        mainCtx.globalAlpha = 0.5;
+        mainCtx.globalAlpha = strokeAlpha;
         mainCtx.drawImage(strokeLayerCanvas, 0, 0);
         mainCtx.globalAlpha = 1;
 
@@ -1287,18 +1299,17 @@ THUMB_ONLY_SLIDER_IDS.forEach(initThumbOnlySlider);
 // The thumb position comes from the input's rendered width, which a rotation, resize or the tab becoming visible can change without the value changing.
 window.addEventListener('resize', () => THUMB_ONLY_SLIDER_IDS.forEach(syncThumbOnlySliderPosition));
 
+
 // 1. Mode Switching & UI Logic
 function setCanvasMode(mode) {
     activeEditorMode = mode;
     
-    document.getElementById('canvas-mode-mask').classList.toggle('active', mode === 'mask');
-    document.getElementById('canvas-mode-paint').classList.toggle('active', mode === 'paint');
+    document.getElementById('canvas-mode-mask')?.classList.toggle('active', mode === 'mask');
+    document.getElementById('canvas-mode-paint')?.classList.toggle('active', mode === 'paint');
     
     const colorPicker = document.getElementById('paintColorPicker');
-    if (mode === 'paint') {
-        colorPicker.classList.remove('hidden');
-    } else {
-        colorPicker.classList.add('hidden');
+    if (colorPicker) {
+        colorPicker.classList.toggle('hidden', mode !== 'paint');
     }
 }
 
@@ -1306,20 +1317,16 @@ function updatePaintColor(hexColor) {
     activePaintColor = hexColor;
 }
 
-// 2. The Engine Hijack (Forces the brush to change color)
+// 2. The Engine Hijack (Applies chosen paint color in Comfy PAINT mode without breaking destination-out erasers)
 const originalStroke = CanvasRenderingContext2D.prototype.stroke;
 CanvasRenderingContext2D.prototype.stroke = function() {
-    // Only hijack the color if we are inside ComfyUI editing mode
     if (typeof isComfyMaskingMode !== 'undefined' && isComfyMaskingMode) {
-        if (typeof activeEditorMode !== 'undefined' && activeEditorMode === 'paint') {
-            // Apply chosen paint color
-            this.strokeStyle = typeof activePaintColor !== 'undefined' ? activePaintColor : '#ff0000';
-        } else {
-            // Force white for standard masking so cutouts keep working
-            this.strokeStyle = '#ffffff'; 
+        if (this.globalCompositeOperation !== 'destination-out') {
+            if (typeof activeEditorMode !== 'undefined' && activeEditorMode === 'paint') {
+                this.strokeStyle = typeof activePaintColor !== 'undefined' ? activePaintColor : '#ff0000';
+            }
         }
     }
-    // Continue drawing the line normally
     originalStroke.apply(this, arguments);
 };
 
@@ -1327,27 +1334,20 @@ CanvasRenderingContext2D.prototype.stroke = function() {
 const originalClearMask = window.clearMask;
 window.clearMask = function() {
     if (typeof isComfyMaskingMode !== 'undefined' && isComfyMaskingMode) {
-        // Wipe visible canvas
-        const canvas = document.getElementById('paintCanvas');
-        const ctx = canvas.getContext('2d');
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        
-        // Redraw clean base image
-        if (typeof comfyBaseImage !== 'undefined' && comfyBaseImage) {
-            ctx.drawImage(comfyBaseImage, 0, 0);
+        if (mainCtx && mainCanvas) {
+            mainCtx.clearRect(0, 0, mainCanvas.width, mainCanvas.height);
         }
-        
-        // Wipe invisible mask canvas
-        if (typeof maskCanvas !== 'undefined' && maskCanvas) {
-            const mCtx = maskCanvas.getContext('2d');
-            mCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+        if (typeof strokeLayerCtx !== 'undefined' && strokeLayerCanvas) {
+            strokeLayerCtx.clearRect(0, 0, strokeLayerCanvas.width, strokeLayerCanvas.height);
         }
-        
-        // Reset brush stroke arrays if they exist in your editor.js
-        if (typeof strokes !== 'undefined') strokes = [];
-        if (typeof paths !== 'undefined') paths = [];
+        if (typeof maskCtx !== 'undefined' && maskCanvas) {
+            maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+        }
+        if (typeof historyStates !== 'undefined') {
+            if (typeof revokeHistoryState === 'function') historyStates.forEach(revokeHistoryState);
+            historyStates = [BLANK_HISTORY_MARKER];
+        }
     } else if (typeof originalClearMask === 'function') {
-        // Do normal behavior if not in Comfy Mode
         originalClearMask();
     }
 };
