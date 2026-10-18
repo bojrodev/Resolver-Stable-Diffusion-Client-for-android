@@ -1,8 +1,8 @@
 {
-  "id": "Bugfix",
-  "title": "ComfyUi inpaint bug is fixed.",
-  "message": "I just released a bugfix for comfyui!",
+  "id": "Uhm!!",
+  "title": "kotlin-beta-announcement",
+  "message": "I started working on a kotlin alternative for this app, and will start beta testing soon, if anybody is interested in testing the app, let me know in the issues.",
   "type": "info",
-  "date": "2026-10-16",
+  "date": "2026-10-18",
   "active": true
 }
