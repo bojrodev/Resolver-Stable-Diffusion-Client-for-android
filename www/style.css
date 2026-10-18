@@ -281,8 +281,8 @@ canvas {
 /* Lets a long VAE/Text Encoder filename shrink and ellipsise instead of pushing its column out of bounds: flex items default to min-width:auto. Targeted at columns containing these trigger buttons rather than changing .col globally. */
 .col:has(.model-picker-trigger) { min-width: 0; }
 
-/* At CFG 1 the negative prompt has no effect: it is visually flagged as inert but remains editable. */
-.neg-prompt-inert { color: var(--text-muted) !important; }
+/* At CFG 1 the negative prompt has no effect: dimmed and not editable (updateNegPromptDimming(), ui.js). */
+.neg-prompt-inert { color: var(--text-muted) !important; opacity: 0.4; pointer-events: none; }
 .mb-5 { margin-bottom: 5px; }
 .c-p { color: var(--accent-primary); font-weight: bold; }
 .c-s { color: var(--accent-secondary); font-weight: bold; }
@@ -352,6 +352,11 @@ h2::after {
     animation: glitch-anim2 1.5s infinite linear alternate-reverse;
 }
 
+h2.glitch-paused::before,
+h2.glitch-paused::after {
+    animation-play-state: paused;
+}
+
 @keyframes glitch-anim {
     0% { clip: rect(10px, 9999px, 40px, 0); }
     20% { clip: rect(30px, 9999px, 60px, 0); }
@@ -404,7 +409,7 @@ textarea {
     resize: none !important;
 }
 
-input:focus, select:focus, textarea:focus {
+input:not(.bojro-switch):focus, select:focus, textarea:focus {
     outline: none;
     border-color: var(--accent-primary);
     background: var(--bg-input-focus);
@@ -455,7 +460,7 @@ input:focus, select:focus, textarea:focus {
 }
 
 /* Readonly fields (like logs) */
-input[readonly], textarea[readonly] {
+input[readonly]:not([data-touch-lock]), textarea[readonly]:not([data-touch-lock]) {
     background: var(--bg-panel);
     opacity: 0.7;
 }
@@ -577,6 +582,11 @@ input[readonly], textarea[readonly] {
 }
 .cn-slider-wrap .slider-fake-thumb {
     left: calc(9px + (100% - 18px) * var(--p, 0));
+}
+/* A ControlNet setting the chosen preprocessor doesn't use (Forge hides it): dimmed and not sent (refreshControlNetParams(), network.js). */
+.cn-param-off {
+    opacity: 0.4;
+    pointer-events: none;
 }
 /* The original number inputs stay in the DOM as the source of truth but are never shown. */
 .cn-slider-source {
@@ -1289,6 +1299,10 @@ body.hide-gallery-badges .gal-badges {
 
 .gen-result {
     width: 100%;
+    height: auto; /* the width/height attributes only give the aspect ratio */
+    /* Not drawn while scrolled off screen; its height still comes from the width/height attributes. */
+    content-visibility: auto;
+    contain-intrinsic-size: auto 300px;
     border-radius: var(--radius-md);
     box-shadow: var(--shadow-soft);
     border: 1px solid var(--border-color);
@@ -1316,8 +1330,8 @@ body.hide-gallery-badges .gal-badges {
     z-index: 300;
 }
 
-/* Modals with text inputs are anchored to the top rather than centred, so the keyboard and varying content height don't push them out of view. Covers loraConfigModal, styleEditorModal and llmModal (Magic Prompt) as well as the pickers. */
-#loraModal, #img2imgPresetModal, #styleModal, #saacModal, #loraConfigModal, #styleEditorModal, #llmModal {
+/* Modals with text inputs are anchored to the top rather than centred, so the keyboard and varying content height don't push them out of view. */
+#loraModal, #img2imgPresetModal, #styleModal, #saacModal, #loraConfigModal, #styleEditorModal, #llmModal, #checkpointManagerModal, #checkpointConfigModal {
     justify-content: flex-start;
     padding-top: 40px;
 }
@@ -1589,6 +1603,54 @@ body.hide-gallery-badges .gal-badges {
     transform: scale(1.2);
 }
 
+/* Scroll indicator: a wide touch strip with a thin track and thumb (see ui.js). */
+.scroll-indicator-wrap {
+    position: relative;
+    display: flex;
+}
+.has-scroll-indicator {
+    padding-right: 14px;
+}
+.scroll-indicator {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: 0;
+    width: 20px;
+    touch-action: none;
+    display: none;
+}
+.scroll-indicator.visible {
+    display: block;
+}
+.scroll-indicator::before {
+    content: '';
+    position: absolute;
+    top: 2px;
+    bottom: 2px;
+    right: 2px;
+    width: 4px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.06);
+}
+.scroll-indicator-thumb {
+    position: absolute;
+    right: 2px;
+    width: 4px;
+    border-radius: 2px;
+    background: var(--accent-primary);
+    opacity: 0.45;
+    transition: opacity 0.2s, width 0.15s;
+    pointer-events: none;
+}
+.scroll-indicator.scrolling .scroll-indicator-thumb {
+    opacity: 0.9;
+}
+.scroll-indicator.dragging .scroll-indicator-thumb {
+    width: 6px;
+    right: 1px;
+}
+
 /* LoRA Item Styles */
 .lora-item-row {
     background: var(--bg-panel);
@@ -1783,8 +1845,21 @@ button[data-kind="cn-resize-mode"] {
    ========================================= */
 #fullScreenModal {
     background: #000000; /* Always black for image viewing */
+    backdrop-filter: none; /* opaque, so the blur would only cost frames */
+    touch-action: none; /* nothing in the viewer scrolls the page behind it */
     flex-direction: column !important; /* Original fix maintained */
     justify-content: space-between !important;
+}
+
+/* The app behind the open viewer is skipped entirely (style, layout, paint and its images); "auto" keeps its height, so the scroll position stays. */
+.container {
+    contain-intrinsic-size: auto 0px;
+}
+body.fs-viewer-open .container {
+    content-visibility: hidden;
+}
+body.fs-viewer-open .dock-wrapper {
+    visibility: hidden;
 }
 
 .lightbox-container {
@@ -1795,6 +1870,7 @@ button[data-kind="cn-resize-mode"] {
     align-items: center;
     justify-content: center;
     overflow: hidden;
+    touch-action: none; /* pinch and pan are handled in engine.js */
 }
 
 .lightbox-img {
@@ -1809,6 +1885,52 @@ button[data-kind="cn-resize-mode"] {
     pointer-events: none;
     will-change: transform;
     backface-visibility: hidden;
+}
+
+/* Auto-Delete Warning: the RECENT grid, with SAVED on images already saved to the phone. Viewing one from here
+   offers only close, download and delete. */
+.autodel-text { font-size: 13px; color: var(--text-main); margin: 4px 0 10px; line-height: 1.4; }
+.autodel-saved {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    padding: 3px 0; text-align: center;
+    font-size: 10px; font-weight: 900; letter-spacing: 1px; color: #fff;
+    background: rgba(0, 0, 0, 0.55);
+}
+#fullScreenModal.fs-from-autodelete button[onclick="editCurrentFs()"],
+#fullScreenModal.fs-from-autodelete #fsSendToCnBtn,
+#fullScreenModal.fs-from-autodelete #fsAnalyzeBtn { display: none !important; }
+
+/* Live Preview full screen: black like the viewer, no gestures. ABORT and GENERATE sit as QUEUE and GENERATE do on the Generate tab. */
+#lpFullscreen {
+    background: #000000;
+    backdrop-filter: none;
+    touch-action: none;
+    justify-content: space-between;
+}
+#lpFsControls { gap: var(--row-gap, 10px); }
+#lpFsControls .lp-fs-close {
+    flex: 0 0 44px;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border-radius: 50%;
+    background: #333;
+}
+#lpFsControls .lp-fs-close svg { width: 20px; height: 20px; }
+#lpFsControls .lp-fs-abort {
+    flex: 0 0 auto !important;
+    width: auto !important;
+    height: 44px !important;
+    margin: 0 !important;
+    padding: 0 6px !important;
+}
+#lpFsControls .lp-fs-gen { flex: 1 1 0 !important; }
+body.lp-fs-open .container { content-visibility: hidden; }
+body.lp-fs-open .dock-wrapper { visibility: hidden; }
+
+/* Tap the image to hide the toolbar (the status bar is hidden natively). */
+#fullScreenModal.fs-immersive .lightbox-controls {
+    display: none;
 }
 
 .lightbox-controls {
@@ -2064,7 +2186,7 @@ body.hide-gen-spinner #inpLoadingSpinner { display: none !important; }
     width: 100%;
 }
 
-#view-cfg input:focus {
+#view-cfg input:not(.bojro-switch):focus {
     border-color: var(--accent-primary);
     background: var(--bg-input-focus);
 }
@@ -2387,6 +2509,9 @@ button[onclick*="setComfyLoraStrength"] {
     overflow: hidden;
     position: relative;
     height: 100%;
+    /* Off-screen cards skip layout, so long lists stay quick to grow. */
+    content-visibility: auto;
+    contain-intrinsic-size: auto 135px;
 }
 
 /* --- THE NEON GLOW --- */
@@ -2751,3 +2876,175 @@ button[onclick*="setComfyLoraStrength"] {
     color: var(--text-muted);
     font-size: 12px;
 }
+
+/* Nothing under Copy Metadata unless the Additional Upscale Features fields follow. */
+#upscaleCopyMetaRow:has(+ #upscaleExpFields.hidden) {
+    margin-bottom: -3px !important; /* the label's line box hangs below its text */
+}
+
+/* Floating Brush Size above the dock (editor.js). */
+.floating-brush-bar {
+    position: fixed;
+    left: 50%;
+    transform: translateX(-50%);
+    width: calc(100% - 2 * clamp(10px, 4vw, 20px));
+    max-width: 500px;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 18px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-color);
+    border-radius: 30px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+    z-index: 100;
+}
+.floating-brush-bar label {
+    margin: 0;
+    font-size: 12px;
+    white-space: nowrap;
+}
+/* Brush size preview on the Inpaint canvas. */
+.brush-size-preview {
+    position: fixed;
+    border-radius: 50%;
+    border: 1px solid #000;
+    background: rgba(255, 165, 0, 0.5);
+    box-shadow: 0 0 4px rgba(0,0,0,0.6);
+    box-sizing: border-box;
+    pointer-events: none;
+    z-index: 101;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+.brush-size-preview.erase {
+    background: rgba(0, 0, 0, 0.25);
+    border-style: dashed;
+}
+.brush-size-preview.visible {
+    opacity: 1;
+    transition: none;
+}
+
+/* Data Usage Tracker (datausage.js). */
+.data-usage-pill {
+    position: fixed;
+    top: calc(env(safe-area-inset-top) + 8px);
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 5px 12px;
+    border-radius: 14px;
+    background: rgba(12, 12, 15, 0.85);
+    border: 1px solid var(--border-color);
+    color: #fff;
+    font-size: 14px; /* as .app-toast */
+    font-weight: 700;
+    white-space: pre;
+    z-index: 150;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+.data-usage-pill.visible {
+    opacity: 1;
+}
+.data-usage-summary {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+}
+.data-usage-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px;
+    margin-bottom: 8px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-panel);
+}
+.data-usage-thumb {
+    position: relative;
+    flex: 0 0 56px;
+    height: 56px;
+    border-radius: 6px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.05);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+}
+.data-usage-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+.data-usage-count {
+    position: absolute;
+    left: 3px;
+    bottom: 3px;
+}
+.data-usage-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+/* Always three single lines of the same height, evenly spaced. */
+.data-usage-info > div {
+    height: 18px;
+    white-space: nowrap;
+    overflow: hidden;
+}
+.data-usage-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-main);
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+.data-usage-live {
+    background: rgba(244, 67, 54, 0.35);
+}
+.data-usage-status {
+    position: absolute;
+    top: 3px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 2px 3px;
+    font-size: 8px;
+    letter-spacing: 0;
+    background: rgba(244, 67, 54, 0.85);
+}
+.data-usage-when {
+    font-size: 11px;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.data-usage-net {
+    background: rgba(33, 150, 243, 0.25);
+}
+.data-usage-net.mobile {
+    background: rgba(255, 152, 0, 0.3);
+}
+.data-usage-figures {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--text-main);
+}
+.data-usage-total {
+    margin-left: auto;
+    font-weight: 800;
+    color: var(--accent-primary);
+}
+
+/* Debug log (Config > Experimental). */
+.debug-log-text { flex: 1; min-height: 200px; overflow: auto; margin: 0; font-size: 10px; line-height: 1.4; white-space: pre-wrap; word-break: break-all; color: var(--text-main); user-select: text; -webkit-user-select: text; }

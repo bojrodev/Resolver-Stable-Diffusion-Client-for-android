@@ -56,15 +56,16 @@ window.LoraManager = {
     applyAdditionalNegative: function(mode, alias, text) {
         const nEl = document.getElementById(`${mode}_neg`);
         if (!nEl) return; // a mode with no negative box (Flux) has nothing to add to
-        const tags = parseTagList(text);
+        const tags = parseTagList(window.formatInsertedTags ? window.formatInsertedTags(text, mode) : text);
         if (!tags.length) return;
 
         if (!this.appliedNegatives[mode]) this.appliedNegatives[mode] = {};
-        const present = new Set(parseTagList(nEl.value));
+        // Compared loosely (normaliseTag()), so a formatted copy already in the box counts.
+        const present = boxTagSet(nEl);
         // A leftover record means the tag was removed some other way, so what it put in the box is still its own to remove.
         const stale = this.appliedNegatives[mode][alias];
-        const carried = stale ? stale.inserted.filter(t => present.has(t)) : [];
-        const fresh = tags.filter((t, i) => !present.has(t) && tags.indexOf(t) === i);
+        const carried = stale ? stale.inserted.filter(t => present.has(normaliseTag(t))) : [];
+        const fresh = tags.filter((t, i) => !present.has(normaliseTag(t)) && tags.findIndex(u => normaliseTag(u) === normaliseTag(t)) === i);
         if (fresh.length) appendTagsToBox(nEl, fresh.join(', '));
 
         this.appliedNegatives[mode][alias] = { tags, inserted: [...new Set([...carried, ...fresh])] };
@@ -73,7 +74,7 @@ window.LoraManager = {
         if (mode === 'inp' && typeof saveCurrentInpaintModeStateLive === 'function') saveCurrentInpaintModeStateLive();
     },
 
-    // Called when a LoRA is toggled off: removes exactly the tags it inserted, except tags another active LoRA also wants (those become that LoRA's). Matched tag by tag (StyleManager.removeStyleTags).
+    // Called when a LoRA is toggled off: removes exactly the tags it inserted, except tags another active LoRA or a tapped style also wants (those become theirs). Matched tag by tag (StyleManager.removeStyleTags).
     removeAdditionalNegative: function(mode, alias) {
         const records = this.appliedNegatives[mode];
         const record = records && records[alias];
@@ -89,21 +90,55 @@ window.LoraManager = {
                 const otherActive = new RegExp(`<lora:${this.escapeRegExp(otherAlias)}:[^>]+>`, 'i').test(promptText);
                 if (!otherActive) return;
                 other.tags.forEach(t => {
-                    if (record.inserted.includes(t)) {
-                        stillWanted.add(t);
-                        if (!other.inserted.includes(t)) other.inserted.push(t);
+                    const mine = record.inserted.find(u => normaliseTag(u) === normaliseTag(t));
+                    if (mine) {
+                        stillWanted.add(normaliseTag(t));
+                        if (!other.inserted.some(u => normaliseTag(u) === normaliseTag(t))) other.inserted.push(mine);
                     }
                 });
             });
-            const toRemove = record.inserted.filter(t => !stillWanted.has(t));
-            if (toRemove.length && window.StyleManager) {
-                nEl.value = withTrailingComma(window.StyleManager.removeStyleTags(nEl.value, toRemove.join(', ')));
-            }
+            // A tapped style that wants the tag keeps it too.
+            const toRemove = record.inserted.filter(t => !stillWanted.has(normaliseTag(t)) && !(window.StyleManager && window.StyleManager.claimTag(mode, 'neg', normaliseTag(t))));
+            // Matched loosely, so a copy the box formatted after it went in still goes.
+            if (toRemove.length) nEl.value = withTrailingComma(removeTagsFromText(nEl.value, new Set(withFormattedPieces(toRemove).map(normaliseTag)), true));
         }
 
         this.saveNegatives(mode);
         if (typeof saveNegativePrompt === 'function') saveNegativePrompt(mode);
         if (mode === 'inp' && typeof saveCurrentInpaintModeStateLive === 'function') saveCurrentInpaintModeStateLive();
+    },
+
+    // Another active LoRA (not exceptAlias) whose trigger words include this tag takes it over. promptText decides which are active.
+    claimTrigger: function(mode, norm, exceptAlias, promptText) {
+        const records = this.appliedInsertions[mode] || {};
+        for (const alias of Object.keys(records)) {
+            const record = records[alias];
+            if (alias === exceptAlias || !record || typeof record === 'string' || !record.trigger) continue;
+            if (!new RegExp(`<lora:${this.escapeRegExp(alias)}:[^>]+>`, 'i').test(promptText)) continue;
+            const word = withFormattedPieces(parseTagList(record.trigger)).find(t => normaliseTag(t) === norm);
+            if (!word) continue;
+            if (Array.isArray(record.inserted) && !record.inserted.some(t => normaliseTag(t) === norm)) {
+                record.inserted.push(word);
+                this.saveInsertions(mode);
+            }
+            return true;
+        }
+        return false;
+    },
+
+    // The same for a LoRA's additional negative tags (appliedNegatives).
+    claimNegative: function(mode, norm) {
+        const records = this.appliedNegatives[mode] || {};
+        const promptText = (document.getElementById(`${mode}_prompt`) || {}).value || '';
+        for (const alias of Object.keys(records)) {
+            const record = records[alias];
+            if (!new RegExp(`<lora:${this.escapeRegExp(alias)}:[^>]+>`, 'i').test(promptText)) continue;
+            const tag = withFormattedPieces(record.tags).find(t => normaliseTag(t) === norm);
+            if (!tag) continue;
+            if (!record.inserted.some(t => normaliseTag(t) === norm)) { record.inserted.push(tag); this.saveNegatives(mode); }
+            return true;
+        }
+        return false;
     },
 
     // Guards against a double-tap inserting a tag twice.
@@ -374,7 +409,7 @@ window.LoraManager = {
 
         // Reset View
         document.getElementById('loraVerticalList').innerHTML = '<div class="spinner" style="display:block"></div>';
-        const refreshBtn = document.querySelector('.lora-refresh-btn');
+        const refreshBtn = document.getElementById('loraRefreshBtn');
         if (refreshBtn) refreshBtn.classList.add('hidden');
 
         // Reuse the list from an earlier open this session if on the same host; REFRESH always re-fetches.
@@ -529,8 +564,13 @@ window.LoraManager = {
         return result;
     },
 
-    // Guesses architecture from the filename/title by keyword (Forge gives none); used for Inpaint/img2img. Defaults to 'xl', since SDXL finetunes have no reliable keyword.
+    // The type set in the Checkpoint Manager, else detected from the name.
     detectCheckpointArchitecture: function(title) {
+        return (window.checkpointTypeOverride && window.checkpointTypeOverride(title)) || this.detectCheckpointArchitectureFromName(title);
+    },
+
+    // Guesses architecture from the filename/title by keyword (Forge gives none). Defaults to 'xl', since SDXL finetunes have no reliable keyword.
+    detectCheckpointArchitectureFromName: function(title) {
         const t = (title || '').toLowerCase();
         if (t.includes('flux')) return 'flux';
         if (t.includes('qwen')) return 'qwen';
@@ -542,6 +582,8 @@ window.LoraManager = {
 
     // Like detectCheckpointArchitecture() but returns null when nothing matches, so "no match" stays distinguishable from SDXL (for buildGroupedModelOptions, network.js).
     detectCheckpointArchitectureStrict: function(title) {
+        const override = window.checkpointTypeOverride && window.checkpointTypeOverride(title);
+        if (override) return override;
         const t = (title || '').toLowerCase();
 
         // Folder prefix (e.g. "SDXL\model.safetensors") is checked first; it is a more reliable signal than a substring.
@@ -692,7 +734,7 @@ window.LoraManager = {
         if(window.lucide) lucide.createIcons();
 
         // Size the refresh button from the rendered chip height; aspect-ratio support varies across Android WebView versions.
-        const refreshBtn = document.querySelector('.lora-refresh-btn');
+        const refreshBtn = document.getElementById('loraRefreshBtn');
         const firstChip = container.querySelector('.folder-chip');
         if (refreshBtn && firstChip) {
             const chipHeight = firstChip.getBoundingClientRect().height;
@@ -709,13 +751,13 @@ window.LoraManager = {
         this.displayedCount = 0;
 
         const qEl = document.getElementById('loraSearch');
-        const query = qEl ? qEl.value.toLowerCase() : "";
+        const query = searchQuery(qEl ? qEl.value : "");
 
         // Get base list
         let list = this.folders[folderName] || [];
 
         // Search matches only the displayed name, not the raw filename.
-        if(query) list = list.filter(l => this.getDisplayName(l).toLowerCase().includes(query));
+        if(query) list = list.filter(l => searchKey(this.getDisplayName(l)).includes(query));
 
         // Starred view: starred LoRAs only; while searching, widened to this model's architecture-matching LoRAs (as the ARCH tab would show).
         const effectiveArch = this.getEffectiveArch();
@@ -749,7 +791,8 @@ window.LoraManager = {
         // Trigger Element for Scroll
         const trigger = document.createElement('div');
         trigger.id = 'lora-scroll-trigger';
-        trigger.style.height = '20px';
+        trigger.style.height = '1px';
+        trigger.style.marginTop = '-1px'; // sentinel adds no space below the last row
         container.appendChild(trigger);
 
         this.renderMore(); // First batch
@@ -810,28 +853,40 @@ window.LoraManager = {
 
             container.insertBefore(row, trigger);
 
-            // Skip the lookup if this LoRA's thumbnail was already resolved this session.
-            if (!cachedThumb) {
-                const imgEl = row.querySelector('.lora-item-thumb');
-                setTimeout(() => {
-                    this.smartLoadThumbnail(imgEl, lora);
-                }, 50);
-            }
+            // Thumbnail and name load once the row nears the viewport.
+            row._lazyLoad = () => {
+                // Skip the lookup if this LoRA's thumbnail was already resolved this session.
+                if (!cachedThumb) {
+                    const imgEl = row.querySelector('.lora-item-thumb');
+                    setTimeout(() => {
+                        this.smartLoadThumbnail(imgEl, lora);
+                    }, 50);
+                }
 
-            // Resolve the nicer display name from .api_info.json (deferred), unless the user renamed this LoRA.
-            if (!this.userRenames.hasOwnProperty(lora.name) && !this.nameCache.hasOwnProperty(lora.name)) {
-                setTimeout(async () => {
-                    const resolved = await this.resolveDisplayName(lora);
-                    if (resolved && !this.userRenames.hasOwnProperty(lora.name)) {
-                        const nameEl = document.getElementById(nameId);
-                        if (nameEl) nameEl.textContent = resolved;
-                    }
-                }, 50);
-            }
+                // Resolve the nicer display name from .api_info.json (deferred), unless the user renamed this LoRA.
+                if (!this.userRenames.hasOwnProperty(lora.name) && !this.nameCache.hasOwnProperty(lora.name)) {
+                    setTimeout(async () => {
+                        const resolved = await this.resolveDisplayName(lora);
+                        if (resolved && !this.userRenames.hasOwnProperty(lora.name)) {
+                            const nameEl = document.getElementById(nameId);
+                            if (nameEl) nameEl.textContent = resolved;
+                        }
+                    }, 50);
+                }
+            };
+            if (this.rowObserver) this.rowObserver.observe(row);
+            else row._lazyLoad();
         });
 
         this.displayedCount += batch.length;
         if(window.lucide) lucide.createIcons();
+        this.fitListHeight();
+    },
+
+    // As many whole rows as fit on screen (ui.js).
+    fitListHeight: function() {
+        const list = document.getElementById('loraVerticalList');
+        if (list) fitListToWholeRows(list, list.querySelectorAll('.lora-item-row'));
     },
 
     setupObserver: function() {
@@ -843,6 +898,20 @@ window.LoraManager = {
                 if(e.isIntersecting) this.renderMore();
             });
         }, opts);
+
+        this.rowObserver = new IntersectionObserver((entries) => {
+            entries.forEach(e => {
+                if (!e.isIntersecting) return;
+                this.rowObserver.unobserve(e.target);
+                if (e.target._lazyLoad) e.target._lazyLoad();
+            });
+        }, { root: root, rootMargin: '400px' });
+
+        // Scroll indicator hooks.
+        root.indicatorScale = () => (this.displayedCount ? Math.max(1, this.filteredList.length / this.displayedCount) : 1);
+        root.indicatorPrepareDrag = () => {
+            while (this.displayedCount < this.filteredList.length) this.renderMore();
+        };
     },
 
     // --- TOGGLE LOGIC ---
@@ -867,17 +936,23 @@ window.LoraManager = {
                 // Backward compatibility: older records were a plain string, not {insertion, trigger}, with no known trigger text, so only the bare tag is removed.
                 if (typeof tracked === 'string') tracked = { insertion: tracked, trigger: '' };
 
-                if (tracked && tracked.insertion && val.includes(tracked.insertion)) {
-                    // Exact match: removes the tag plus what was inserted with it (e.g. a trigger word).
-                    val = val.split(tracked.insertion).join('');
-                } else {
-                    // No tracked insertion, or edited since: remove the bare tag first; never assume trailing text belongs to it.
-                    const bareTagRegex = new RegExp(`<lora:${this.escapeRegExp(alias)}:[^>]+>`, 'gi');
-                    val = val.replace(bareTagRegex, '');
-                    // If the trigger words are known, also strip those still present exactly as inserted.
-                    if (tracked && tracked.trigger) {
-                        val = this.removeTriggerWords(val, tracked.trigger);
-                    }
+                const bareTagRegex = new RegExp(`<lora:${this.escapeRegExp(alias)}:[^>]+>`, 'gi');
+                // A tag alone at the start of a line takes the line break with it, as removeTagsFromText() does.
+                val = val.replace(new RegExp(`\\n[ \\t]*<lora:${this.escapeRegExp(alias)}:[^>]+>(?=[ \\t]*(?:,|\\n|$))`, 'gi'), ',');
+                val = val.replace(bareTagRegex, '');
+                // Its trigger words go too: those it added (all of them for a record from before 'inserted' was kept),
+                // except ones the default prompt, another active LoRA or a tapped style also wants.
+                if (tracked && tracked.trigger) {
+                    const owned = withFormattedPieces(Array.isArray(tracked.inserted) ? tracked.inserted : parseTagList(tracked.trigger));
+                    const defaults = window.StyleManager ? window.StyleManager.defaultTagSet(mode, 'prompt') : new Set();
+                    const toRemove = new Set();
+                    owned.forEach(t => {
+                        const n = normaliseTag(t);
+                        if (defaults.has(n) || this.claimTrigger(mode, n, alias, val)) return;
+                        if (window.StyleManager && window.StyleManager.claimTag(mode, 'prompt', n)) return;
+                        toRemove.add(n);
+                    });
+                    val = removeTagsFromText(val, toRemove, true);
                 }
                 if (this.appliedInsertions[mode]) {
                     delete this.appliedInsertions[mode][alias];
@@ -894,12 +969,7 @@ window.LoraManager = {
             }
 
             // Collapse only horizontal whitespace within a line, keeping deliberate line breaks. Leading/trailing junk is stripped, then exactly one ", " is put back if anything remains (withTrailingComma(), utils.js), so the box ends the same after an add or a remove.
-            promptEl.value = withTrailingComma(val
-                .replace(/,\s*,/g, ',')
-                .replace(/[ \t]{2,}/g, ' ')
-                .replace(/\n[ \t]*\n/g, '\n')
-                .replace(/\n[ \t]+/g, '\n')
-                .replace(/[ \t]+\n/g, '\n')
+            promptEl.value = withTrailingComma(collapseBlankLines(val.replace(/[ \t]{2,}/g, ' '))
                 .replace(/^[\s,]+/, '')
                 .replace(/[\s,]+$/, ''));
             // As the add path: programmatic assignment doesn't trigger the textarea's auto-save.
@@ -914,33 +984,6 @@ window.LoraManager = {
 
     escapeRegExp: function(string) {
         return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    },
-
-    // Removes trigger words still present exactly as inserted, segment by segment (an edited segment is left whole). Comma and newline both separate; a capturing split keeps multi-line text intact.
-    removeTriggerWords: function(text, triggerSource) {
-        const remainingWords = triggerSource.split(/[,\n]/).map(t => t.trim()).filter(t => t.length > 0);
-        const parts = text.split(/([,\n])/);
-        const kept = [];
-        for (let i = 0; i < parts.length; i += 2) {
-            const raw = parts[i];
-            const sep = parts[i + 1];
-            const trimmedVal = raw.trim();
-            const idx = trimmedVal.length > 0 ? remainingWords.indexOf(trimmedVal) : -1;
-            if (idx !== -1) {
-                remainingWords.splice(idx, 1);
-            } else {
-                kept.push(raw);
-                if (sep !== undefined) kept.push(sep);
-            }
-        }
-        return kept.join("")
-            .replace(/,\s*,/g, ",")
-            .replace(/\n[ \t]*\n/g, "\n")
-            .replace(/\n[ \t]+/g, "\n")
-            .replace(/[ \t]+\n/g, "\n")
-            .replace(/^[\s,]+/, "")
-            .replace(/[\s,]+$/, "")
-            .trim();
     },
 
     // =========================================================
@@ -982,8 +1025,12 @@ window.LoraManager = {
             pathNoExt = pathNoExt.substring(0, pathNoExt.lastIndexOf('.'));
         }
 
-        // Possible extensions to try
+        // Possible extensions, the one that last found a thumbnail first (fewer failed requests).
         const candidates = ['.png', '.jpg', '.preview.png', '.jpeg', '.webp'];
+        // Remembered separately for checkpoints ('ckpt_' names), which may be named differently.
+        const extKey = 'bojroThumbExt_' + (String(lora.name).startsWith('ckpt_') ? 'ckpt' : 'lora');
+        const lastExt = localStorage.getItem(extKey);
+        if (candidates.includes(lastExt)) candidates.unshift(...candidates.splice(candidates.indexOf(lastExt), 1));
 
         // 2. Determine Local Cache Path
         const safeName = lora.name.replace(/[^a-zA-Z0-9.\-_]/g, '_') + '.jpg'; // Normalize to jpg for cache
@@ -1016,7 +1063,10 @@ window.LoraManager = {
         // Loop candidates
         for (let ext of candidates) {
             validServerImg = await checkServer(ext);
-            if (validServerImg) break;
+            if (validServerImg) {
+                if (ext !== lastExt) localStorage.setItem(extKey, ext);
+                break;
+            }
         }
 
         if (!validServerImg) return; // No image found on server
@@ -1068,12 +1118,11 @@ window.LoraManager = {
 
             // Save
             try {
-                try { await this.fs.mkdir({ path: this.CACHE_DIR, directory: 'CACHE' }); } catch(e){}
-
                 await this.fs.writeFile({
                     path: path,
                     data: b64,
-                    directory: 'CACHE'
+                    directory: 'CACHE',
+                    recursive: true
                 });
 
                 // Update Meta

@@ -110,7 +110,7 @@ window.SaacManager = {
             if (!grid) return resolve(false);
 
             grid.innerHTML = `
-                <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 85%; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; font-family: var(--font-main); color: var(--text-main); z-index: 100;">
+                <div style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 85%; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; font-family: var(--font-main); color: var(--text-main); z-index: 100;">
                     <div style="margin-bottom: 15px; font-weight: bold; letter-spacing: 1px;">SYNCING DATABASE...<br>DO NOT CLOSE THIS POP UP</div>
                     <div style="width: 100%; height: 12px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; overflow: hidden; margin-bottom: 12px;">
                         <div id="saac-progress-bar" style="width: 0%; height: 100%; background: var(--accent-gradient); box-shadow: 0 0 10px var(--accent-primary); transition: width 0.1s;"></div>
@@ -201,17 +201,18 @@ window.SaacManager = {
             cardsGrid.id = 'saacCardsGrid';
             scrollContainer.appendChild(cardsGrid);
         }
-        const q = document.getElementById('saacSearch')?.value.toLowerCase() || '';
+        const rawQ = document.getElementById('saacSearch')?.value || '';
+        const q = searchQuery(rawQ);
         const clearBtn = document.getElementById('saacSearchClear');
-        if (clearBtn) clearBtn.classList.toggle('hidden', !q);
+        if (clearBtn) clearBtn.classList.toggle('hidden', !rawQ);
         let filtered = q ? this.data.filter(c => 
-            c.name.toLowerCase().includes(q) || c.tag.toLowerCase().includes(q)
+            searchKey(c.name).includes(q) || searchKey(c.tag).includes(q)
         ) : [...this.data];
-        // Characters already in the prompt first, alphabetical within each group.
-        const prompt = document.getElementById('xl_prompt')?.value || '';
+        // Characters already in the prompt first, alphabetical within each group. Matched loosely (normaliseTag()), so a formatted tag counts.
+        const inPrompt = boxTagSet(document.getElementById('xl_prompt'));
         filtered.sort((a, b) => {
-            const aActive = prompt.includes(a.tag);
-            const bActive = prompt.includes(b.tag);
+            const aActive = inPrompt.has(normaliseTag(a.tag));
+            const bActive = inPrompt.has(normaliseTag(b.tag));
             if (aActive && !bActive) return -1;
             if (!aActive && bActive) return 1;
             return a.name.localeCompare(b.name);
@@ -227,6 +228,7 @@ window.SaacManager = {
         // A sibling of cardsGrid, in normal flow after it.
         scrollContainer.appendChild(trigger);
         this.renderMore();
+        this.fitGridHeight(scrollContainer, cardsGrid);
         if(this.observer) this.observer.disconnect();
         this.observer = new IntersectionObserver(e => {
             if(e[0].isIntersecting && this.displayedCount < this.filteredData.length) this.renderMore();
@@ -234,13 +236,36 @@ window.SaacManager = {
         this.observer.observe(trigger);
     },
 
+    refitGrid: function() {
+        const scrollContainer = document.getElementById('saacGrid');
+        const cardsGrid = document.getElementById('saacCardsGrid');
+        if (scrollContainer && cardsGrid) this.fitGridHeight(scrollContainer, cardsGrid);
+    },
+
+    // As many whole rows of cards as fit on screen (ui.js); scroll indicator hooks.
+    fitGridHeight: function(scrollContainer, cardsGrid) {
+        const cards = cardsGrid.children;
+        if (cards.length > 3) {
+            const stride = cards[3].getBoundingClientRect().top - cards[0].getBoundingClientRect().top;
+            if (stride > 0) this.rowStride = stride;
+        }
+        fitListToWholeRows(scrollContainer, cards, 3);
+        scrollContainer.indicatorScale = () => (this.displayedCount ? Math.max(1, this.filteredData.length / this.displayedCount) : 1);
+        // Renders enough rows to fill the view at the dragged-to position, without measuring between batches.
+        scrollContainer.indicatorGrow = (target) => {
+            const need = Math.ceil((target + scrollContainer.clientHeight) / (this.rowStride || 148) + 1) * 3;
+            const end = Math.min(need, this.filteredData.length);
+            while (this.displayedCount < end) this.renderMore();
+        };
+    },
+
     renderMore: function() {
         const cardsGrid = document.getElementById('saacCardsGrid');
         const batch = this.filteredData.slice(this.displayedCount, this.displayedCount + this.BATCH_SIZE);
-        const prompt = document.getElementById('xl_prompt')?.value || '';
+        const inPrompt = boxTagSet(document.getElementById('xl_prompt'));
         const frag = document.createDocumentFragment();
         batch.forEach(c => {
-            const active = prompt.includes(c.tag);
+            const active = inPrompt.has(normaliseTag(c.tag));
             const imgSrc = this.imgDb?.[c.tag];
             const card = document.createElement('div');
             card.className = `saac-card ${active ? 'saac-active' : ''}`;
@@ -266,11 +291,13 @@ window.SaacManager = {
         const el = document.getElementById('xl_prompt');
         if(!el) return;
         let v = el.value;
-        if(v.includes(c.tag)) {
-            v = v.replace(new RegExp(`(${c.tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*,?\\s*)`,'gi'), '');
+        const key = normaliseTag(c.tag);
+        if (boxTagSet(el).has(key)) {
+            v = removeTagsFromText(v, new Set([key]), true);
         } else {
-            // New tags are appended after the existing prompt.
-            v = v ? `${v}, ${c.tag}` : c.tag;
+            // New tags are appended after the existing prompt, formatted as the box would be (Prompt Auto-Formatting).
+            const tag = window.formatInsertedTags ? window.formatInsertedTags(c.tag, 'xl') : c.tag;
+            v = v ? `${v}, ${tag}` : tag;
         }
         el.value = v.replace(/^[\s,]+|[\s,]+$/g, '').replace(/,\s*,/g, ',');
         this.render(); 

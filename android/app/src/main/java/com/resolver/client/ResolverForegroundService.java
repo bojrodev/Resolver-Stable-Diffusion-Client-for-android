@@ -3,6 +3,7 @@ package com.resolver.client;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
@@ -16,7 +17,9 @@ import androidx.core.app.NotificationCompat;
 
 public class ResolverForegroundService extends Service {
     
-    private static final String CHANNEL_ID = "RESOLVER_FG_CHANNEL";
+    // Normal importance, silent. New ID as Android never raises a channel's importance; the old one is deleted.
+    private static final String CHANNEL_ID = "RESOLVER_PROGRESS_CHANNEL";
+    private static final String OLD_CHANNEL_ID = "RESOLVER_FG_CHANNEL";
     private static final int NOTIFICATION_ID = 1002;
     
     // Actions
@@ -111,7 +114,8 @@ public class ResolverForegroundService extends Service {
                         break;
                     case ACTION_UPDATE_PROGRESS:
                         int progress = intent.getIntExtra(EXTRA_PROGRESS, 0);
-                        updateNotification(title, body, progress);
+                        // startForeground, not notify(): also covers an update arriving before the start.
+                        startForegroundServiceCompat(title, body, progress);
                         break;
                     case ACTION_STOP_FOREGROUND_SERVICE:
                         // Release locks when we explicitly stop
@@ -126,7 +130,58 @@ public class ResolverForegroundService extends Service {
                 }
             }
         }
-        return START_REDELIVER_INTENT; 
+        // Not restarted after the app's process dies: with no page to update it, the notification would be stuck.
+        return START_NOT_STICKY;
+    }
+
+    // Swiping the app away from Recents ends the job's notification too (the page that ran it is gone),
+    // and tells GenerationWatchdogWorker not to bring it back.
+    @Override
+    public void onTaskRemoved(Intent rootIntent) {
+        interruptJobOnServer();
+        getSharedPreferences("ResolverPrefs", Context.MODE_PRIVATE).edit().putBoolean("should_be_generating", false).apply();
+        androidx.work.WorkManager.getInstance(this).cancelUniqueWork("GenerationWatchdog");
+        releaseLocks();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            stopForeground(STOP_FOREGROUND_REMOVE);
+        } else {
+            stopForeground(true);
+        }
+        stopSelf();
+        super.onTaskRemoved(rootIntent);
+    }
+
+    // Abort Job If App Closes: tells Forge to stop the job (set by ResolverDevicePlugin.setJobServer while one runs).
+    // Waits up to 3 seconds, as the process may end soon after.
+    private void interruptJobOnServer() {
+        android.content.SharedPreferences prefs = getSharedPreferences(ResolverDevicePlugin.PREFS, Context.MODE_PRIVATE);
+        final String server = prefs.getString(ResolverDevicePlugin.KEY_JOB_SERVER, "");
+        final String headers = prefs.getString(ResolverDevicePlugin.KEY_JOB_HEADERS, "{}");
+        prefs.edit().putString(ResolverDevicePlugin.KEY_JOB_SERVER, "").apply();
+        if (server == null || server.isEmpty()) return;
+        Thread t = new Thread(() -> {
+            java.net.HttpURLConnection conn = null;
+            try {
+                conn = (java.net.HttpURLConnection) new java.net.URL(server + "/sdapi/v1/interrupt").openConnection();
+                conn.setRequestMethod("POST");
+                conn.setConnectTimeout(2500);
+                conn.setReadTimeout(2500);
+                org.json.JSONObject h = new org.json.JSONObject(headers);
+                java.util.Iterator<String> keys = h.keys();
+                while (keys.hasNext()) {
+                    String k = keys.next();
+                    conn.setRequestProperty(k, h.optString(k));
+                }
+                conn.setDoOutput(true);
+                conn.getOutputStream().close();
+                conn.getResponseCode();
+            } catch (Exception ignored) {
+            } finally {
+                if (conn != null) conn.disconnect();
+            }
+        });
+        t.start();
+        try { t.join(3000); } catch (InterruptedException ignored) {}
     }
 
     @Override
@@ -137,33 +192,69 @@ public class ResolverForegroundService extends Service {
 
     // --- Notification Management ---
 
+    private boolean channelReady = false;
+
     private void createNotificationChannel() {
+        if (channelReady) return;
+        channelReady = true;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel channel = new NotificationChannel(
                     CHANNEL_ID,
-                    "Resolver Background",
-                    NotificationManager.IMPORTANCE_LOW 
+                    "Generation Progress",
+                    NotificationManager.IMPORTANCE_DEFAULT
             );
             channel.setDescription("Background generation status.");
+            channel.setSound(null, null);
+            channel.enableVibration(false);
+            channel.setShowBadge(false);
             NotificationManager manager = getSystemService(NotificationManager.class);
             if (manager != null) {
+                manager.deleteNotificationChannel(OLD_CHANNEL_ID);
                 manager.createNotificationChannel(channel);
             }
         }
     }
 
+    // Tap opens the running app (MainActivity is singleTask).
+    private PendingIntent openApp;
+
+    private PendingIntent openAppIntent() {
+        if (openApp != null) return openApp;
+        Intent launch = getPackageManager().getLaunchIntentForPackage(getPackageName());
+        if (launch == null) return null;
+        launch.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+        // Tells the page the progress notification was tapped (ResolverDevicePlugin).
+        launch.putExtra(ResolverDevicePlugin.EXTRA_TAP, "progress");
+        int flags = PendingIntent.FLAG_UPDATE_CURRENT;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) flags |= PendingIntent.FLAG_IMMUTABLE;
+        openApp = PendingIntent.getActivity(this, 0, launch, flags);
+        return openApp;
+    }
+
     private Notification buildNotification(String title, String body, int progress) {
         createNotificationChannel();
         
-        return new NotificationCompat.Builder(this, CHANNEL_ID)
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle(title)
-                .setContentText(body) 
-                .setSmallIcon(R.mipmap.ic_launcher) 
-                .setProgress(100, progress, false) 
-                .setOnlyAlertOnce(true) 
-                .setOngoing(true) 
-                .setPriority(NotificationCompat.PRIORITY_LOW) 
-                .build();
+                .setSmallIcon(R.mipmap.ic_launcher)
+                .setProgress(100, progress, false)
+                .setOnlyAlertOnce(true)
+                .setShowWhen(false) // the time would truncate the step count
+                .setOngoing(true)
+                .setCategory(NotificationCompat.CATEGORY_PROGRESS)
+                // Show at once; Android 12+ otherwise delays it up to 10 s, missing quick jobs.
+                .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+                .setPriority(NotificationCompat.PRIORITY_DEFAULT);
+        PendingIntent open = openAppIntent();
+        if (open != null) builder.setContentIntent(open);
+        // An empty body leaves the title on its own line ("Generating: Step 42 / 50").
+        if (body != null && !body.isEmpty()) builder.setContentText(body);
+        // Android 16 Live Update (raw extra, as compileSdk is 35); Config > Experimental.
+        if (Build.VERSION.SDK_INT >= 36 && getSharedPreferences(ResolverDevicePlugin.PREFS, Context.MODE_PRIVATE)
+                .getBoolean(ResolverDevicePlugin.KEY_LIVE_UPDATE, false)) {
+            builder.getExtras().putBoolean("android.requestPromotedOngoing", true);
+        }
+        return builder.build();
     }
     
     private void startForegroundServiceCompat(String title, String body, int progress) {
@@ -177,13 +268,6 @@ public class ResolverForegroundService extends Service {
         }
     }
     
-    private void updateNotification(String title, String body, int progress) {
-        Notification notification = buildNotification(title, body, progress);
-        NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
-        if (manager != null) {
-            manager.notify(NOTIFICATION_ID, notification);
-        }
-    }
     
     @Nullable
     @Override

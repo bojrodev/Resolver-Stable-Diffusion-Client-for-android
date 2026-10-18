@@ -126,11 +126,19 @@ function setupEditorEvents() {
 window.openEditorFromFile = function(e) {
     const file = e.target.files[0];
     if (!file) return;
+    e.target.value = '';
+    if (typeof EditHistory !== 'undefined') EditHistory.save(file);
+    openEditorFromBlob(file);
+};
 
+// An uploaded image (or one reopened from RECENT) into Crop & Edit.
+function openEditorFromBlob(file) {
     // Read the original file's embedded prompt/negative now, since PROCEED re-encodes the image and drops PNG text chunks (see inpSourceMetadata, globals.js). Held as a pending promise and committed by applyEditorChanges(), so backing out leaves the loaded image's metadata alone.
     editorPendingMetadataPromise = readImportablePromptsFromBlob(file);
     editorPendingTextChunksPromise = readPngTextChunks(file);
     editorPendingBadges = null;
+    // Picked from the phone on the Inpaint tab: cancelling stays here.
+    editorReturnTo = null;
 
     // Opened immediately, before the file is read (as editCurrentFs(), engine.js), so the underlying page can't flash.
     const editorCanvasEl = document.getElementById('editorCanvas');
@@ -159,7 +167,6 @@ window.openEditorFromFile = function(e) {
         };
     };
     reader.readAsDataURL(file);
-    e.target.value = '';
 }
 
 // Snaps the crop box to the image's aspect ratio and resolution. Extracted so matchesFitToImageState() uses the same target dimensions.
@@ -388,7 +395,7 @@ function drawEditor() {
 // Touch Handling (Gestures)
 function handleTouchStart(e) {
     if (e.target.closest('input')) return;
-    e.preventDefault();
+    if (e.cancelable) e.preventDefault();
     if (e.touches.length === 2) {
         pinchStartDist = getDist(e.touches[0], e.touches[1]);
         startScale = editorScale;
@@ -444,7 +451,7 @@ function handleTouchStart(e) {
 
 function handleTouchMove(e) {
     if (e.target.closest('input')) return;
-    e.preventDefault();
+    if (e.cancelable) e.preventDefault();
     if (e.touches.length === 2 && pinchStartDist > 0) {
         const dist = getDist(e.touches[0], e.touches[1]);
         const scaleFactor = dist / pinchStartDist;
@@ -525,6 +532,34 @@ function getDist(t1, t2) {
     return Math.sqrt(Math.pow(t1.clientX - t2.clientX, 2) + Math.pow(t1.clientY - t2.clientY, 2));
 }
 
+// A canvas as a PNG data URL, via toBlob() so the UI doesn't freeze. Chrome encodes toBlob() in idle time between frames,
+// and the WebView can stop drawing frames until the screen is touched, which left PROCEED stuck on PROCESSING...
+// So frames are kept coming while it encodes, and after 3 seconds it falls back to the synchronous toDataURL().
+function canvasToPngDataUrl(canvas) {
+    return new Promise(resolve => {
+        let done = false, raf = 0;
+        const fallback = () => canvas.toDataURL('image/png');
+        const finish = url => {
+            if (done) return;
+            done = true;
+            cancelAnimationFrame(raf);
+            clearTimeout(timer);
+            resolve(url);
+        };
+        const pump = () => { raf = requestAnimationFrame(pump); };
+        pump();
+        const timer = setTimeout(() => finish(fallback()), 3000);
+        canvas.toBlob(blob => {
+            if (done) return;
+            if (!blob) { finish(fallback()); return; }
+            const reader = new FileReader();
+            reader.onload = () => finish(reader.result);
+            reader.onerror = () => finish(fallback());
+            reader.readAsDataURL(blob);
+        }, 'image/png');
+    });
+}
+
 window.applyEditorChanges = async function() {
     // toDataURL('image/png') is synchronous and freezes the UI, so show feedback on tap, use toBlob() and read it back into the data-URL format downstream code expects.
     const proceedBtn = document.getElementById('editorProceedBtn');
@@ -553,13 +588,7 @@ window.applyEditorChanges = async function() {
         ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(editorImage, sourceX, sourceY, sourceW, sourceH, 0, 0, editorTargetW, editorTargetH);
 
-        const blob = await new Promise(resolve => finalCvs.toBlob(resolve, 'image/png'));
-        sourceImageB64 = await new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(reader.result);
-            reader.onerror = reject;
-            reader.readAsDataURL(blob);
-        });
+        sourceImageB64 = await canvasToPngDataUrl(finalCvs);
         // Commit the metadata captured when this image entered the editor (inpSourceMetadata, globals.js) together with its image. Unconditional, so a path that captured none leaves null rather than the previous image's prompts. Awaited, since the read is async.
         inpSourceMetadata = editorPendingMetadataPromise ? await editorPendingMetadataPromise : null;
         editorPendingMetadataPromise = null;
@@ -585,6 +614,7 @@ window.applyEditorChanges = async function() {
 
     // classList, not inline style (a leftover inline display:none would override classList.remove('hidden')).
     document.getElementById('img-input-container').classList.add('hidden');
+    editorReturnTo = null;
     document.getElementById('editorModal').classList.add('hidden');
     document.getElementById('inpTopModeSwitcher').classList.remove('hidden');
 
@@ -611,7 +641,35 @@ window.applyEditorChanges = async function() {
     }
 }
 
-window.closeEditor = () => document.getElementById('editorModal').classList.add('hidden');
+// Set when Crop & Edit is opened from another place (fullscreen viewer, Analyzer); CANCEL or back returns there.
+let editorReturnTo = null;
+// viewer: the fullscreen viewer's images and position, when opened from there.
+window.rememberEditorReturn = function(viewer = null) {
+    const view = [...document.querySelectorAll('[id^="view-"]')].find(v => v.getClientRects().length);
+    editorReturnTo = view ? { tab: view.id.slice(5), scrollY: window.scrollY, topMode: currentInpaintTopMode, viewer } : null;
+};
+window.closeEditor = () => {
+    const back = editorReturnTo;
+    editorReturnTo = null;
+    const viewer = back && back.viewer && back.viewer.images[back.viewer.index] ? back.viewer : null;
+    // Back to the viewer: the editor stays up until it opens, a frame after the scroll is restored, as the open
+    // viewer skips the tab's layout (and its scroll height with it).
+    if (!viewer) document.getElementById('editorModal').classList.add('hidden');
+    if (!back) return;
+    if (back.topMode && back.topMode !== currentInpaintTopMode) setInpaintTopMode(back.topMode);
+    if (back.tab !== 'inp') window.switchTab(back.tab);
+    requestAnimationFrame(() => {
+        window.scrollTo({ top: back.scrollY, behavior: 'instant' });
+        if (viewer) requestAnimationFrame(() => {
+            fullscreenOpenedFromGalleryGrid = viewer.fromGrid;
+            currentGalleryImages = viewer.images;
+            currentGalleryIndex = viewer.index;
+            updateLightboxImage();
+            document.getElementById('fullScreenModal').classList.remove('hidden');
+            document.getElementById('editorModal').classList.add('hidden');
+        });
+    });
+};
 
 // -----------------------------------------------------------
 // INPAINTING CANVAS LOGIC (DRAWING/MASKING)
@@ -694,7 +752,7 @@ function initMainCanvas() {
     mainCanvas.addEventListener('touchstart', (e) => {
         // Let native scroll handle it (see updateCanvasTouchBehavior()).
         if (currentInpaintTopMode === 'img2img' && !(typeof isComfyMaskingMode !== 'undefined' && isComfyMaskingMode)) return;
-        e.preventDefault();
+        if (e.cancelable) e.preventDefault();
         blurActiveTextField();
         if (e.touches.length === 2) {
             // A pending single-finger paint with a second finger arriving was a pinch: discard it.
@@ -707,11 +765,11 @@ function initMainCanvas() {
             if (isDrawing) stopPaint();
             paintPinchStartDist = getPaintTouchDist(e.touches[0], e.touches[1]);
             paintPinchStartScale = paintZoomScale;
-            paintPinchStartTranslate = { x: paintTranslateX, y: paintTranslateY };
-            paintPinchStartMid = {
-                x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
-                y: (e.touches[0].clientY + e.touches[1].clientY) / 2
-            };
+            const r = mainCanvas.getBoundingClientRect();
+            paintPinchCentre = { x: r.left + r.width / 2 - paintTranslateX, y: r.top + r.height / 2 - paintTranslateY };
+            const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2 - paintPinchCentre.x;
+            const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2 - paintPinchCentre.y;
+            paintPinchAnchor = { x: (midX - paintTranslateX) / paintZoomScale, y: (midY - paintTranslateY) / paintZoomScale };
         } else if (e.touches.length === 1) {
             // A pinch's fingers never land in the same event, so hold the first touch pending (PAINT_START_DELAY_MS, globals.js) and commit on touchmove, the timer, or touchend (a quick tap).
             pendingPaintTouch = { clientX: e.touches[0].clientX, clientY: e.touches[0].clientY };
@@ -728,17 +786,18 @@ function initMainCanvas() {
     });
     mainCanvas.addEventListener('touchmove', (e) => {
         if (currentInpaintTopMode === 'img2img' && !(typeof isComfyMaskingMode !== 'undefined' && isComfyMaskingMode)) return;
-        e.preventDefault();
+        if (e.cancelable) e.preventDefault();
         if (e.touches.length === 2 && paintPinchStartDist > 0) {
             const dist = getPaintTouchDist(e.touches[0], e.touches[1]);
             const scaleFactor = dist / paintPinchStartDist;
-            paintZoomScale = paintPinchStartScale * scaleFactor;
+            // Clamped first so the anchor holds at the zoom limits.
+            paintZoomScale = Math.min(PAINT_MAX_ZOOM, Math.max(PAINT_MIN_ZOOM, paintPinchStartScale * scaleFactor));
 
-            // Pan follows the pinch midpoint as well as the distance change.
-            const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
-            const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-            paintTranslateX = paintPinchStartTranslate.x + (midX - paintPinchStartMid.x);
-            paintTranslateY = paintPinchStartTranslate.y + (midY - paintPinchStartMid.y);
+            // Keeps the pinched point under the fingers.
+            const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2 - paintPinchCentre.x;
+            const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2 - paintPinchCentre.y;
+            paintTranslateX = midX - paintZoomScale * paintPinchAnchor.x;
+            paintTranslateY = midY - paintZoomScale * paintPinchAnchor.y;
 
             clampPaintTransform();
             applyPaintTransform();
@@ -764,7 +823,7 @@ function initMainCanvas() {
     });
     mainCanvas.addEventListener('touchend', (e) => {
         if (currentInpaintTopMode === 'img2img' && !(typeof isComfyMaskingMode !== 'undefined' && isComfyMaskingMode)) return;
-        e.preventDefault();
+        if (e.cancelable) e.preventDefault();
         if (e.touches.length < 2) paintPinchStartDist = 0;
         if (e.touches.length === 0) {
             // A pending paint never confirmed by a move or the delay is a quick tap: commit via startPaint()+stopPaint() with no painting() call in between.
@@ -808,6 +867,11 @@ function blurActiveTextField() {
     if (active && (active.tagName === 'TEXTAREA' || active.tagName === 'INPUT')) {
         active.blur();
     }
+}
+
+// The on-screen keyboard shrinks the visual viewport well below the screen height.
+function isKeyboardUp() {
+    return !!window.visualViewport && window.visualViewport.height < screen.height * 0.7;
 }
 
 // FIX: Set image as background instead of drawing it (allows real erasing)
@@ -1104,8 +1168,9 @@ function restoreInpaintModeState(mode) {
         }
     });
 
-    // These are direct .value assignments with no events, so refresh inp_sampler/inp_scheduler's triggers and the preset active-border tracking (IMG2IMG_PRESET_FIELD_IDS).
-    if (typeof refreshAllModelPickerTriggers === 'function') refreshAllModelPickerTriggers();
+    // Direct .value assignments fire no events, so refresh the sampler/scheduler triggers and preset tracking.
+    if (typeof updateModelPickerTriggerText === 'function') ['inp_sampler', 'inp_scheduler'].forEach(updateModelPickerTriggerText);
+    if (typeof updateNegPromptDimming === 'function') updateNegPromptDimming('inp');
     if (typeof clearActiveImg2imgPreset === 'function') clearActiveImg2imgPreset();
 }
 
@@ -1216,7 +1281,7 @@ window.setInpaintTopMode = function(mode) {
 }
 
 // The real <input> is inert (pointer-events:none, .thumb-only-slider); a .slider-fake-thumb is the only draggable element. The input's value/min/max/step stay the source of truth: the thumb is positioned from them and writes back via a real 'input' event.
-const THUMB_ONLY_SLIDER_IDS = ['inp_mask_blur', 'inp_padding', 'denoisingStrength', 'brushSize', 'cfgWeight'];
+const THUMB_ONLY_SLIDER_IDS = ['inp_mask_blur', 'inp_padding', 'denoisingStrength', 'brushSize', 'brushSizeFloat', 'cfgWeight'];
 
 function syncThumbOnlySliderPosition(sliderId) {
     const input = document.getElementById(sliderId);
@@ -1299,6 +1364,97 @@ THUMB_ONLY_SLIDER_IDS.forEach(initThumbOnlySlider);
 // The thumb position comes from the input's rendered width, which a rotation, resize or the tab becoming visible can change without the value changing.
 window.addEventListener('resize', () => THUMB_ONLY_SLIDER_IDS.forEach(syncThumbOnlySliderPosition));
 
+// Floating Brush Size and brush size preview.
+(function () {
+    const main = document.getElementById('brushSize');
+    const float = document.getElementById('brushSizeFloat');
+    const bar = document.getElementById('floatingBrushBar');
+    const preview = document.getElementById('brushSizePreview');
+    const mainThumb = document.querySelector('.slider-fake-thumb[data-for="brushSize"]');
+    if (!mainThumb || !main || !float || !bar || !preview) return;
+    const GAP = 10;
+    // Toast container is after this script in index.html, so looked up on use.
+    let toastBottom = null;
+    const toastBox = () => {
+        const el = document.getElementById('appToastContainer');
+        if (el && toastBottom === null) toastBottom = el.style.bottom;
+        return el;
+    };
+
+    const dockTop = () => document.querySelector('.glass-dock')?.getBoundingClientRect().top ?? window.innerHeight;
+
+    // Shown while the real slider is below the dock and the canvas is on screen.
+    function update() {
+        const on = localStorage.getItem('bojroFloatingBrushSize') === 'true';
+        if (!on || main.offsetParent === null) { hide(); return; }
+        // Thumb touch area, so half-hidden counts as hidden.
+        const r = mainThumb.getBoundingClientRect();
+        const limit = dockTop();
+        const c = mainCanvas ? mainCanvas.getBoundingClientRect() : null;
+        const canvasOnScreen = !!c && c.bottom > 0 && c.top < limit;
+        if (!(r.width > 0 && canvasOnScreen && r.bottom > limit && !isKeyboardUp())) { hide(); return; }
+        bar.classList.remove('hidden');
+        bar.style.bottom = `${window.innerHeight - limit + GAP}px`;
+        // Toasts sit just above the dock, so lift them over the bar while it shows.
+        const toasts = toastBox();
+        if (toasts) toasts.style.bottom = `${Math.max(parseFloat(toastBottom) || 0, window.innerHeight - bar.getBoundingClientRect().top + GAP)}px`;
+        if (float.value !== main.value) float.value = main.value;
+        syncThumbOnlySliderPosition('brushSizeFloat');
+    }
+    function hide() {
+        if (bar.classList.contains('hidden')) return;
+        bar.classList.add('hidden');
+        const toasts = toastBox();
+        if (toasts) toasts.style.bottom = toastBottom;
+    }
+    window.updateFloatingBrushBar = update;
+
+    let queued = false;
+    const schedule = () => {
+        if (queued || (bar.classList.contains('hidden') && localStorage.getItem('bojroFloatingBrushSize') !== 'true')) return;
+        queued = true;
+        requestAnimationFrame(() => { queued = false; update(); });
+    };
+    window.addEventListener('scroll', schedule, { passive: true, capture: true });
+    window.addEventListener('resize', schedule);
+    // Tab, mode and image changes.
+    const mo = new MutationObserver(schedule);
+    ['view-inp', 'canvasWrapper', 'inpaintOnlyControls'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) mo.observe(el, { attributes: true, attributeFilter: ['class', 'style'] });
+    });
+
+    // Brush-sized circle in the middle of the visible canvas.
+    let hideTimer = null;
+    function showPreview(size) {
+        if (!mainCanvas || !mainCanvas.width) return;
+        const c = mainCanvas.getBoundingClientRect();
+        if (!c.width) return;
+        const d = size * c.width / mainCanvas.width;
+        const bottomLimit = bar.classList.contains('hidden') ? dockTop() : bar.getBoundingClientRect().top;
+        const top = Math.max(c.top, 0), bottom = Math.min(c.bottom, bottomLimit);
+        const left = Math.max(c.left, 0), right = Math.min(c.right, window.innerWidth);
+        const cx = right > left ? (left + right) / 2 : window.innerWidth / 2;
+        const cy = bottom > top ? (top + bottom) / 2 : bottomLimit / 2;
+        preview.style.width = preview.style.height = `${d}px`;
+        preview.style.left = `${cx - d / 2}px`;
+        preview.style.top = `${cy - d / 2}px`;
+        preview.classList.toggle('erase', currentBrushMode === 'erase');
+        preview.classList.add('visible');
+        clearTimeout(hideTimer);
+        hideTimer = setTimeout(() => preview.classList.remove('visible'), 700);
+    }
+
+    main.addEventListener('input', () => {
+        if (float.value !== main.value) { float.value = main.value; syncThumbOnlySliderPosition('brushSizeFloat'); }
+        showPreview(parseFloat(main.value));
+    });
+    float.addEventListener('input', () => {
+        main.value = float.value;
+        syncThumbOnlySliderPosition('brushSize');
+        showPreview(parseFloat(float.value));
+    });
+})();
 
 // 1. Mode Switching & UI Logic
 function setCanvasMode(mode) {
@@ -1351,3 +1507,121 @@ window.clearMask = function() {
         originalClearMask();
     }
 };
+
+// Horizontal swipe steps through the Inpaint modes and the Generate model tabs, like tapping the next chip.
+(function () {
+    const INP_ORDER = ['inpaint', 'img2img', 'upscale'];
+    const GEN_ORDER = ['xl', 'anima', 'qwen', 'flux', 'krea'];
+    const MIN_DX = 60;
+    const HOLD_MS = 300;
+    const IGNORED = 'input[type="range"],.slider-fake-thumb-wrap,[class*="slider"],.modal,#inpTopModeSwitcher,#modeSwitcher,#floatingBrushBar';
+    let g = null;
+
+    // Sliders, tab headers, the painting canvas and scrollable areas keep their touches.
+    function ignoresSwipe(el, view) {
+        if (view.id === 'view-inp' && typeof isComfyMaskingMode !== 'undefined' && isComfyMaskingMode) return true;
+        if (bodyScrollLockCount > 0 || [...document.querySelectorAll('.modal:not(.hidden)')].some(m => m.getClientRects().length)) return true;
+        if (el.closest(IGNORED)) return true;
+        const sel = window.getSelection && window.getSelection();
+        if (sel && !sel.isCollapsed && sel.toString()) return true;
+        const paintStage = document.getElementById('paintCanvas')?.parentElement;
+        for (let e = el; e && e !== view; e = e.parentElement) {
+            if (e === paintStage && view.id === 'view-inp' && currentInpaintTopMode === 'inpaint') return true;
+            if (e.scrollWidth > e.clientWidth + 1) {
+                const ox = getComputedStyle(e).overflowX;
+                if (ox === 'auto' || ox === 'scroll') return true;
+            }
+        }
+        return false;
+    }
+
+    // Next mode in the swipe direction, or null at either end.
+    function nextTarget(view, dx) {
+        const step = dx < 0 ? 1 : -1;
+        if (view.id === 'view-inp') {
+            if (document.getElementById('inpTopModeSwitcher').classList.contains('hidden')) return null;
+            const next = INP_ORDER[INP_ORDER.indexOf(currentInpaintTopMode) + step];
+            return next ? () => setInpaintTopMode(next) : null;
+        }
+        const tabs = GEN_ORDER.filter(m => {
+            const b = document.getElementById('btn-' + m);
+            return b && b.offsetParent !== null;
+        });
+        const next = tabs[tabs.indexOf(currentMode) + step];
+        return next ? () => setMode(next) : null;
+    }
+
+    const TEXT_FIELD = 'textarea,input:not([type]),input[type="text"],input[type="search"],input[type="number"],input[type="url"]';
+    let locked = null; // field made read-only for the current touch
+    let holdTimer = 0;
+    let guardUntil = 0;
+    const isEditing = (el) => el && el.matches && el.matches('input,textarea,select,[contenteditable]');
+    function release() {
+        clearTimeout(holdTimer);
+        if (locked) { locked.readOnly = false; delete locked.dataset.touchLock; locked = null; }
+    }
+    function unfocus() {
+        if (isEditing(document.activeElement)) document.activeElement.blur();
+    }
+    // Undo focus that Android gives a field mid-swipe or just after.
+    document.addEventListener('focusin', (e) => {
+        if (((g && g.locked) || Date.now() < guardUntil) && isEditing(e.target)) e.target.blur();
+    }, true);
+    // Lift-off restores the field before the tap's click, so a tap still focuses it.
+    document.addEventListener('touchend', release, { capture: true, passive: true });
+    document.addEventListener('touchcancel', release, { capture: true, passive: true });
+
+    function attach(view) {
+        if (!view) return;
+        view.addEventListener('touchstart', (e) => {
+            release();
+            g = null;
+            guardUntil = 0;
+            if (e.touches.length !== 1 || ignoresSwipe(e.target, view)) return;
+            g = { x0: e.touches[0].clientX, y0: e.touches[0].clientY, t: Date.now(), locked: false, field: e.target.closest('input,textarea,select,[contenteditable]') };
+            if (!g.field) return;
+            // A field not being typed in is read-only during the touch, so a drag can't focus it or move its caret.
+            const f = g.field;
+            if (f.matches(TEXT_FIELD) && !f.readOnly && !(document.activeElement === f && isKeyboardUp())) {
+                if (document.activeElement === f) f.blur();
+                f.dataset.touchLock = '1';
+                f.readOnly = true;
+                locked = f;
+            }
+            // A held touch on a field is a text selection, not a swipe.
+            const s = g;
+            holdTimer = setTimeout(() => { if (g === s && !s.locked) { release(); g = null; } }, HOLD_MS);
+        }, { passive: true });
+        view.addEventListener('touchmove', (e) => {
+            if (!g) return;
+            if (e.touches.length > 1) { g = null; return; }
+            const dx = e.touches[0].clientX - g.x0;
+            const dy = e.touches[0].clientY - g.y0;
+            if (!g.locked) {
+                if (Math.abs(dx) < 12 && Math.abs(dy) < 12) return;
+                clearTimeout(holdTimer);
+                if (Math.abs(dx) < Math.abs(dy) * 1.5) { g = null; return; }
+                g.locked = true;
+                unfocus();
+            }
+            g.dx = dx;
+        }, { passive: true });
+        const end = (e) => {
+            const s = g;
+            g = null;
+            if (!s || !s.locked) return;
+            const fast = Math.abs(s.dx) / Math.max(1, Date.now() - s.t) > 0.5 && Math.abs(s.dx) > 40;
+            if (Math.abs(s.dx) < MIN_DX && !fast) return;
+            // Stop the lift-off from focusing a field, and close one still being edited.
+            if (e && e.cancelable) e.preventDefault();
+            guardUntil = Date.now() + 600;
+            unfocus();
+            const go = nextTarget(view, s.dx);
+            if (go) go();
+        };
+        view.addEventListener('touchend', end, { passive: false });
+        view.addEventListener('touchcancel', () => { g = null; }, { passive: true });
+    }
+    attach(document.getElementById('view-inp'));
+    attach(document.getElementById('view-gen'));
+})();

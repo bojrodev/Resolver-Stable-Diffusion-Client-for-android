@@ -1,5 +1,5 @@
-// Slider widgets for ControlNet Weight (one ball) and Guidance start/end (two balls), in the ControlNet
-// sections and ADetailer's ControlNet. Steps of 0.05; a ball must be touched to move (the track
+// Slider widgets for ControlNet Weight (one ball), Guidance start/end (two balls) and the preprocessor's own
+// settings, in the ControlNet sections and ADetailer's ControlNet. Steps come from the input; a ball must be touched to move (the track
 // scrolls the page). The hidden <input type=number> stays the single source of truth, so payload
 // builders, save functions and presets keep working through .value. The widget stays in step with
 // the input both ways (dragging writes it and fires input/change; programmatic .value changes are
@@ -18,8 +18,8 @@
     function toFraction(value, min, max) {
         return max > min ? Math.min(1, Math.max(0, (value - min) / (max - min))) : 0;
     }
-    function format(value) {
-        return Number(value).toFixed(2);
+    function format(value, decimals) {
+        return Number(value).toFixed(decimals);
     }
 
     // Runs onChange after any change to input.value, including assignments from other code.
@@ -39,15 +39,16 @@
     function build(inputs, anchorCols, labelText) {
         const isRange = inputs.length === 2;
         const first = inputs[0];
-        const min = parseFloat(first.min);
-        const max = parseFloat(first.max);
-        const step = parseFloat(first.step) || 0.05;
-        const decimals = (String(step).split('.')[1] || '').length;
+        // let: a preprocessor slider's range changes with the preprocessor (refreshRange below).
+        let min = parseFloat(first.min);
+        let max = parseFloat(first.max);
+        let step = parseFloat(first.step) || 0.05;
+        let decimals = (String(step).split('.')[1] || '').length;
 
         const block = document.createElement('div');
         block.className = 'col cn-slider-col';
         block.innerHTML =
-            `<div class="cn-slider-head"><label>${labelText} (${min}-${max})</label><span class="cn-slider-val"></span></div>` +
+            `<div class="cn-slider-head"><label class="cn-slider-label">${labelText} (${min}-${max})</label><span class="cn-slider-val"></span></div>` +
             `<div class="cn-slider-wrap"><div class="cn-slider-track">${isRange ? '<div class="cn-slider-fill"></div>' : ''}</div></div>`;
         const wrap = block.querySelector('.cn-slider-wrap');
         const fill = block.querySelector('.cn-slider-fill');
@@ -79,11 +80,22 @@
                 const hi = Math.max(vs[0], vs[1]);
                 fill.style.setProperty('--p1', toFraction(lo, min, max));
                 fill.style.setProperty('--p2', toFraction(hi, min, max));
-                readout.textContent = `${format(vs[0])} - ${format(vs[1])}`;
+                readout.textContent = `${format(vs[0], decimals)} - ${format(vs[1], decimals)}`;
             } else {
-                readout.textContent = format(vs[0]);
+                readout.textContent = format(vs[0], decimals);
             }
         }
+
+        // Re-reads the range and label from the input (set by refreshControlNetParams(), network.js).
+        function refreshRange() {
+            min = parseFloat(first.min);
+            max = parseFloat(first.max);
+            step = parseFloat(first.step) || 0.05;
+            decimals = (String(step).split('.')[1] || '').length;
+            block.querySelector('.cn-slider-label').textContent = `${first.dataset.cnLabel || labelText} (${min}-${max})`;
+            thumbs.forEach(t => { t.setAttribute('aria-valuemin', String(min)); t.setAttribute('aria-valuemax', String(max)); t.setAttribute('aria-label', first.dataset.cnLabel || labelText); });
+        }
+        first._cnRefresh = () => { refreshRange(); sync(); };
 
         // ---- dragging: only a ball moves it ----
         let drag = null; // { index, pointerId, lastStepIndex }
@@ -196,6 +208,12 @@
         root.querySelectorAll('input[type="number"]').forEach(input => {
             if (input.dataset.cnSlider || !input.id) return;
             const col = input.closest('.col');
+            // A ControlNet preprocessor slider (data-cn-label), relabelled per preprocessor.
+            if (input.dataset.cnLabel !== undefined && col) {
+                input.dataset.cnSlider = '1';
+                build([input], [col], input.dataset.cnLabel);
+                return;
+            }
             if (WEIGHT_ID.test(input.id)) {
                 if (!col) { built.skipped.push(input.id); return; }
                 input.dataset.cnSlider = '1';

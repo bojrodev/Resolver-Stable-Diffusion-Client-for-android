@@ -354,6 +354,8 @@ function buildComfyUI(workflow) {
     if (hasExtras) container.appendChild(extrasBox);
     
     if(window.lucide) lucide.createIcons();
+    // Styled triggers for the dropdowns just built (modelpicker.js).
+    if (typeof initModelPickers === 'function') initModelPickers();
 }
 
 // --- 3. UI GENERATORS (Namespaced & Collapsible) ---
@@ -373,6 +375,7 @@ function addComfyDropdown(parent, nodeId, fieldName, label, listData, currentVal
         <select id="${uid}" onchange="updateComfyValue('${safeId(nodeId)}', '${safeId(fieldName)}', this.value)" style="border-left: 2px solid var(--accent-secondary);">
             ${options}
         </select>
+        <button type="button" class="model-picker-trigger hidden" data-target="${uid}" data-kind="option" data-modal-title="${escapeHtmlAttr(label)}" onclick="openModelPicker(this)"><span class="model-picker-trigger-primary"></span><span class="model-picker-trigger-subtitle hidden"></span></button>
     `;
     parent.appendChild(div);
     comfyInputMap[uid] = { nodeId, field: fieldName };
@@ -410,6 +413,7 @@ function addComfyLora(parent, nodeId, title, inputs) {
         <select id="in_${safeId(nodeId)}_lora_name" onchange="updateComfyValue('${safeId(nodeId)}', 'lora_name', this.value)" style="margin-bottom:8px;">
             ${options}
         </select>
+        <div style="margin-bottom:8px;"><button type="button" class="model-picker-trigger hidden" data-target="in_${safeId(nodeId)}_lora_name" data-kind="option" data-modal-title="Select LoRA" onclick="openModelPicker(this)"><span class="model-picker-trigger-primary"></span><span class="model-picker-trigger-subtitle hidden"></span></button></div>
 
         <div class="col">
             <div class="row" style="justify-content:space-between">
@@ -557,9 +561,10 @@ function renderPowerLoraSlot(container, nodeId, key, data) {
             </div>
         </div>
 
-        <select onchange="updateComfyValue('${safeId(nodeId)}', '${safeId(key)}.lora', this.value)" style="margin-bottom:8px;">
+        <select id="${valId}_lora" onchange="updateComfyValue('${safeId(nodeId)}', '${safeId(key)}.lora', this.value)" style="margin-bottom:8px;">
             ${options}
         </select>
+        <div style="margin-bottom:8px;"><button type="button" class="model-picker-trigger hidden" data-target="${valId}_lora" data-kind="option" data-modal-title="Select LoRA" onclick="openModelPicker(this)"><span class="model-picker-trigger-primary"></span><span class="model-picker-trigger-subtitle hidden"></span></button></div>
 
         <div class="row" style="justify-content:space-between">
             <label>Strength</label>
@@ -570,6 +575,7 @@ function renderPowerLoraSlot(container, nodeId, key, data) {
     `;
     
     container.appendChild(div);
+    if (typeof initModelPickers === 'function') initModelPickers();
 }
 
 async function removePowerLoraSlot(nodeId, key, btn) {

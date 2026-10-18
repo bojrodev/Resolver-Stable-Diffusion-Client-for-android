@@ -1,0 +1,130 @@
+diff --git a/www/index.html b/www/index.html
+index 7215ea1..386bda4 100644
+--- a/www/index.html
++++ b/www/index.html
+@@ -224,7 +224,7 @@
+                         <button onclick="saveNegativeAsNewDefault('xl')" class="btn-icon" style="width:20px; height:20px; padding:2px; color:var(--accent-primary);" title="Save Current as Default"><i data-lucide="save" width="16" height="16"></i></button>
+                         <button onclick="insertDefaultNegative('xl')" class="btn-icon" style="width:20px; height:20px; padding:2px; color:#2e7d32;" title="Insert Default Negative"><i data-lucide="refresh-cw" width="16" height="16"></i></button><button onclick="clearNegative('xl')" class="btn-icon" style="width:20px; height:20px; padding:2px; color:#f44336;" title="Clear Negative"><i data-lucide="trash-2" width="16" height="16"></i></button>
+                     </div>
+-                    <textarea id="xl_neg" style="min-height: 50px;" oninput="saveNegativePrompt('xl')" onblur="dedupePromptTagsOnBlur('xl', 'neg')">bad quality,worst quality,worst detail</textarea>
++                    <textarea id="xl_neg" rows="3" oninput="saveNegativePrompt('xl')" onblur="dedupePromptTagsOnBlur('xl', 'neg')">bad quality,worst quality,worst detail</textarea>
+                 </div>
+ 
+                 <div class="glass-box">
+@@ -2167,7 +2167,7 @@
+                         <button onclick="saveNegativeAsNewDefault('qwen')" class="btn-icon" style="width:20px; height:20px; padding:2px; color:var(--accent-primary);" title="Save Current as Default"><i data-lucide="save" width="16" height="16"></i></button>
+                         <button onclick="insertDefaultNegative('qwen')" class="btn-icon" style="width:20px; height:20px; padding:2px; color:#2e7d32;" title="Insert Default Negative"><i data-lucide="refresh-cw" width="16" height="16"></i></button><button onclick="clearNegative('qwen')" class="btn-icon" style="width:20px; height:20px; padding:2px; color:#f44336;" title="Clear Negative"><i data-lucide="trash-2" width="16" height="16"></i></button>
+                     </div>
+-                    <textarea id="qwen_neg" style="min-height: 50px;" oninput="saveNegativePrompt('qwen')">bad quality, blur, watermark</textarea>
++                    <textarea id="qwen_neg" rows="3" oninput="saveNegativePrompt('qwen')">bad quality, blur, watermark</textarea>
+                 </div>
+ 
+                 <div class="glass-box">
+@@ -3094,7 +3094,7 @@
+                         <button onclick="saveNegativeAsNewDefault('anima')" class="btn-icon" style="width:20px; height:20px; padding:2px; color:var(--accent-primary);" title="Save Current as Default"><i data-lucide="save" width="16" height="16"></i></button>
+                         <button onclick="insertDefaultNegative('anima')" class="btn-icon" style="width:20px; height:20px; padding:2px; color:#2e7d32;" title="Insert Default Negative"><i data-lucide="refresh-cw" width="16" height="16"></i></button><button onclick="clearNegative('anima')" class="btn-icon" style="width:20px; height:20px; padding:2px; color:#f44336;" title="Clear Negative"><i data-lucide="trash-2" width="16" height="16"></i></button>
+                     </div>
+-                    <textarea id="anima_neg" style="min-height: 50px;" oninput="saveNegativePrompt('anima')" onblur="dedupePromptTagsOnBlur('anima', 'neg')">bad quality, blur, watermark</textarea>
++                    <textarea id="anima_neg" rows="3" oninput="saveNegativePrompt('anima')" onblur="dedupePromptTagsOnBlur('anima', 'neg')">bad quality, blur, watermark</textarea>
+                 </div>
+ 
+                 <div class="glass-box">
+@@ -4021,7 +4021,7 @@
+                         <button onclick="saveNegativeAsNewDefault('krea')" class="btn-icon" style="width:20px; height:20px; padding:2px; color:var(--accent-primary);" title="Save Current as Default"><i data-lucide="save" width="16" height="16"></i></button>
+                         <button onclick="insertDefaultNegative('krea')" class="btn-icon" style="width:20px; height:20px; padding:2px; color:#2e7d32;" title="Insert Default Negative"><i data-lucide="refresh-cw" width="16" height="16"></i></button><button onclick="clearNegative('krea')" class="btn-icon" style="width:20px; height:20px; padding:2px; color:#f44336;" title="Clear Negative"><i data-lucide="trash-2" width="16" height="16"></i></button>
+                     </div>
+-                    <textarea id="krea_neg" style="min-height: 50px;" oninput="saveNegativePrompt('krea')">bad quality, blur, watermark</textarea>
++                    <textarea id="krea_neg" rows="3" oninput="saveNegativePrompt('krea')">bad quality, blur, watermark</textarea>
+                 </div>
+ 
+                 <div class="glass-box">
+@@ -6738,7 +6738,7 @@
+                             <label style="margin:0; font-size:13px;"><i data-lucide="shield-off" width="20" height="20"></i> Negative</label>
+                             <button onclick="saveNegativeAsNewDefault('inp')" class="btn-icon" style="width:20px; height:20px; padding:2px; color:var(--accent-primary);" title="Save Current as Default"><i data-lucide="save" width="16" height="16"></i></button>
+                             <button onclick="insertDefaultNegative('inp')" class="btn-icon" style="width:20px; height:20px; padding:2px; color:#2e7d32;" title="Insert Default Negative"><i data-lucide="refresh-cw" width="16" height="16"></i></button><button id="img2imgImportNegBtn" onclick="importNegativeFromImageMetadata('inp')" class="btn-icon hidden" style="width:20px; height:20px; padding:2px; color:#29b6f6;" title="Import Negative from Image Metadata"><i data-lucide="download" width="16" height="16"></i></button><button onclick="clearNegative('inp')" class="btn-icon" style="width:20px; height:20px; padding:2px; color:#f44336;" title="Clear Negative"><i data-lucide="trash-2" width="16" height="16"></i></button>
+-                            <textarea id="inp_neg" style="min-height:50px; width:100%;" oninput="saveNegativePrompt('inp'); saveCurrentInpaintModeStateLive();" onblur="dedupePromptTagsOnBlur('inp', 'neg')">bad quality, blur</textarea>
++                            <textarea id="inp_neg" rows="3" style="width:100%;" oninput="saveNegativePrompt('inp'); saveCurrentInpaintModeStateLive();" onblur="dedupePromptTagsOnBlur('inp', 'neg')">bad quality, blur</textarea>
+                         </div>
+                     </div>
+ 
+@@ -7311,6 +7311,14 @@
+                             <label for="cfgOneSectionSwitch" style="margin: 0; color: var(--text-main); font-size: 13px;">Auto-Collapse Config Sections</label>
+                             <input type="checkbox" id="cfgOneSectionSwitch" class="bojro-switch" onchange="setCfgOneSection(this.checked)">
+                         </div>
++                        <div class="row" style="justify-content: space-between; align-items: center; padding: 0 5px;">
++                            <label for="cfgTallNegSwitch" style="margin: 0; color: var(--text-main); font-size: 13px;">Double Negative Box Height</label>
++                            <input type="checkbox" id="cfgTallNegSwitch" class="bojro-switch" onchange="togglePromptBoxHeight('neg', this.checked)">
++                        </div>
++                        <div class="row" style="justify-content: space-between; align-items: center; padding: 0 5px;">
++                            <label for="cfgTallPromptSwitch" style="margin: 0; color: var(--text-main); font-size: 13px;">Double Prompt Box Height</label>
++                            <input type="checkbox" id="cfgTallPromptSwitch" class="bojro-switch" onchange="togglePromptBoxHeight('prompt', this.checked)">
++                        </div>
+                         <div class="row" style="justify-content: space-between; align-items: center; padding: 0 5px;">
+                             <label for="cfgFloatingBrushSwitch" style="margin: 0; color: var(--text-main); font-size: 13px;">Floating Brush Size</label>
+                             <input type="checkbox" id="cfgFloatingBrushSwitch" class="bojro-switch" onchange="toggleFloatingBrushBar()">
+diff --git a/www/js/boot.js b/www/js/boot.js
+index 6f74d86..4880da8 100644
+--- a/www/js/boot.js
++++ b/www/js/boot.js
+@@ -562,6 +562,8 @@ const BACKDROP_CLOSERS = {
+     loraModal: () => window.closeLoraModal(),
+     saacModal: () => window.SaacManager.close(),
+     styleModal: () => window.closeStyleModal(),
++    dataUsageModal: () => window.closeDataUsageHistory(),
++    debugLogModal: () => window.closeDebugLog(),
+ };
+ Object.entries(BACKDROP_CLOSERS).forEach(([id, close]) => {
+     const el = document.getElementById(id);
+diff --git a/www/js/cfg.js b/www/js/cfg.js
+index 46cf278..c88047a 100644
+--- a/www/js/cfg.js
++++ b/www/js/cfg.js
+@@ -423,7 +423,7 @@ const RESET_KEYS = [
+     // Interface
+     'bojroTheme', 'bojroResultStripLimit', 'bojroAnalyzerHistory', 'bojroEditHistory', 'bojroCfgOneSection',
+     'bojroFloatingBrushSize', 'bojroHideModelHints', 'bojroHideGenSpinner', 'bojroGalleryBadgesOff', 'bojroHideDevPower',
+-    'bojro_model_visibility',
++    'bojro_model_visibility', 'bojroTallPrompt', 'bojroTallNeg',
+     // Generation
+     'bojroAutoDeleteWarning', 'bojroAutoSave', 'bojroGenerationPollingRate', 'bojroBackgroundPollingRate',
+     'bojroKeepSourceSeed', 'bojroProgressBridgeEnabled', 'bojroShowBatchGrids', 'bojroLimitBatchGrid',
+@@ -459,6 +459,26 @@ window.resetAppConfig = async function() {
+     window.location.reload();
+ };
+ 
++// Double Prompt Box Height / Double Negative Box Height (Config > Interface): each tab's prompt and negative boxes are
++// 3 rows tall, or 6 with the option on.
++const PROMPT_BOX_MODES = ['xl', 'flux', 'qwen', 'anima', 'krea', 'inp'];
++function applyPromptBoxHeights() {
++    const tall = key => localStorage.getItem(key) === 'true';
++    PROMPT_BOX_MODES.forEach(m => {
++        const p = document.getElementById(`${m}_prompt`), n = document.getElementById(`${m}_neg`);
++        if (p) p.rows = tall('bojroTallPrompt') ? 6 : 3;
++        if (n) n.rows = tall('bojroTallNeg') ? 6 : 3;
++    });
++    const ps = document.getElementById('cfgTallPromptSwitch'), ns = document.getElementById('cfgTallNegSwitch');
++    if (ps) ps.checked = tall('bojroTallPrompt');
++    if (ns) ns.checked = tall('bojroTallNeg');
++}
++window.togglePromptBoxHeight = function(field, on) {
++    localStorage.setItem(field === 'neg' ? 'bojroTallNeg' : 'bojroTallPrompt', on ? 'true' : 'false');
++    applyPromptBoxHeights();
++};
++applyPromptBoxHeights();
++
+ // Backs up every localStorage key, independent of what resetAppConfig() resets.
+ window.backupAppSettings = async function() {
+     try {
+diff --git a/www/style.css b/www/style.css
+index 669f20f..b360bd7 100644
+--- a/www/style.css
++++ b/www/style.css
+@@ -1331,7 +1331,7 @@ body.hide-gallery-badges .gal-badges {
+ }
+ 
+ /* Modals with text inputs are anchored to the top rather than centred, so the keyboard and varying content height don't push them out of view. */
+-#loraModal, #img2imgPresetModal, #styleModal, #saacModal, #loraConfigModal, #styleEditorModal, #llmModal, #checkpointManagerModal, #checkpointConfigModal, #dataUsageModal {
++#loraModal, #img2imgPresetModal, #styleModal, #saacModal, #loraConfigModal, #styleEditorModal, #llmModal, #checkpointManagerModal, #checkpointConfigModal {
+     justify-content: flex-start;
+     padding-top: 40px;
+ }

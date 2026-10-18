@@ -334,6 +334,7 @@
     window.sendAnalyzedImageTo = function (topMode) {
         return guardedSend(dataUrl => {
             startEditorMetadataCapture(dataUrl); // so img2img's import-from-metadata buttons work afterwards
+            if (typeof rememberEditorReturn === 'function') rememberEditorReturn();
             window.switchTab('inp');
             window.setInpaintTopMode(topMode);
             showEditorWithImage(dataUrl);
@@ -363,6 +364,12 @@
         const menu = document.getElementById('anaStickyMenu');
         if (menu) { menu.textContent = ''; menu.classList.add('hidden'); }
     }
+    // Android back closes an open sticky menu (boot.js).
+    window.closeAnaStickyMenu = () => {
+        if (!stickyMenuKind) return false;
+        closeStickyMenu();
+        return true;
+    };
 
     // Config > Interface > Analyzer Sticky Bar. Off unless switched on.
     function stickyBarEnabled() {

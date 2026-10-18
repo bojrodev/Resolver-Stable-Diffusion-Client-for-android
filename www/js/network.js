@@ -38,16 +38,30 @@ async function performNativeRequest(url, options = {}) {
         }
     } catch (e) {}
 
+    const t0 = Date.now();
     try {
-        const response = await window.Capacitor.Plugins.CapacitorHttp.request({
+        const request = window.Capacitor.Plugins.CapacitorHttp.request({
             method: method,
             url: url,
             headers: headers,
             data: data
         });
+        // The native request can't be cancelled; an aborted signal just stops waiting for it.
+        const signal = options.signal;
+        if (signal && signal.aborted) throw new DOMException('Aborted', 'AbortError');
+        const response = !signal ? await request : await new Promise((resolve, reject) => {
+            const onAbort = () => reject(new DOMException('Aborted', 'AbortError'));
+            signal.addEventListener('abort', onAbort, { once: true });
+            request.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort));
+        });
 
+        // Debug log: slow native requests.
+        if (window.dbg && Date.now() - t0 > 15000) window.dbg(`native ${method} ${String(url).replace(/^https?:\/\/[^/]+/, '')} took ${Math.round((Date.now() - t0) / 1000)}s`);
         // Return a Fetch-Compatible Response Object
+        const raw = response.data;
         return {
+            // Reply size for the Data Usage Tracker; only worked out when read.
+            get nativeBytes() { return raw == null ? 0 : (typeof raw === 'string' ? raw.length : JSON.stringify(raw).length); },
             ok: response.status >= 200 && response.status < 300,
             status: response.status,
             statusText: response.status >= 200 && response.status < 300 ? "OK" : "Error",
@@ -58,7 +72,8 @@ async function performNativeRequest(url, options = {}) {
         };
 
     } catch (error) {
-        console.error("[NativeProxy] Request Failed:", error);
+        if (window.dbg && error?.name !== 'AbortError') window.dbg(`native ${method} ${String(url).replace(/^https?:\/\/[^/]+/, '')} failed after ${Date.now() - t0}ms: ${error?.message || error}`);
+        if (error?.name !== 'AbortError') console.error("[NativeProxy] Request Failed:", error);
         throw error;
     }
 }
@@ -104,6 +119,13 @@ window.fetch = async function(input, init) {
         console.warn("[NeoPatch] Error sanitizing payload", e);
     }
     // ---------------------------------
+
+    // Job requests (marked preferNative) always go through native HTTP on the device:
+    // the WebView stops getting replies about a minute after the app goes into the background.
+    if (init && init.preferNative && window.Capacitor?.isNativePlatform?.() && window.Capacitor.Plugins?.CapacitorHttp) {
+        const nativeUrl = typeof input === 'string' ? input : (input && input.url) || String(input);
+        return performNativeRequest(nativeUrl, init);
+    }
 
     // A. VALIDATION CHECK: Only run if Remote + Cloudflare are ON
     if (typeof connectionConfig === 'undefined' || !connectionConfig.isRemote) {
@@ -249,6 +271,7 @@ window.connect = async function(silent = false) {
 
         // fetchControlNetOptions() also runs on every successful connection (including re-taps of Initialize Engine), because the ControlNet lists were otherwise only populated once at boot and could stay empty if the server wasn't ready then. It also populates ADetailer's ControlNet model dropdown (populateAdetailerControlNetModels()), which depends on the same fetch.
         await Promise.all([fetchModels(), fetchSamplers(), fetchSchedulers(), fetchVaes(), fetchUpscalers(), fetchAdetailerModels(), fetchControlNetOptions()]);
+        fetchEmbeddingNames();
 
         // applyAllSavedDefaults() does not run here (it fought the live-state system). Sampler/scheduler are restored in fetchSamplers()/fetchSchedulers(); saved defaults apply only via Load Default.
 
@@ -325,51 +348,91 @@ async function fetchModels() {
         
         // SORT MODELS ALPHABETICALLY BY NAME
         data.sort((a, b) => a.model_name.localeCompare(b.model_name, undefined, {sensitivity: 'base'}));
+        window.allCheckpointModels = data;
+        populateCheckpointSelects(data);
+    } catch (e) {}
+}
 
-        // Helper to safely populate
-        const safePopulate = (id, list) => {
-            const el = document.getElementById(id);
-            if(el) {
-                el.innerHTML = "";
-                list.forEach(item => el.appendChild(item));
-            }
-        };
+// Restores a tab's saved checkpoint; one its grouping now leaves out is added back so the selection never changes by itself.
+function keepSavedCheckpoint(mode, data) {
+    const saved = localStorage.getItem('bojroModel_' + mode);
+    const el = document.getElementById(mode + '_modelSelect');
+    if (!saved || !el) return;
+    el.value = saved;
+    const m = el.value !== saved && data.find(d => d.title === saved);
+    if (m) {
+        el.appendChild(new Option(m.model_name, m.title));
+        el.value = saved;
+        if (typeof updateModelPickerTriggerText === 'function') updateModelPickerTriggerText(mode + '_modelSelect');
+    }
+}
 
-        const optsInp = [];
-        const optsImg2img = [];
-        data.forEach(m => {
-            optsInp.push(new Option(m.model_name, m.title));
-            optsImg2img.push(new Option(m.model_name, m.title));
-        });
-
-        safePopulate('xl_modelSelect', buildGroupedModelOptions(data, 'xl', 'SDXL Models'));
-        safePopulate('flux_modelSelect', buildGroupedModelOptions(data, 'flux', 'Flux Models'));
-        safePopulate('inp_modelSelect', optsInp);
-        safePopulate('img2img_modelSelect', optsImg2img);
-        safePopulate('anima_modelSelect', buildGroupedModelOptions(data, 'anima', 'Anima Models'));
-        safePopulate('krea_modelSelect', buildGroupedModelOptions(data, 'krea', 'Krea Models'));
-
-        ['xl', 'flux', 'inp', 'img2img', 'anima', 'krea'].forEach(mode => {
-            const saved = localStorage.getItem('bojroModel_' + mode);
-            const el = document.getElementById(mode + '_modelSelect');
-            if (saved && el) el.value = saved;
-        });
-        // Setting .value fires no 'change', so refresh the trigger button text.
-        if (typeof refreshAllModelPickerTriggers === 'function') refreshAllModelPickerTriggers();
-        // Inpaint/img2img Low Bits belongs to the checkpoint just restored
-        if (typeof refreshLowBitsControls === 'function') refreshLowBitsControls();
-
-        // Re-check now that the saved checkpoint (not the "Loading..." placeholder) is in the dropdown.
-        if (typeof updateInpaintNegativePromptVisibility === 'function') updateInpaintNegativePromptVisibility();
-        // The same for the Flux CLIP/T5 module row, for both sub-modes.
-        if (typeof updateInpFluxModuleVisibility === 'function') {
-            updateInpFluxModuleVisibility('inp');
-            updateInpFluxModuleVisibility('img2img');
+// Fills every tab's checkpoint dropdown; re-run when a checkpoint's type or Inpaint visibility changes.
+function populateCheckpointSelects(data) {
+    // Helper to safely populate
+    const safePopulate = (id, list) => {
+        const el = document.getElementById(id);
+        if(el) {
+            el.innerHTML = "";
+            list.forEach(item => el.appendChild(item));
         }
+    };
 
-        // --- NEO HOOK: POPULATE QWEN MODELS ---
-        if (window.Neo && window.Neo.populateModels) window.Neo.populateModels(data);
+    // Checkpoints hidden in Inpaint/img2img (one still selected there is added back by keepSavedCheckpoint()).
+    const inpOpts = () => data.filter(m => !(window.isCheckpointHiddenInInpaint && window.isCheckpointHiddenInInpaint(m.title)))
+        .map(m => new Option(m.model_name, m.title));
+    const optsInp = inpOpts();
+    const optsImg2img = inpOpts();
 
+    safePopulate('xl_modelSelect', buildGroupedModelOptions(data, 'xl', 'SDXL Models'));
+    safePopulate('flux_modelSelect', buildGroupedModelOptions(data, 'flux', 'Flux Models'));
+    safePopulate('inp_modelSelect', optsInp);
+    safePopulate('img2img_modelSelect', optsImg2img);
+    safePopulate('anima_modelSelect', buildGroupedModelOptions(data, 'anima', 'Anima Models'));
+    safePopulate('krea_modelSelect', buildGroupedModelOptions(data, 'krea', 'Krea Models'));
+
+    ['xl', 'flux', 'inp', 'img2img', 'anima', 'krea'].forEach(mode => keepSavedCheckpoint(mode, data));
+    // Setting .value fires no 'change', so refresh the trigger button text.
+    if (typeof refreshAllModelPickerTriggers === 'function') refreshAllModelPickerTriggers();
+    // Low Bits belongs to the checkpoint just restored.
+    if (typeof migrateLowBitsToCheckpoints === 'function') migrateLowBitsToCheckpoints(data);
+    if (typeof refreshLowBitsControls === 'function') refreshLowBitsControls();
+
+    // Re-check now that the saved checkpoint (not the "Loading..." placeholder) is in the dropdown.
+    if (typeof updateInpaintNegativePromptVisibility === 'function') updateInpaintNegativePromptVisibility();
+    // The same for the Flux CLIP/T5 module row, for both sub-modes.
+    if (typeof updateInpFluxModuleVisibility === 'function') {
+        updateInpFluxModuleVisibility('inp');
+        updateInpFluxModuleVisibility('img2img');
+    }
+
+    // --- NEO HOOK: POPULATE QWEN MODELS ---
+    if (window.Neo && window.Neo.populateModels) window.Neo.populateModels(data);
+    keepSavedCheckpoint('qwen', data);
+}
+
+// After a Checkpoint Manager change: regroup the dropdowns and re-read each Inpaint/img2img checkpoint's type.
+window.refreshCheckpointDependentUi = function() {
+    if (Array.isArray(window.allCheckpointModels) && window.allCheckpointModels.length) {
+        populateCheckpointSelects(window.allCheckpointModels);
+        return;
+    }
+    if (typeof updateInpaintNegativePromptVisibility === 'function') updateInpaintNegativePromptVisibility();
+    if (typeof updateInpFluxModuleVisibility === 'function') {
+        updateInpFluxModuleVisibility('inp');
+        updateInpFluxModuleVisibility('img2img');
+    }
+};
+
+// Embedding names, so Prompt Auto-Formatting keeps their underscores (ui.js). Not needed to connect, so failures are ignored.
+async function fetchEmbeddingNames() {
+    try {
+        const res = await fetch(`${HOST}/sdapi/v1/embeddings`, { headers: getHeaders() });
+        if (!res.ok) return;
+        const data = await res.json();
+        const names = [...Object.keys(data.loaded || {}), ...Object.keys(data.skipped || {})].map(n => n.toLowerCase());
+        promptEmbeddingNames = new Set(names);
+        localStorage.setItem('bojroEmbeddingNames', JSON.stringify(names));
     } catch (e) {}
 }
 
@@ -639,7 +702,7 @@ async function fetchVaes() {
         if (saved && el && Array.from(el.options).some(o => o.value === saved)) el.value = saved;
     });
     
-    // Low Bits is remembered per tab (engine.js getLowBitsForMode); this puts the stored values into the two selects.
+    // Low Bits is remembered per checkpoint (engine.js getLowBitsForMode); this puts the stored values into the two selects.
     if (typeof refreshLowBitsControls === 'function') refreshLowBitsControls();
 
     // Setting a select's value fires no 'change', so refresh each trigger button (modelpicker.js).
@@ -879,6 +942,7 @@ async function fetchControlNetOptions() {
                 const savedModel = localStorage.getItem(`bojro_${mode}_cn_${unit}_model`);
                 if (moduleSel && savedModule && Array.from(moduleSel.options).some(o => o.value === savedModule)) moduleSel.value = savedModule;
                 if (modelSel && savedModel && Array.from(modelSel.options).some(o => o.value === savedModel)) modelSel.value = savedModel;
+                refreshControlNetParams(mode, unit);
                 // Setting .value fires no 'change', so refresh each select's trigger button (as applyImg2imgPresetData()'s setIfExists()).
                 if (typeof updateModelPickerTriggerText === 'function') {
                     updateModelPickerTriggerText(`${mode}_cn_${unit}_module`);
@@ -969,6 +1033,87 @@ async function fetchControlNetTypes() {
     }
 }
 
+// What each preprocessor uses, from Forge Neo's preprocessor definitions. Unlisted ones use Resolution, Control Mode and a model, with no sliders.
+// Sliders: [label, min, max, default, step], sent as threshold_a/threshold_b.
+const CN_PREPROCESSOR_SPECS = (() => {
+    const noRes = { res: false };
+    const clipVision = { res: false, controlMode: false };
+    const reference = { res: false, controlMode: false, model: false, sliders: [['Style Fidelity', 0, 1, 0.5, 0.01]] };
+    const leres = { sliders: [['Remove Near %', 0, 100, 0, 0.1], ['Remove Background %', 0, 100, 0, 0.1]] };
+    const variation = ['Variation', 3, 32, 8, 1];
+    return {
+        'canny': { sliders: [['Low Threshold', 0, 256, 100, 1], ['High Threshold', 0, 256, 200, 1]] },
+        'blur_gaussian': { sliders: [['Sigma', 0.01, 64, 9, 0.01]] },
+        'depth_leres': leres,
+        'depth_leres++': leres,
+        'mediapipe_face': { sliders: [['Max Faces', 1, 10, 1, 1], ['Min Face Confidence', 0.01, 1, 0.5, 0.01]] },
+        'mlsd': { sliders: [['MLSD Value Threshold', 0.01, 2, 0.1, 0.01], ['MLSD Distance Threshold', 0.01, 20, 0.1, 0.01]] },
+        'normal_midas': { sliders: [['Normal Background Threshold', 0, 1, 0.4, 0.01]] },
+        'scribble_xdog': { sliders: [['XDoG Threshold', 1, 64, 32, 1]] },
+        'softedge_teed': { sliders: [['Safe Steps', 0, 10, 2, 1]] },
+        'threshold': { sliders: [['Binarization Threshold', 0, 255, 127, 1]] },
+        'tile_resample': noRes,
+        'tile_colorfix': { res: false, sliders: [variation] },
+        'tile_colorfix+sharp': { res: false, sliders: [variation, ['Sharpness', 0, 2, 1, 0.01]] },
+        'inpaint_global_harmonious': noRes,
+        'inpaint_only': noRes,
+        'inpaint_only+lama': noRes,
+        'inpaint_noobai': noRes,
+        'reference_only': reference,
+        'reference_adain': reference,
+        'reference_adain+attn': reference,
+        'CLIP-ViT-H (IPAdapter)': clipVision,
+        'CLIP-ViT-bigG (IPAdapter)': clipVision,
+        'InsightFace+CLIP-H (IPAdapter)': clipVision,
+        'InsightFace (InstantID)': clipVision
+    };
+})();
+function controlNetPreprocessorSpec(module) {
+    let spec = CN_PREPROCESSOR_SPECS[module];
+    if (!spec && /\((IPAdapter|InstantID)\)$/.test(module || '')) spec = { res: false, controlMode: false };
+    spec = spec || {};
+    return { res: spec.res !== false, controlMode: spec.controlMode !== false, model: spec.model !== false, sliders: spec.sliders || [] };
+}
+
+// Shows the unit's settings its preprocessor uses (Forge hides the rest). A new preprocessor's sliders start at its defaults.
+window.refreshControlNetParams = function(mode, unit) {
+    const P = `${mode}_cn_${unit}`;
+    const moduleSel = document.getElementById(`${P}_module`);
+    if (!moduleSel) return;
+    const module = moduleSel.value || 'none';
+    const spec = controlNetPreprocessorSpec(module);
+    const setOff = (id, off) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.disabled = off;
+        el.closest('.col')?.classList.toggle('cn-param-off', off);
+    };
+    setOff(`${P}_res`, !spec.res);
+    setOff(`${P}_control_mode`, !spec.controlMode);
+    setOff(`${P}_model`, !spec.model);
+
+    // Before Forge's list loads, the select only holds "none": nothing is reset or remembered yet.
+    const listLoaded = Array.isArray(window.controlNetFullModuleList);
+    const moduleKey = `bojro_${P}_param_module`;
+    const isNewModule = listLoaded && localStorage.getItem(moduleKey) !== module;
+    ['thresh_a', 'thresh_b'].forEach((field, i) => {
+        const input = document.getElementById(`${P}_${field}`);
+        if (!input) return;
+        const s = spec.sliders[i];
+        input.closest('.cn-param-row')?.classList.toggle('hidden', !s);
+        if (!s) return;
+        const [label, min, max, def, step] = s;
+        input.min = min; input.max = max; input.step = step;
+        input.dataset.cnLabel = label;
+        if (typeof input._cnRefresh === 'function') input._cnRefresh();
+        let v = parseFloat(input.value);
+        if (isNewModule || isNaN(v) || v < min || v > max) v = def;
+        input.value = v;
+        localStorage.setItem(`bojro_${P}_${field}`, v);
+    });
+    if (listLoaded) localStorage.setItem(moduleKey, module);
+};
+
 // Applies the selected Control Type's filtered lists (or restores the full lists for "All"); called from the select's onchange per mode and unit.
 window.applyControlType = function(mode, unit) {
     const typeSel = document.getElementById(`${mode}_cn_${unit}_controltype`);
@@ -1011,6 +1156,7 @@ window.applyControlType = function(mode, unit) {
         }
     }
 
+    refreshControlNetParams(mode, unit);
     saveControlNet(mode);
     if (typeof updateModelPickerTriggerText === 'function') {
         updateModelPickerTriggerText(`${mode}_cn_${unit}_module`);
@@ -1174,6 +1320,10 @@ window.initControlNet = function() {
             loadVal('start', 0.0);
             loadVal('end', 1.0);
             loadVal('control_mode', 0);
+            loadVal('res', 512);
+            loadVal('thresh_a');
+            loadVal('thresh_b');
+            refreshControlNetParams(mode, u);
         }
 
         const masterEl = document.getElementById(`${mode}_cn_master`);
@@ -1306,6 +1456,7 @@ function applyImg2imgPresetData(data) {
         setVal(`img2img_cn_${u}_start`, unit.start);
         setVal(`img2img_cn_${u}_end`, unit.end);
         setVal(`img2img_cn_${u}_control_mode`, unit.control_mode);
+        refreshControlNetParams('img2img', u);
     });
 
     // Persist the applied values into img2img's mode state too, so switching away and back shows them.
@@ -1314,10 +1465,40 @@ function applyImg2imgPresetData(data) {
     // saveControlNet() needs a mode to build its element IDs from (it was called with none).
     if (typeof saveControlNet === 'function') saveControlNet('img2img');
     if (typeof saveSelection === 'function') {
-        saveSelection('img2img');
+        checkpointSelectionQuiet = true;
+        try { saveSelection('img2img'); } finally { checkpointSelectionQuiet = false; }
         saveSelection('img2img_vae');
         saveSelection('img2img_te');
     }
+    applyPromptLoraOverrides('inp');
+    if (typeof updateNegPromptDimming === 'function') updateNegPromptDimming('inp');
+}
+
+// Re-applies the Sampler/Schedule/Steps/CFG overrides of the LoRAs in a mode's prompt (later LoRAs win), after checkpoint defaults.
+function applyPromptLoraOverrides(mode) {
+    const prompt = document.getElementById(`${mode}_prompt`)?.value || '';
+    const configs = typeof loraConfigs !== 'undefined' ? loraConfigs : {};
+    const all = (window.LoraManager && window.LoraManager.allLoras) || [];
+    const fields = { overrideSampler: 'sampler', overrideScheduler: 'scheduler', overrideSteps: 'steps', overrideCfg: 'cfg' };
+    let applied = false;
+    for (const m of prompt.matchAll(/<lora:([^:>]+):[^>]*>/g)) {
+        const alias = m[1].toLowerCase();
+        const name = (all.find(l => (l.alias || l.name || '').toLowerCase() === alias) || {}).name;
+        const key = name && configs[name] ? name : Object.keys(configs).find(k => k.toLowerCase() === alias);
+        const cfg = key && configs[key];
+        if (!cfg) continue;
+        for (const k in fields) {
+            const v = cfg[k];
+            const el = document.getElementById(`${mode}_${fields[k]}`);
+            if (v === undefined || v === null || v === '' || !el) continue;
+            el.value = v;
+            applied = true;
+            if ((fields[k] === 'sampler' || fields[k] === 'scheduler') && typeof updateModelPickerTriggerText === 'function') updateModelPickerTriggerText(el.id);
+            if (fields[k] === 'cfg' && typeof updateNegPromptDimming === 'function') updateNegPromptDimming(mode);
+        }
+    }
+    if (applied && mode === 'inp' && typeof saveCurrentInpaintModeStateLive === 'function') saveCurrentInpaintModeStateLive();
+    return applied;
 }
 
 // Which preset (if any) matches the current configuration exactly; at most one is active. Cleared by clearActiveImg2imgPresetIfMatchingField() when a captured setting changes.
@@ -1333,9 +1514,10 @@ window.clearActiveImg2imgPreset = function() {
 window.renderImg2imgPresetList = function() {
     const presets = loadImg2imgPresets();
     const container = document.getElementById('img2imgPresetList');
-    const query = (document.getElementById('img2imgPresetSearch')?.value || '').toLowerCase();
+    const rawQuery = document.getElementById('img2imgPresetSearch')?.value || '';
+    const query = searchQuery(rawQuery);
     const clearBtn = document.getElementById('img2imgPresetSearchClear');
-    if (clearBtn) clearBtn.classList.toggle('hidden', !query);
+    if (clearBtn) clearBtn.classList.toggle('hidden', !rawQuery);
 
     const allNames = Object.keys(presets);
     if (allNames.length === 0) {
@@ -1344,7 +1526,7 @@ window.renderImg2imgPresetList = function() {
     }
 
     const names = allNames
-        .filter(name => name.toLowerCase().includes(query))
+        .filter(name => searchKey(name).includes(query))
         .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
 
     if (names.length === 0) {

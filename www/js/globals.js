@@ -155,8 +155,9 @@ let paintTranslateX = 0;
 let paintTranslateY = 0;
 let paintPinchStartDist = 0;
 let paintPinchStartScale = 1;
-let paintPinchStartTranslate = { x: 0, y: 0 };
-let paintPinchStartMid = null;
+// Pinch anchor (canvas point under the fingers) and the canvas's unmoved centre.
+let paintPinchAnchor = { x: 0, y: 0 };
+let paintPinchCentre = { x: 0, y: 0 };
 const PAINT_MIN_ZOOM = 1;
 const PAINT_MAX_ZOOM = 5;
 
@@ -220,6 +221,8 @@ let totalBatchSteps = 0;
 let currentBatchProgress = 0;
 // Sum of each finished job's real ADetailer growth, carried across jobs within one queue run.
 let queueADetailerGrowthCarried = 0;
+// Queue jobs finished in the current run, for the notification's "Queue 3/4".
+let queueJobsDone = 0;
 let isSingleJobRunning = false;
 
 let isSelectionMode = false;

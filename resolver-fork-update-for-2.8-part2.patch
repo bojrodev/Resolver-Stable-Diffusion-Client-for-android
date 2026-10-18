@@ -1,0 +1,2233 @@
+diff --git a/android/app/src/main/AndroidManifest.xml b/android/app/src/main/AndroidManifest.xml
+index 96b530f..493a64e 100644
+--- a/android/app/src/main/AndroidManifest.xml
++++ b/android/app/src/main/AndroidManifest.xml
+@@ -51,5 +51,7 @@
+     <uses-permission android:name="android.permission.WAKE_LOCK" />
+     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
++    <!-- Android 16 Live Update for the generation progress notification. -->
++    <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
+ 
+ </manifest>
+\ No newline at end of file
+diff --git a/android/app/src/main/java/com/resolver/client/GenerationWatchdogWorker.java b/android/app/src/main/java/com/resolver/client/GenerationWatchdogWorker.java
+index e3da732..68af485 100644
+--- a/android/app/src/main/java/com/resolver/client/GenerationWatchdogWorker.java
++++ b/android/app/src/main/java/com/resolver/client/GenerationWatchdogWorker.java
+@@ -2,11 +2,10 @@ package com.resolver.client;
+ 
+ import android.app.ActivityManager;
+ import android.content.Context;
+-import android.content.Intent;
+ import android.content.SharedPreferences;
+-import android.os.Build;
+ import androidx.annotation.NonNull;
+ import androidx.work.Worker;
++import androidx.work.WorkManager;
+ import androidx.work.WorkerParameters;
+ 
+ public class GenerationWatchdogWorker extends Worker {
+@@ -27,20 +26,11 @@ public class GenerationWatchdogWorker extends Worker {
+         if (shouldBeRunning) {
+             // 2. Check if we ARE running
+             if (!isServiceRunning(context, ResolverForegroundService.class)) {
+-                // 3. RESTART SERVICE if missing
+-                String title = prefs.getString("last_title", "Resuming...");
+-                String body = prefs.getString("last_body", "Restoring connection...");
+-                
+-                Intent intent = new Intent(context, ResolverForegroundService.class);
+-                intent.setAction(ResolverForegroundService.ACTION_START_FOREGROUND_SERVICE);
+-                intent.putExtra(ResolverForegroundService.EXTRA_TITLE, title);
+-                intent.putExtra(ResolverForegroundService.EXTRA_BODY, body);
+-                
+-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+-                    context.startForegroundService(intent);
+-                } else {
+-                    context.startService(intent);
+-                }
++                // 3. The service only stops while a job is expected when the app's process died with it, and the
++                // page that drove the job is gone too, so a restarted notification would never update or clear.
++                // Clear the expectation and stop checking instead.
++                prefs.edit().putBoolean("should_be_generating", false).apply();
++                WorkManager.getInstance(context).cancelUniqueWork("GenerationWatchdog");
+             }
+         }
+         return Result.success();
+diff --git a/android/app/src/main/java/com/resolver/client/MainActivity.java b/android/app/src/main/java/com/resolver/client/MainActivity.java
+index 20e536e..ef76849 100644
+--- a/android/app/src/main/java/com/resolver/client/MainActivity.java
++++ b/android/app/src/main/java/com/resolver/client/MainActivity.java
+@@ -1,6 +1,8 @@
+ package com.resolver.client;
+ 
++import android.os.Build;
+ import android.os.Bundle;
++import android.webkit.WebView;
+ import android.webkit.WebSettings;
+ import com.getcapacitor.BridgeActivity;
+ 
+@@ -9,6 +11,7 @@ public class MainActivity extends BridgeActivity {
+     @Override
+     public void onCreate(Bundle savedInstanceState) {
+         registerPlugin(ResolverServicePlugin.class);
++        registerPlugin(ResolverDevicePlugin.class);
+         super.onCreate(savedInstanceState);
+         
+         // OLD LOCKS REMOVED:
+@@ -28,6 +31,15 @@ public class MainActivity extends BridgeActivity {
+             // Hide the WebView's native scroll indicator (CSS cannot reach it).
+             this.bridge.getWebView().setVerticalScrollBarEnabled(false);
+             this.bridge.getWebView().setHorizontalScrollBarEnabled(false);
++
++            // Hide From Accessibility Services, before anything can read the page (ResolverDevicePlugin).
++            ResolverDevicePlugin.applyHideFromAccessibility(this.bridge.getWebView(),
++                getSharedPreferences(ResolverDevicePlugin.PREFS, android.content.Context.MODE_PRIVATE).getBoolean(ResolverDevicePlugin.KEY_HIDE_A11Y, false));
++
++            // Keep the WebView's renderer at full priority while hidden, so background jobs keep running.
++            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
++                this.bridge.getWebView().setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false);
++            }
+         }
+     }
+ 
+diff --git a/android/app/src/main/java/com/resolver/client/ResolverDevicePlugin.java b/android/app/src/main/java/com/resolver/client/ResolverDevicePlugin.java
+new file mode 100644
+index 0000000..c285c1c
+--- /dev/null
++++ b/android/app/src/main/java/com/resolver/client/ResolverDevicePlugin.java
+@@ -0,0 +1,219 @@
++package com.resolver.client;
++
++import android.app.ActivityManager;
++import android.content.Context;
++import android.content.Intent;
++import android.net.ConnectivityManager;
++import android.net.NetworkInfo;
++import android.os.Build;
++import android.os.PowerManager;
++import android.os.Handler;
++import android.os.Looper;
++import android.provider.Settings;
++import android.view.View;
++import android.view.Window;
++import android.webkit.WebView;
++
++import androidx.core.view.WindowCompat;
++import androidx.core.view.WindowInsetsCompat;
++import androidx.core.view.WindowInsetsControllerCompat;
++
++import com.getcapacitor.JSObject;
++import com.getcapacitor.Plugin;
++import com.getcapacitor.PluginCall;
++import com.getcapacitor.PluginMethod;
++import com.getcapacitor.annotation.CapacitorPlugin;
++
++import java.net.HttpURLConnection;
++import java.net.URL;
++import java.util.Iterator;
++
++@CapacitorPlugin(name = "ResolverDevice")
++public class ResolverDevicePlugin extends Plugin {
++
++    static final String PREFS = "ResolverPrefs";
++    static final String KEY_LIVE_UPDATE = "live_update";
++    static final String EXTRA_TAP = "resolverNotificationTap";
++    static final String KEY_JOB_SERVER = "job_server_url";
++    static final String KEY_JOB_HEADERS = "job_server_headers";
++    static final String KEY_HIDE_A11Y = "hide_from_accessibility";
++
++    // Progress notification tapped: tell the page (kept until a listener is added).
++    @Override
++    public void load() {
++        reportTap(getActivity().getIntent());
++    }
++
++    @Override
++    protected void handleOnNewIntent(Intent intent) {
++        super.handleOnNewIntent(intent);
++        reportTap(intent);
++    }
++
++    private void reportTap(Intent intent) {
++        if (intent == null || !intent.hasExtra(EXTRA_TAP)) return;
++        JSObject data = new JSObject();
++        data.put("target", intent.getStringExtra(EXTRA_TAP));
++        intent.removeExtra(EXTRA_TAP);
++        notifyListeners("notificationTap", data, true);
++    }
++
++    // While a job runs with Abort Job If App Closes on: the server to stop if the app is swiped away
++    // (ResolverForegroundService.onTaskRemoved). An empty url clears it.
++    @PluginMethod()
++    public void setJobServer(PluginCall call) {
++        String url = call.getString("url", "");
++        JSObject headers = call.getObject("headers", new JSObject());
++        getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
++            .putString(KEY_JOB_SERVER, url == null ? "" : url)
++            .putString(KEY_JOB_HEADERS, headers.toString())
++            .apply();
++        call.resolve();
++    }
++
++    @PluginMethod()
++    public void getDeviceInfo(PluginCall call) {
++        JSObject ret = new JSObject();
++        ret.put("manufacturer", Build.MANUFACTURER);
++        ret.put("sdk", Build.VERSION.SDK_INT);
++        call.resolve(ret);
++    }
++
++    @PluginMethod()
++    public void setLiveUpdate(PluginCall call) {
++        getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
++                .putBoolean(KEY_LIVE_UPDATE, call.getBoolean("enabled", false)).apply();
++        call.resolve();
++    }
++
++    // Ticks while the page is hidden, waking job timers the WebView would slow to about one a minute.
++    private final Handler tickHandler = new Handler(Looper.getMainLooper());
++    private boolean ticking = false;
++    private final Runnable tick = new Runnable() {
++        @Override
++        public void run() {
++            if (!ticking) return;
++            notifyListeners("tick", new JSObject());
++            tickHandler.postDelayed(this, 500);
++        }
++    };
++
++    @PluginMethod()
++    public void startTicks(PluginCall call) {
++        if (!ticking) {
++            ticking = true;
++            tickHandler.post(tick);
++        }
++        call.resolve();
++    }
++
++    @PluginMethod()
++    public void stopTicks(PluginCall call) {
++        ticking = false;
++        tickHandler.removeCallbacks(tick);
++        call.resolve();
++    }
++
++    @Override
++    protected void handleOnDestroy() {
++        ticking = false;
++        tickHandler.removeCallbacks(tick);
++    }
++
++    // Debug log (Config > Experimental): process importance, network state and a native request to the server.
++    @PluginMethod()
++    public void diag(PluginCall call) {
++        final String url = call.getString("url");
++        final JSObject headers = call.getObject("headers", new JSObject());
++        new Thread(() -> {
++            JSObject r = new JSObject();
++            try {
++                ActivityManager.RunningAppProcessInfo info = new ActivityManager.RunningAppProcessInfo();
++                ActivityManager.getMyMemoryState(info);
++                r.put("importance", info.importance);
++                ConnectivityManager cm = (ConnectivityManager) getContext().getSystemService(Context.CONNECTIVITY_SERVICE);
++                if (cm != null) {
++                    NetworkInfo ni = cm.getActiveNetworkInfo();
++                    r.put("net", ni == null ? "none" : ni.getTypeName() + " " + ni.getDetailedState());
++                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) r.put("restrictBg", cm.getRestrictBackgroundStatus());
++                }
++                PowerManager pm = (PowerManager) getContext().getSystemService(Context.POWER_SERVICE);
++                if (pm != null) {
++                    r.put("powerSave", pm.isPowerSaveMode());
++                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) r.put("idle", pm.isDeviceIdleMode());
++                }
++            } catch (Exception e) {
++                r.put("stateError", e.toString());
++            }
++            if (url != null) {
++                long t0 = System.currentTimeMillis();
++                HttpURLConnection c = null;
++                try {
++                    c = (HttpURLConnection) new URL(url).openConnection();
++                    c.setConnectTimeout(5000);
++                    c.setReadTimeout(5000);
++                    Iterator<String> keys = headers.keys();
++                    while (keys.hasNext()) {
++                        String k = keys.next();
++                        c.setRequestProperty(k, headers.optString(k));
++                    }
++                    int code = c.getResponseCode();
++                    r.put("probe", "HTTP " + code + " in " + (System.currentTimeMillis() - t0) + "ms");
++                } catch (Exception e) {
++                    r.put("probe", e.getClass().getSimpleName() + ": " + e.getMessage() + " after " + (System.currentTimeMillis() - t0) + "ms");
++                } finally {
++                    if (c != null) c.disconnect();
++                }
++            }
++            call.resolve(r);
++        }).start();
++    }
++
++    // Hide From Accessibility Services: accessibility services (screen readers, and apps like Bitdefender) can't read
++    // the page. Reading a WebView's whole page runs on the main thread, so a service that keeps asking causes stalls.
++    @PluginMethod()
++    public void setHideFromAccessibility(PluginCall call) {
++        final boolean hide = call.getBoolean("hide", false);
++        getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_HIDE_A11Y, hide).apply();
++        getActivity().runOnUiThread(() -> {
++            applyHideFromAccessibility(getBridge().getWebView(), hide);
++            call.resolve();
++        });
++    }
++
++    static void applyHideFromAccessibility(WebView webView, boolean hide) {
++        if (webView == null) return;
++        webView.setImportantForAccessibility(hide ? View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS : View.IMPORTANT_FOR_ACCESSIBILITY_AUTO);
++    }
++
++    // Fullscreen viewer: hides or shows the status bar (swiping down shows it briefly).
++    @PluginMethod()
++    public void setStatusBarHidden(PluginCall call) {
++        final boolean hidden = call.getBoolean("hidden", false);
++        getActivity().runOnUiThread(() -> {
++            Window window = getActivity().getWindow();
++            WindowInsetsControllerCompat c = WindowCompat.getInsetsController(window, window.getDecorView());
++            c.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
++            if (hidden) c.hide(WindowInsetsCompat.Type.statusBars());
++            else c.show(WindowInsetsCompat.Type.statusBars());
++            call.resolve();
++        });
++    }
++
++    // Opens Settings > Notifications (Samsung's filter has no direct intent), else Settings.
++    @PluginMethod()
++    public void openNotificationSettings(PluginCall call) {
++        String[] actions = { "android.settings.NOTIFICATION_SETTINGS", Settings.ACTION_SETTINGS };
++        for (String action : actions) {
++            try {
++                Intent intent = new Intent(action);
++                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
++                getContext().startActivity(intent);
++                call.resolve();
++                return;
++            } catch (Exception ignored) {
++            }
++        }
++        call.reject("Settings unavailable");
++    }
++}
+diff --git a/android/app/src/main/java/com/resolver/client/ResolverForegroundService.java b/android/app/src/main/java/com/resolver/client/ResolverForegroundService.java
+index 65ba8be..192e5cf 100644
+--- a/android/app/src/main/java/com/resolver/client/ResolverForegroundService.java
++++ b/android/app/src/main/java/com/resolver/client/ResolverForegroundService.java
+@@ -3,6 +3,7 @@ package com.resolver.client;
+ import android.app.Notification;
+ import android.app.NotificationChannel;
+ import android.app.NotificationManager;
++import android.app.PendingIntent;
+ import android.app.Service;
+ import android.content.Context;
+ import android.content.Intent;
+@@ -16,7 +17,9 @@ import androidx.core.app.NotificationCompat;
+ 
+ public class ResolverForegroundService extends Service {
+     
+-    private static final String CHANNEL_ID = "RESOLVER_FG_CHANNEL";
++    // Normal importance, silent. New ID as Android never raises a channel's importance; the old one is deleted.
++    private static final String CHANNEL_ID = "RESOLVER_PROGRESS_CHANNEL";
++    private static final String OLD_CHANNEL_ID = "RESOLVER_FG_CHANNEL";
+     private static final int NOTIFICATION_ID = 1002;
+     
+     // Actions
+@@ -111,7 +114,8 @@ public class ResolverForegroundService extends Service {
+                         break;
+                     case ACTION_UPDATE_PROGRESS:
+                         int progress = intent.getIntExtra(EXTRA_PROGRESS, 0);
+-                        updateNotification(title, body, progress);
++                        // startForeground, not notify(): also covers an update arriving before the start.
++                        startForegroundServiceCompat(title, body, progress);
+                         break;
+                     case ACTION_STOP_FOREGROUND_SERVICE:
+                         // Release locks when we explicitly stop
+@@ -126,7 +130,58 @@ public class ResolverForegroundService extends Service {
+                 }
+             }
+         }
+-        return START_REDELIVER_INTENT; 
++        // Not restarted after the app's process dies: with no page to update it, the notification would be stuck.
++        return START_NOT_STICKY;
++    }
++
++    // Swiping the app away from Recents ends the job's notification too (the page that ran it is gone),
++    // and tells GenerationWatchdogWorker not to bring it back.
++    @Override
++    public void onTaskRemoved(Intent rootIntent) {
++        interruptJobOnServer();
++        getSharedPreferences("ResolverPrefs", Context.MODE_PRIVATE).edit().putBoolean("should_be_generating", false).apply();
++        androidx.work.WorkManager.getInstance(this).cancelUniqueWork("GenerationWatchdog");
++        releaseLocks();
++        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
++            stopForeground(STOP_FOREGROUND_REMOVE);
++        } else {
++            stopForeground(true);
++        }
++        stopSelf();
++        super.onTaskRemoved(rootIntent);
++    }
++
++    // Abort Job If App Closes: tells Forge to stop the job (set by ResolverDevicePlugin.setJobServer while one runs).
++    // Waits up to 3 seconds, as the process may end soon after.
++    private void interruptJobOnServer() {
++        android.content.SharedPreferences prefs = getSharedPreferences(ResolverDevicePlugin.PREFS, Context.MODE_PRIVATE);
++        final String server = prefs.getString(ResolverDevicePlugin.KEY_JOB_SERVER, "");
++        final String headers = prefs.getString(ResolverDevicePlugin.KEY_JOB_HEADERS, "{}");
++        prefs.edit().putString(ResolverDevicePlugin.KEY_JOB_SERVER, "").apply();
++        if (server == null || server.isEmpty()) return;
++        Thread t = new Thread(() -> {
++            java.net.HttpURLConnection conn = null;
++            try {
++                conn = (java.net.HttpURLConnection) new java.net.URL(server + "/sdapi/v1/interrupt").openConnection();
++                conn.setRequestMethod("POST");
++                conn.setConnectTimeout(2500);
++                conn.setReadTimeout(2500);
++                org.json.JSONObject h = new org.json.JSONObject(headers);
++                java.util.Iterator<String> keys = h.keys();
++                while (keys.hasNext()) {
++                    String k = keys.next();
++                    conn.setRequestProperty(k, h.optString(k));
++                }
++                conn.setDoOutput(true);
++                conn.getOutputStream().close();
++                conn.getResponseCode();
++            } catch (Exception ignored) {
++            } finally {
++                if (conn != null) conn.disconnect();
++            }
++        });
++        t.start();
++        try { t.join(3000); } catch (InterruptedException ignored) {}
+     }
+ 
+     @Override
+@@ -137,33 +192,69 @@ public class ResolverForegroundService extends Service {
+ 
+     // --- Notification Management ---
+ 
++    private boolean channelReady = false;
++
+     private void createNotificationChannel() {
++        if (channelReady) return;
++        channelReady = true;
+         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+             NotificationChannel channel = new NotificationChannel(
+                     CHANNEL_ID,
+-                    "Resolver Background",
+-                    NotificationManager.IMPORTANCE_LOW 
++                    "Generation Progress",
++                    NotificationManager.IMPORTANCE_DEFAULT
+             );
+             channel.setDescription("Background generation status.");
++            channel.setSound(null, null);
++            channel.enableVibration(false);
++            channel.setShowBadge(false);
+             NotificationManager manager = getSystemService(NotificationManager.class);
+             if (manager != null) {
++                manager.deleteNotificationChannel(OLD_CHANNEL_ID);
+                 manager.createNotificationChannel(channel);
+             }
+         }
+     }
+ 
++    // Tap opens the running app (MainActivity is singleTask).
++    private PendingIntent openApp;
++
++    private PendingIntent openAppIntent() {
++        if (openApp != null) return openApp;
++        Intent launch = getPackageManager().getLaunchIntentForPackage(getPackageName());
++        if (launch == null) return null;
++        launch.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
++        // Tells the page the progress notification was tapped (ResolverDevicePlugin).
++        launch.putExtra(ResolverDevicePlugin.EXTRA_TAP, "progress");
++        int flags = PendingIntent.FLAG_UPDATE_CURRENT;
++        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) flags |= PendingIntent.FLAG_IMMUTABLE;
++        openApp = PendingIntent.getActivity(this, 0, launch, flags);
++        return openApp;
++    }
++
+     private Notification buildNotification(String title, String body, int progress) {
+         createNotificationChannel();
+         
+-        return new NotificationCompat.Builder(this, CHANNEL_ID)
++        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
+                 .setContentTitle(title)
+-                .setContentText(body) 
+-                .setSmallIcon(R.mipmap.ic_launcher) 
+-                .setProgress(100, progress, false) 
+-                .setOnlyAlertOnce(true) 
+-                .setOngoing(true) 
+-                .setPriority(NotificationCompat.PRIORITY_LOW) 
+-                .build();
++                .setSmallIcon(R.mipmap.ic_launcher)
++                .setProgress(100, progress, false)
++                .setOnlyAlertOnce(true)
++                .setShowWhen(false) // the time would truncate the step count
++                .setOngoing(true)
++                .setCategory(NotificationCompat.CATEGORY_PROGRESS)
++                // Show at once; Android 12+ otherwise delays it up to 10 s, missing quick jobs.
++                .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
++                .setPriority(NotificationCompat.PRIORITY_DEFAULT);
++        PendingIntent open = openAppIntent();
++        if (open != null) builder.setContentIntent(open);
++        // An empty body leaves the title on its own line ("Generating: Step 42 / 50").
++        if (body != null && !body.isEmpty()) builder.setContentText(body);
++        // Android 16 Live Update (raw extra, as compileSdk is 35); Config > Experimental.
++        if (Build.VERSION.SDK_INT >= 36 && getSharedPreferences(ResolverDevicePlugin.PREFS, Context.MODE_PRIVATE)
++                .getBoolean(ResolverDevicePlugin.KEY_LIVE_UPDATE, false)) {
++            builder.getExtras().putBoolean("android.requestPromotedOngoing", true);
++        }
++        return builder.build();
+     }
+     
+     private void startForegroundServiceCompat(String title, String body, int progress) {
+@@ -177,13 +268,6 @@ public class ResolverForegroundService extends Service {
+         }
+     }
+     
+-    private void updateNotification(String title, String body, int progress) {
+-        Notification notification = buildNotification(title, body, progress);
+-        NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+-        if (manager != null) {
+-            manager.notify(NOTIFICATION_ID, notification);
+-        }
+-    }
+     
+     @Nullable
+     @Override
+diff --git a/www/index.html b/www/index.html
+index 65bc6c5..7215ea1 100644
+--- a/www/index.html
++++ b/www/index.html
+@@ -7486,10 +7486,34 @@
+                         <i id="arr-cfg-experimental" data-lucide="chevron-down" width="14" height="14" style="transition: transform 0.2s;"></i>
+                     </div>
+                     <div id="cfg-experimental" class="col cfg-accordion-content" style="gap: 14px; padding: 0;">
++                        <div class="row" style="justify-content: space-between; align-items: center; padding: 0 5px;">
++                            <label for="cfgAbortJobOnCloseSwitch" style="margin: 0; color: var(--text-main); font-size: 13px;">Abort Job If App Closes or Disconnects</label>
++                            <input type="checkbox" id="cfgAbortJobOnCloseSwitch" class="bojro-switch" onchange="localStorage.setItem('bojroAbortJobOnClose', this.checked ? 'true' : 'false')">
++                        </div>
+                         <div class="row" style="justify-content: space-between; align-items: center; padding: 0 5px;">
+                             <label for="cfgUpscaleExpSwitch" style="margin: 0; color: var(--text-main); font-size: 13px;">Additional Upscale Features</label>
+                             <input type="checkbox" id="cfgUpscaleExpSwitch" class="bojro-switch" onchange="toggleUpscaleExpFeatures()">
+                         </div>
++                        <div class="row" style="justify-content: space-between; align-items: center; padding: 0 5px;">
++                            <label for="cfgDataUsageSwitch" style="margin: 0; color: var(--text-main); font-size: 13px;">Data Usage Tracker</label>
++                            <input type="checkbox" id="cfgDataUsageSwitch" class="bojro-switch" onchange="toggleDataUsageTracker()">
++                        </div>
++                        <div id="cfgDataUsagePillRow" class="row hidden" style="justify-content: space-between; align-items: center; padding: 0 5px 0 17px;">
++                            <label for="cfgDataUsagePillSwitch" style="margin: 0; color: var(--text-main); font-size: 13px;">Floating Data Counter</label>
++                            <input type="checkbox" id="cfgDataUsagePillSwitch" class="bojro-switch" onchange="toggleDataUsagePill()">
++                        </div>
++                        <div class="row" style="justify-content: space-between; align-items: center; padding: 0 5px;">
++                            <label for="cfgDebugLogSwitch" style="margin: 0; color: var(--text-main); font-size: 13px;">Enable Debug Log</label>
++                            <input type="checkbox" id="cfgDebugLogSwitch" class="bojro-switch" onchange="toggleDebugLog()">
++                        </div>
++                        <div class="row" style="justify-content: space-between; align-items: center; padding: 0 5px;">
++                            <label for="cfgHideA11ySwitch" style="margin: 0; color: var(--text-main); font-size: 13px;">Hide From Accessibility Services</label>
++                            <input type="checkbox" id="cfgHideA11ySwitch" class="bojro-switch" onchange="toggleHideFromAccessibility()">
++                        </div>
++                        <div id="cfgLiveUpdateRow" class="row hidden" style="justify-content: space-between; align-items: center; padding: 0 5px;">
++                            <label for="cfgLiveUpdateSwitch" style="margin: 0; color: var(--text-main); font-size: 13px;">Live Update Notification</label>
++                            <input type="checkbox" id="cfgLiveUpdateSwitch" class="bojro-switch" onchange="toggleLiveUpdate()">
++                        </div>
+                         <div class="row" style="justify-content: space-between; align-items: center; padding: 0 5px;">
+                             <label for="cfgPromptFormatSwitch" style="margin: 0; color: var(--text-main); font-size: 13px;">Prompt Auto-Formatting</label>
+                             <input type="checkbox" id="cfgPromptFormatSwitch" class="bojro-switch" onchange="togglePromptFormat()">
+@@ -7510,6 +7534,12 @@
+                             <label for="cfgShowControlnetOtherSwitch" style="margin: 0; color: var(--text-main); font-size: 13px;">Show ControlNet [Other]</label>
+                             <input type="checkbox" id="cfgShowControlnetOtherSwitch" class="bojro-switch" onchange="toggleControlnetSectionVisibilityOther()">
+                         </div>
++                        <button id="cfgDataUsageHistoryBtn" onclick="openDataUsageHistory()" class="btn-small hidden" style="width: 100%;">
++                            <i data-lucide="activity" width="16" height="16" style="vertical-align: -2px; margin-right: 6px;"></i> DATA USAGE HISTORY
++                        </button>
++                        <button id="cfgDebugLogBtn" onclick="openDebugLog()" class="btn-small hidden" style="width: 100%;">
++                            <i data-lucide="file-text" width="16" height="16" style="vertical-align: -2px; margin-right: 6px;"></i> DEBUG LOG
++                        </button>
+                     </div>
+                 </div>
+ 
+@@ -7739,6 +7769,38 @@
+         </div>
+     </div>
+ 
++    <!-- Debug log (Config > Experimental). -->
++    <div id="debugLogModal" class="modal hidden">
++        <div class="modal-content" style="max-height: calc(100vh - 60px); display: flex; flex-direction: column;">
++            <div class="modal-header">
++                <h3>Debug Log</h3>
++                <div style="display:flex; gap:8px; align-items:center;">
++                    <button type="button" onclick="copyDebugLog()" class="btn-small">COPY</button>
++                    <button type="button" onclick="clearDebugLog()" class="btn-small">CLEAR</button>
++                    <button onclick="closeDebugLog()" class="close-btn">×</button>
++                </div>
++            </div>
++            <pre id="debugLogText" class="debug-log-text"></pre>
++        </div>
++    </div>
++
++    <div id="dataUsageModal" class="modal hidden">
++        <div class="modal-content">
++            <div class="modal-header">
++                <h3>Data Usage</h3>
++                <div style="display:flex; gap:8px; align-items:center;">
++                    <button id="dataUsageClearBtn" type="button" onclick="clearDataUsageHistory()" class="btn-small hidden">CLEAR</button>
++                    <button onclick="closeDataUsageHistory()" class="close-btn">×</button>
++                </div>
++            </div>
++            <div id="dataUsageSummary" class="data-usage-summary"></div>
++            <div class="scroll-indicator-wrap" style="flex: 1; min-height: 0;">
++                <div id="dataUsageList" class="has-scroll-indicator" style="flex: 1; overflow-y: auto;"></div>
++                <div class="scroll-indicator"><div class="scroll-indicator-thumb"></div></div>
++            </div>
++        </div>
++    </div>
++
+     <div id="checkpointManagerModal" class="modal hidden">
+         <div class="modal-content">
+             <div class="modal-header">
+@@ -8025,6 +8087,8 @@
+         </div>
+     </div>
+ 
++    <!-- Data Usage Tracker counter (Config > Experimental). -->
++    <div id="dataUsagePill" class="data-usage-pill"></div>
+     <!-- Floating Brush Size (Config > Interface). -->
+     <div id="floatingBrushBar" class="floating-brush-bar hidden">
+         <label>Brush Size</label>
+@@ -8199,7 +8263,10 @@
+     <script src="js/cfg.js"></script>
+     <script src="js/network.js"></script>
+     <script src="js/modelpicker.js"></script>
++    <script src="js/debuglog.js"></script>
++    <script src="js/datausage.js"></script>
+     <script src="js/engine.js"></script>
++    <script src="js/jobabort.js"></script>
+     <script src="js/comfy_logic.js"></script>
+     <script src="js/updater.js"></script>
+     <script src="js/notice_board.js"></script>
+diff --git a/www/js/boot.js b/www/js/boot.js
+index 34b4bbf..6f74d86 100644
+--- a/www/js/boot.js
++++ b/www/js/boot.js
+@@ -160,6 +160,8 @@ window.onload = function() {
+         if (typeof initModelPickers === 'function') initModelPickers();
+         if (typeof loadHostIp === 'function') loadHostIp();
+         if (typeof loadQueueState === 'function') loadQueueState();
++        // The app closed mid-job: stop Forge's job if that's turned on (jobabort.js).
++        if (window.JobAbort) JobAbort.checkOnLaunch();
+         if (typeof renderQueueAll === 'function') renderQueueAll();
+         if (typeof loadAutoDlState === 'function') loadAutoDlState();
+         if (typeof loadLlmSettings === 'function') loadLlmSettings();
+diff --git a/www/js/cfg.js b/www/js/cfg.js
+index 7b77436..46cf278 100644
+--- a/www/js/cfg.js
++++ b/www/js/cfg.js
+@@ -75,6 +75,10 @@ function loadConnectionConfig() {
+     if (showLowBitsSwitch) showLowBitsSwitch.checked = showLowBits;
+     applyLowBitsRowsVisible(showLowBits);
+ 
++    // Abort Job If App Closes or Disconnects (off by default, jobabort.js).
++    const abortOnCloseSwitch = document.getElementById('cfgAbortJobOnCloseSwitch');
++    if (abortOnCloseSwitch) abortOnCloseSwitch.checked = localStorage.getItem('bojroAbortJobOnClose') === 'true';
++
+     // Auto-Collapse Config Sections (off by default).
+     const oneSectionSwitch = document.getElementById('cfgOneSectionSwitch');
+     if (oneSectionSwitch) oneSectionSwitch.checked = localStorage.getItem('bojroCfgOneSection') === 'true';
+@@ -430,6 +434,8 @@ const RESET_KEYS = [
+     'bojroShowLowBitsRows', 'bojroShowFluxCache', 'bojroNeverOomVisible', 'bojro_upscaler2_visibility',
+     // Experimental
+     'bojroUpscaleExpEnabled', 'bojroPromptFormat', 'bojroPromptFormatOnBlur', 'bojroSaacEnabled',
++    'bojroAbortJobOnClose', 'bojroDataUsageTracker', 'bojroDataUsagePill', 'bojroDebugLogEnabled',
++    'bojroHideFromAccessibility', 'bojroLiveUpdate',
+     // View, and prompts shown once (battery optimisation, update notices, a skipped update)
+     'bojroLoraViewMode', 'bojroAnalyzerStickyBar', 'bojroBatteryOpt', 'bojroUpdateNoticesOff', 'bojro_skip_version',
+ ];
+@@ -1096,3 +1102,59 @@ window.saveLivePreviewMobileDataAllowed = function() {
+     localStorage.setItem('bojroLivePreviewMobileDataAllowed', isChecked ? 'true' : 'false');
+     if (typeof refreshLivePreviewToggleInteractivity === 'function') refreshLivePreviewToggleInteractivity();
+ }
++
++// Hide From Accessibility Services (off by default). The native side keeps its own copy, applied at launch.
++;(function () {
++    const KEY = 'bojroHideFromAccessibility';
++    const send = hide => { try { window.Capacitor?.Plugins?.ResolverDevice?.setHideFromAccessibility?.({ hide }); } catch (e) { } };
++    window.toggleHideFromAccessibility = function () {
++        const hide = document.getElementById('cfgHideA11ySwitch').checked;
++        localStorage.setItem(KEY, hide ? 'true' : 'false');
++        send(hide);
++    };
++    const hide = localStorage.getItem(KEY) === 'true';
++    const sw = document.getElementById('cfgHideA11ySwitch');
++    if (sw) sw.checked = hide;
++    // Keeps the native copy in step, e.g. after Restore Settings.
++    send(hide);
++})();
++
++// Live Update progress notification (Android 16+, off by default); the service reads the native copy.
++;(function () {
++    const KEY = 'bojroLiveUpdate';
++    const FILTER_PATH = 'Settings › Notifications › Sort and filter notifications (older One UI: Advanced settings › Filter notifications)';
++    const device = () => window.Capacitor?.Plugins?.ResolverDevice;
++    let isSamsung = false;
++
++    async function sendToNative(on) {
++        try { await device()?.setLiveUpdate({ enabled: on }); } catch (e) { }
++    }
++    async function openSettings() {
++        try { await device().openNotificationSettings(); } catch (e) { }
++    }
++
++    window.toggleLiveUpdate = async function () {
++        const on = document.getElementById('cfgLiveUpdateSwitch').checked;
++        localStorage.setItem(KEY, on ? 'true' : 'false');
++        sendToNative(on);
++        if (!isSamsung) return;
++        const message = on
++            ? `On Samsung phones, the Live Update also leaves an empty "1 more notification" entry, and clearing either clears both.\n\nTo stop this, go to ${FILTER_PATH} and turn off Background activities.`
++            : `If you turned off Background activities for Live Updates, you can turn it back on in ${FILTER_PATH}.`;
++        if (await window.appConfirm(message, { title: 'Live Update Notification', okText: 'OPEN SETTINGS', cancelText: 'NOT NOW' })) openSettings();
++    };
++
++    (async function init() {
++        const on = localStorage.getItem(KEY) === 'true';
++        const sw = document.getElementById('cfgLiveUpdateSwitch');
++        if (sw) sw.checked = on;
++        if (!device()) return;
++        try {
++            const info = await device().getDeviceInfo();
++            isSamsung = /samsung/i.test(info.manufacturer || '');
++            if (info.sdk >= 36) document.getElementById('cfgLiveUpdateRow')?.classList.remove('hidden');
++        } catch (e) { return; }
++        // Keeps the native copy in step, e.g. after Reset App Configuration.
++        sendToNative(on);
++    })();
++})();
+diff --git a/www/js/datausage.js b/www/js/datausage.js
+new file mode 100644
+index 0000000..978bb35
+--- /dev/null
++++ b/www/js/datausage.js
+@@ -0,0 +1,316 @@
++// Data Usage tracker (Config > Experimental): approximate data per Generate, queue or Upscale job.
++// Counts request/response bodies only (not headers, TLS or compression).
++(function () {
++    const ENABLED_KEY = 'bojroDataUsageTracker';
++    const PILL_KEY = 'bojroDataUsagePill'; // stored as the OFF state: on by default
++    const HISTORY_KEY = 'bojroDataUsageHistory';
++    const MAX_HISTORY = 50;
++    const active = {}; // kind ('gen' or 'up') -> session
++    let pillHideTimer = null;
++    let pillQueued = false;
++
++    const enabled = () => localStorage.getItem(ENABLED_KEY) === 'true';
++    const pillEnabled = () => localStorage.getItem(PILL_KEY) !== 'off';
++
++    function formatBytes(n) {
++        if (n < 1024) return `${n} B`;
++        if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
++        if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
++        return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
++    }
++
++    // WIFI / MOBILE etc. from the native check (as Live Preview uses), else the WebView; null if unknown.
++    async function connectionType() {
++        let t = null;
++        try {
++            if (window.Capacitor?.Plugins?.ResolverService?.getNetworkType) t = (await Capacitor.Plugins.ResolverService.getNetworkType())?.type;
++        } catch (e) {}
++        if (!t) t = navigator.connection && navigator.connection.type;
++        if (!t || t === 'unknown') return null;
++        return { wifi: 'WIFI', cellular: 'MOBILE', ethernet: 'ETHERNET', none: 'OFFLINE' }[t] || t.toUpperCase();
++    }
++    const MODE_COLOURS = { xl: '#ff9800', anima: '#00c853', qwen: '#ff007f', flux: '#00e5ff', krea: '#b026ff' };
++
++    function bodySize(body) {
++        if (body == null) return 0;
++        if (typeof body === 'string') return new Blob([body]).size;
++        if (body instanceof Blob) return body.size;
++        if (body instanceof ArrayBuffer) return body.byteLength;
++        if (ArrayBuffer.isView(body)) return body.byteLength;
++        return 0;
++    }
++
++    // Upscale requests go to the upscale session, the rest to the generation one.
++    function sessionFor(url) {
++        if (/extra-single-image/.test(url) && active.up) return active.up;
++        return active.gen || active.up || null;
++    }
++
++    const origFetch = window.fetch.bind(window);
++    window.fetch = async function (input, init) {
++        const url = typeof input === 'string' ? input : (input && input.url) || '';
++        const s = /^https?:/i.test(url) ? sessionFor(url) : null;
++        if (!s) return origFetch(input, init);
++        s.sent += bodySize(init && init.body);
++        schedulePill();
++        const res = await origFetch(input, init);
++        if (res.body) {
++            // Counted from a copy as it arrives, so the figure moves during a download.
++            const reader = res.clone().body.getReader();
++            (async () => {
++                try {
++                    for (;;) {
++                        const { done, value } = await reader.read();
++                        if (done) break;
++                        s.recv += value.byteLength;
++                        schedulePill();
++                    }
++                } catch (e) { /* aborted or dropped */ }
++            })();
++        } else if (res && res.nativeBytes) {
++            // Native replies arrive whole, so they're counted at the end.
++            s.recv += res.nativeBytes;
++            schedulePill();
++        }
++        return res;
++    };
++
++    // opts: { mode } for the label colour.
++    function begin(kind, label, opts = {}) {
++        if (!enabled()) return null;
++        const s = { kind, label, mode: opts.mode || null, sent: 0, recv: 0, images: 0, steps: 0, live: false, firstImage: null, t: Date.now(), net: null };
++        connectionType().then(n => { s.net = n; });
++        active[kind] = s;
++        schedulePill();
++        return s;
++    }
++
++    function addSteps(kind, n) {
++        if (active[kind] && n > 0) active[kind].steps += n;
++    }
++    function markLive(kind) {
++        if (active[kind]) active[kind].live = true;
++    }
++
++    function addImages(kind, count, firstDataUrl) {
++        const s = active[kind];
++        if (!s || !count) return;
++        if (!s.firstImage && firstDataUrl) s.firstImage = firstDataUrl;
++        s.images += count;
++    }
++
++    // Small JPEG copy of the first image for the history list.
++    function makeThumb(dataUrl) {
++        return new Promise(resolve => {
++            if (!dataUrl) return resolve(null);
++            const img = new Image();
++            img.onload = () => {
++                const scale = Math.min(1, 120 / Math.max(img.width, img.height));
++                const c = document.createElement('canvas');
++                c.width = Math.max(1, Math.round(img.width * scale));
++                c.height = Math.max(1, Math.round(img.height * scale));
++                c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
++                try { resolve(c.toDataURL('image/jpeg', 0.7)); } catch (e) { resolve(null); }
++            };
++            img.onerror = () => resolve(null);
++            img.src = dataUrl;
++        });
++    }
++
++    function readHistory() {
++        try { return JSON.parse(localStorage.getItem(HISTORY_KEY)) || []; } catch (e) { return []; }
++    }
++    function writeHistory(list) {
++        // Drops the oldest entries if storage is full.
++        while (list.length) {
++            try { localStorage.setItem(HISTORY_KEY, JSON.stringify(list)); return; } catch (e) { list.pop(); }
++        }
++        localStorage.removeItem(HISTORY_KEY);
++    }
++
++    async function end(s, status) {
++        if (!s) return;
++        if (active[s.kind] === s) delete active[s.kind];
++        schedulePill(true);
++        // Tracking switched off mid-job (which clears the history): don't record it.
++        if (!enabled()) return;
++        // Lets the last bytes of a download finish counting.
++        await new Promise(r => setTimeout(r, 300));
++        const thumb = await makeThumb(s.firstImage);
++        // Start and end connection, e.g. "WIFI → MOBILE" if it switched during the job.
++        const netEnd = await connectionType();
++        const net = s.net && netEnd && s.net !== netEnd ? `${s.net} → ${netEnd}` : (s.net || netEnd);
++        const list = readHistory();
++        list.unshift({ t: s.t, label: s.label, mode: s.mode, kind: s.kind, sent: s.sent, recv: s.recv, images: s.images, steps: s.steps, live: s.live, status, thumb, net });
++        writeHistory(list.slice(0, MAX_HISTORY));
++        const modal = document.getElementById('dataUsageModal');
++        if (modal && !modal.classList.contains('hidden')) renderHistory();
++    }
++
++    // Floating counter while a job runs; fades a few seconds after the last one ends.
++    function schedulePill(ended) {
++        if (pillQueued) return;
++        pillQueued = true;
++        requestAnimationFrame(() => {
++            pillQueued = false;
++            updatePill();
++        });
++        if (ended) setTimeout(updatePill, 350);
++    }
++    let lastTotals = { sent: 0, recv: 0 };
++    function updatePill() {
++        const pill = document.getElementById('dataUsagePill');
++        if (!pill) return;
++        const sessions = Object.values(active);
++        if (!pillEnabled()) {
++            pill.classList.remove('visible');
++            return;
++        }
++        if (sessions.length) {
++            lastTotals = sessions.reduce((a, s) => ({ sent: a.sent + s.sent, recv: a.recv + s.recv }), { sent: 0, recv: 0 });
++            clearTimeout(pillHideTimer);
++            pillHideTimer = null;
++            pill.classList.add('visible');
++        } else if (!pillHideTimer && pill.classList.contains('visible')) {
++            pillHideTimer = setTimeout(() => { pill.classList.remove('visible'); pillHideTimer = null; }, 4000);
++        }
++        pill.textContent = `↑ ${formatBytes(lastTotals.sent)}  ↓ ${formatBytes(lastTotals.recv)}`;
++    }
++
++    function renderHistory() {
++        const listEl = document.getElementById('dataUsageList');
++        const sumEl = document.getElementById('dataUsageSummary');
++        if (!listEl) return;
++        const list = readHistory();
++        document.getElementById('dataUsageClearBtn')?.classList.toggle('hidden', !list.length);
++        listEl.innerHTML = '';
++        if (!list.length) {
++            listEl.innerHTML = '<div style="text-align:center; color:var(--text-muted); font-size:12px; padding:20px 0;">No jobs recorded yet</div>';
++            if (sumEl) sumEl.textContent = '';
++            return;
++        }
++        let sent = 0, recv = 0;
++        list.forEach(e => {
++            sent += e.sent; recv += e.recv;
++            const row = document.createElement('div');
++            row.className = 'data-usage-row';
++            const thumb = document.createElement('div');
++            thumb.className = 'data-usage-thumb';
++            if (e.thumb) {
++                const img = document.createElement('img');
++                img.src = e.thumb;
++                thumb.appendChild(img);
++            } else {
++                thumb.innerHTML = '<i data-lucide="image-off" width="18" height="18"></i>';
++            }
++            if (e.images > 0) {
++                const badge = document.createElement('span');
++                badge.className = 'gal-badge data-usage-count';
++                badge.textContent = `x${e.images}`;
++                thumb.appendChild(badge);
++            }
++            const info = document.createElement('div');
++            info.className = 'data-usage-info';
++            const d = new Date(e.t);
++            const when = `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
++            info.innerHTML = `<div class="data-usage-title"></div><div class="data-usage-when"><span></span></div>
++                <div class="data-usage-figures"><span>↑ ${formatBytes(e.sent)}</span><span>↓ ${formatBytes(e.recv)}</span><span class="data-usage-total">${formatBytes(e.sent + e.recv)}</span></div>`;
++            // Title: mode in its accent colour, LIVE PREVIEW chip and step count.
++            const title = info.querySelector('.data-usage-title');
++            const label = document.createElement('span');
++            label.textContent = e.label;
++            if (MODE_COLOURS[e.mode]) label.style.color = MODE_COLOURS[e.mode];
++            title.appendChild(label);
++            if (e.live) {
++                const chip = document.createElement('span');
++                chip.className = 'gal-badge data-usage-live';
++                chip.textContent = 'LIVE PREVIEW';
++                title.appendChild(chip);
++            }
++            if (e.steps > 0) {
++                const steps = document.createElement('span');
++                steps.className = 'data-usage-steps';
++                steps.textContent = `${e.steps} STEPS`;
++                title.appendChild(steps);
++            }
++            // Aborted/failed goes on the thumbnail, keeping the title to one line.
++            if (e.status && e.status !== 'ok') {
++                const st = document.createElement('span');
++                st.className = 'gal-badge data-usage-status';
++                st.textContent = e.status.toUpperCase();
++                thumb.appendChild(st);
++            }
++            info.querySelector('.data-usage-when span').textContent = when;
++            if (e.net) {
++                const chip = document.createElement('span');
++                chip.className = 'gal-badge data-usage-net' + (/MOBILE/.test(e.net) ? ' mobile' : '');
++                chip.textContent = e.net;
++                info.querySelector('.data-usage-when').appendChild(chip);
++            }
++            row.append(thumb, info);
++            listEl.appendChild(row);
++        });
++        if (sumEl) sumEl.textContent = `Last ${list.length} job${list.length === 1 ? '' : 's'}: ↑ ${formatBytes(sent)}  ↓ ${formatBytes(recv)}  = ${formatBytes(sent + recv)}`;
++        if (window.lucide) lucide.createIcons();
++        requestAnimationFrame(() => { fitLines(); fitDataUsageListHeight(); });
++    }
++
++    // One row per line on narrow screens: LIVE PREVIEW becomes LIVE, then the text shrinks.
++    function fitLines() {
++        const over = el => el.scrollWidth > el.clientWidth + 0.5;
++        document.querySelectorAll('#dataUsageList .data-usage-info > div').forEach(line => {
++            if (!over(line)) return;
++            const live = line.querySelector('.data-usage-live');
++            if (live) live.textContent = 'LIVE';
++            if (over(line)) line.style.fontSize = '11px';
++        });
++    }
++
++    // Whole rows only, clean at both ends of the scroll (as the other lists).
++    function fitDataUsageListHeight() {
++        const list = document.getElementById('dataUsageList');
++        if (list && typeof fitListToWholeRows === 'function') fitListToWholeRows(list, list.querySelectorAll('.data-usage-row'));
++    }
++    window.fitDataUsageListHeight = fitDataUsageListHeight;
++
++    window.openDataUsageHistory = function () {
++        renderHistory();
++        document.getElementById('dataUsageModal').classList.remove('hidden');
++        if (typeof lockBodyScroll === 'function') lockBodyScroll();
++    };
++    window.closeDataUsageHistory = function () {
++        document.getElementById('dataUsageModal').classList.add('hidden');
++        if (typeof unlockBodyScroll === 'function') unlockBodyScroll();
++    };
++    window.clearDataUsageHistory = async function () {
++        if (!(await window.appConfirm('Clear the data usage history?', { title: 'Data Usage', okText: 'CLEAR', danger: true }))) return;
++        localStorage.removeItem(HISTORY_KEY);
++        // Closes the window, as Clear all in the Analyzer's Recent does.
++        window.closeDataUsageHistory();
++        if (typeof Toast !== 'undefined' && Toast) Toast.show({ text: 'Cleared', duration: 'short' });
++    };
++    // The Floating Data Counter switch only shows while tracking is on.
++    function syncSwitches() {
++        const sw = document.getElementById('cfgDataUsageSwitch');
++        const pillSw = document.getElementById('cfgDataUsagePillSwitch');
++        if (sw) sw.checked = enabled();
++        if (pillSw) pillSw.checked = pillEnabled();
++        document.getElementById('cfgDataUsagePillRow')?.classList.toggle('hidden', !enabled());
++        document.getElementById('cfgDataUsageHistoryBtn')?.classList.toggle('hidden', !enabled());
++    }
++    // Switching tracking off also clears the history.
++    window.toggleDataUsageTracker = function () {
++        const on = document.getElementById('cfgDataUsageSwitch').checked;
++        localStorage.setItem(ENABLED_KEY, on ? 'true' : 'false');
++        if (!on) localStorage.removeItem(HISTORY_KEY);
++        syncSwitches();
++    };
++    window.toggleDataUsagePill = function () {
++        const on = document.getElementById('cfgDataUsagePillSwitch').checked;
++        localStorage.setItem(PILL_KEY, on ? 'on' : 'off');
++        updatePill();
++    };
++    syncSwitches();
++
++    window.DataUsage = { begin, end, addImages, addSteps, markLive, formatBytes };
++})();
+diff --git a/www/js/debuglog.js b/www/js/debuglog.js
+new file mode 100644
+index 0000000..66fafca
+--- /dev/null
++++ b/www/js/debuglog.js
+@@ -0,0 +1,74 @@
++// Debug log (Config > Experimental > Enable Debug Log). Records job, network and background events to help
++// diagnose problems. V/H = app in view/hidden. Kept in memory only, so it starts empty each time the app opens.
++(function () {
++    const ENABLED_KEY = 'bojroDebugLogEnabled', MAX = 1500;
++    let lines = [];
++    const enabled = () => localStorage.getItem(ENABLED_KEY) === 'true';
++    const pad = (n, w = 2) => String(n).padStart(w, '0');
++    function stamp() {
++        const d = new Date();
++        return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`;
++    }
++    window.dbg = function (msg) {
++        if (!enabled()) return;
++        lines.push(`${stamp()} ${document.hidden ? 'H' : 'V'} ${msg}`);
++        if (lines.length > MAX) lines.splice(0, lines.length - MAX);
++    };
++
++    function header() {
++        const c = typeof connectionConfig !== 'undefined' ? connectionConfig : {};
++        const pick = k => localStorage.getItem(k);
++        dbg(`app started: version ${typeof APP_VERSION !== 'undefined' ? APP_VERSION : '?'}, ${navigator.userAgent}`);
++        dbg(`settings: ${c.isRemote ? 'remote' : 'local'}${c.isCloudflare ? ' (Cloudflare)' : ''}, polling ${typeof getGenerationPollingRate === 'function' ? getGenerationPollingRate() : '?'}ms, background polling ${typeof getBackgroundPollingRate === 'function' ? getBackgroundPollingRate() : '?'}ms, live preview ${pick('bojroLivePreviewOn') === 'true' ? 'on' : 'off'}, progress bridge ${pick('bojroProgressBridgeEnabled') === 'true' ? 'on' : 'off'}, live update ${pick('bojroLiveUpdate') === 'true' ? 'on' : 'off'}, data usage ${pick('bojroDataUsageTracker') === 'true' ? 'on' : 'off'}`);
++        const d = window.Capacitor?.Plugins?.ResolverDevice;
++        if (d?.getDeviceInfo) d.getDeviceInfo().then(i => dbg(`device: ${i.manufacturer}, Android SDK ${i.sdk}`)).catch(() => { });
++    }
++
++    document.addEventListener('visibilitychange', () => {
++        dbg(document.hidden ? 'app hidden' : 'app visible');
++        if (!document.hidden && enabled() && typeof runDiag === 'function' && typeof activeJobs !== 'undefined' && activeJobs.size) runDiag('back in view');
++    });
++    window.addEventListener('error', e => dbg(`script error: ${e.message} (${(e.filename || '').split('/').pop()}:${e.lineno})`));
++    window.addEventListener('unhandledrejection', e => dbg(`unhandled rejection: ${e.reason && e.reason.message || e.reason}`));
++
++    window.openDebugLog = function () {
++        const box = document.getElementById('debugLogText');
++        box.textContent = lines.join('\n') || '(empty)';
++        document.getElementById('debugLogModal').classList.remove('hidden');
++        box.scrollTop = box.scrollHeight;
++    };
++    window.closeDebugLog = () => document.getElementById('debugLogModal').classList.add('hidden');
++    window.copyDebugLog = async function () {
++        const text = lines.join('\n');
++        try {
++            await navigator.clipboard.writeText(text);
++        } catch (e) {
++            const r = document.createRange();
++            r.selectNodeContents(document.getElementById('debugLogText'));
++            const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
++            document.execCommand('copy');
++            sel.removeAllRanges();
++        }
++        if (typeof Toast !== 'undefined' && Toast) Toast.show({ text: 'Debug log copied', duration: 'short' });
++    };
++    window.clearDebugLog = function () {
++        lines = [];
++        openDebugLog();
++    };
++
++    function syncSwitch() {
++        const sw = document.getElementById('cfgDebugLogSwitch');
++        if (sw) sw.checked = enabled();
++        document.getElementById('cfgDebugLogBtn')?.classList.toggle('hidden', !enabled());
++    }
++    // Switching it off also clears the log.
++    window.toggleDebugLog = function () {
++        const on = document.getElementById('cfgDebugLogSwitch').checked;
++        localStorage.setItem(ENABLED_KEY, on ? 'true' : 'false');
++        if (on) header();
++        else lines = [];
++        syncSwitch();
++    };
++    syncSwitch();
++    if (enabled()) document.addEventListener('DOMContentLoaded', header);
++})();
+diff --git a/www/js/engine.js b/www/js/engine.js
+index 0ca3736..7629188 100644
+--- a/www/js/engine.js
++++ b/www/js/engine.js
+@@ -4,8 +4,52 @@
+ 
+ // Running jobs' local cancel switches, so ABORT works on a stalled connection.
+ const activeJobs = new Set();
++// Debug log (Config > Experimental); does nothing while it's off.
++const dlog = (m) => { if (window.dbg) window.dbg(m); };
++// Debug log: process and network state, and the same server request made natively and from the WebView.
++let diagLast = 0;
++function runDiag(reason) {
++    const d = window.Capacitor?.Plugins?.ResolverDevice;
++    if (localStorage.getItem('bojroDebugLogEnabled') !== 'true' || !d?.diag || Date.now() - diagLast < 30000) return;
++    diagLast = Date.now();
++    const headers = { ...getHeaders() };
++    if (connectionConfig?.isRemote && connectionConfig.isCloudflare) {
++        if (connectionConfig.cfClientId) headers['CF-Access-Client-Id'] = connectionConfig.cfClientId;
++        if (connectionConfig.cfClientSecret) headers['CF-Access-Client-Secret'] = connectionConfig.cfClientSecret;
++    }
++    const url = `${HOST}/sdapi/v1/progress?skip_current_image=true`;
++    const webview = (async () => {
++        const ctrl = new AbortController(), t0 = Date.now();
++        const t = setTimeout(() => ctrl.abort(), 5000);
++        try {
++            const res = await window.originalFetch(url, { headers, signal: ctrl.signal });
++            await res.text();
++            return `HTTP ${res.status} in ${Date.now() - t0}ms`;
++        } catch (e) {
++            return `${ctrl.signal.aborted ? 'no answer' : e.message} after ${Date.now() - t0}ms`;
++        } finally { clearTimeout(t); }
++    })();
++    Promise.all([d.diag({ url, headers }), webview])
++        .then(([r, wv]) => dlog(`diag (${reason}): importance ${r.importance}, network ${r.net}, data saver ${{ 1: 'off', 2: 'on (exempt)', 3: 'on' }[r.restrictBg] || r.restrictBg}, power saving ${r.powerSave ? 'on' : 'off'}, doze ${r.idle ? 'on' : 'off'}; native request ${r.probe}; WebView request ${wv}`))
++        .catch(e => dlog('diag failed: ' + e));
++}
++// Debug log: one line describing a job.
++function describeJob(job) {
++    const p = job.payload || {};
++    const ad = (p.alwayson_scripts?.ADetailer?.args || []).filter(a => a && typeof a === 'object').length;
++    const cn = (p.alwayson_scripts?.ControlNet?.args || []).filter(u => u && u.enabled).length;
++    return `${job.mode}${job.mode === 'inp' ? '/' + (job.inpSubMode || '') : ''}, ${job.modelTitle || '?'}, ${p.width}x${p.height}, ${p.steps} steps, sampler ${p.sampler_name}/${p.scheduler || '-'}`
++        + `${p.enable_hr ? `, Hi-Res x${p.hr_scale} ${p.hr_second_pass_steps || p.steps} steps` : ''}${ad ? `, ADetailer ${ad} passes` : ''}${cn ? `, ControlNet ${cn}` : ''}`
++        + `, batch ${p.n_iter || 1}x${p.batch_size || 1}${p.denoising_strength != null && job.mode === 'inp' ? `, denoise ${p.denoising_strength}` : ''}`;
++}
+ // A finished image that takes longer than this to arrive shows DOWNLOADING... on the button.
+ const DOWNLOADING_LABEL_DELAY_MS = 1500;
++// A failure caused by the connection, not the server: Forge may still be running the job (jobabort.js).
++function connectionLostError(message) {
++    const e = new Error(message);
++    e.connectionLost = true;
++    return e;
++}
+ // After ABORT, idle time before the job is dropped locally.
+ const ABORT_GRACE_MS = 5000;
+ 
+@@ -15,17 +59,69 @@ function makeAbortError() {
+     return e;
+ }
+ 
++// Timers for the job path. Android's WebView slows hidden-page timers to about one a minute after 5 min,
++// so while hidden a native tick (ResolverDevice) also fires any that are overdue.
++const BgTimer = (() => {
++    const pending = new Map();
++    let nextId = 1, ticking = false, idleTicks = 0, listening = false;
++    const device = () => window.Capacitor?.Plugins?.ResolverDevice;
++    function fire(id) {
++        const e = pending.get(id);
++        if (!e) return;
++        pending.delete(id);
++        clearTimeout(e.t);
++        e.fn();
++    }
++    let lastTick = 0;
++    function onTick() {
++        const now = Date.now();
++        if (lastTick && now - lastTick > 3000) dlog(`native tick gap ${now - lastTick}ms`);
++        lastTick = now;
++        for (const [id, e] of [...pending]) if (e.due <= now) fire(id);
++        if (pending.size) idleTicks = 0;
++        else if (++idleTicks >= 6) stop();
++    }
++    function start() {
++        const d = device();
++        if (ticking || !d?.startTicks) return;
++        ticking = true; idleTicks = 0; lastTick = 0;
++        if (!listening) { listening = true; d.addListener('tick', onTick); }
++        d.startTicks().catch(e => { ticking = false; dlog('native ticks failed to start: ' + e); });
++    }
++    function stop() {
++        if (!ticking) return;
++        ticking = false;
++        device()?.stopTicks().catch(() => {});
++    }
++    document.addEventListener('visibilitychange', () => {
++        if (!document.hidden) stop();
++        else if (pending.size) start();
++    });
++    return {
++        set(fn, ms) {
++            const id = nextId++;
++            pending.set(id, { fn, due: Date.now() + ms, t: setTimeout(() => fire(id), ms) });
++            if (document.hidden) start();
++            return id;
++        },
++        clear(id) {
++            const e = pending.get(id);
++            if (e) { clearTimeout(e.t); pending.delete(id); }
++        }
++    };
++})();
++
+ // fetch() with a time limit that also stops when jobSignal aborts.
+ async function timedFetch(url, options, ms, jobSignal, readJson) {
+     const ctrl = new AbortController();
+-    const timer = setTimeout(() => ctrl.abort(), ms);
++    const timer = BgTimer.set(() => ctrl.abort(), ms);
+     const onJobAbort = () => ctrl.abort();
+     if (jobSignal) {
+         if (jobSignal.aborted) ctrl.abort();
+         else jobSignal.addEventListener('abort', onJobAbort);
+     }
+     try {
+-        const res = await fetch(url, { ...options, signal: ctrl.signal });
++        const res = await fetch(url, { ...options, signal: ctrl.signal, preferNative: true });
+         const data = readJson ? await res.json() : null;
+         return { res, data };
+     } catch (e) {
+@@ -33,7 +129,7 @@ async function timedFetch(url, options, ms, jobSignal, readJson) {
+         if (ctrl.signal.aborted) throw new Error('The server took too long to answer.');
+         throw e;
+     } finally {
+-        clearTimeout(timer);
++        BgTimer.clear(timer);
+         if (jobSignal) jobSignal.removeEventListener('abort', onJobAbort);
+     }
+ }
+@@ -42,8 +138,8 @@ async function timedFetch(url, options, ms, jobSignal, readJson) {
+ function abortableSleep(ms, signal) {
+     return new Promise((resolve, reject) => {
+         if (signal && signal.aborted) return reject(makeAbortError());
+-        const t = setTimeout(() => { if (signal) signal.removeEventListener('abort', onAbort); resolve(); }, ms);
+-        const onAbort = () => { clearTimeout(t); reject(makeAbortError()); };
++        const t = BgTimer.set(() => { if (signal) signal.removeEventListener('abort', onAbort); resolve(); }, ms);
++        const onAbort = () => { BgTimer.clear(t); reject(makeAbortError()); };
+         if (signal) signal.addEventListener('abort', onAbort, { once: true });
+     });
+ }
+@@ -783,6 +879,55 @@ function buildJobFromUIRaw() {
+ // QUEUE MANAGEMENT
+ // -----------------------------------------------------------
+ 
++// Stops the background service and its progress notification.
++async function stopProgressService() {
++    progressNotifStopped = true;
++    const svc = window.ResolverService || window.Capacitor?.Plugins?.ResolverService;
++    if (!svc) return;
++    try { await svc.stop(); } catch (e) { }
++}
++// A freshly loaded page has no job, so clear any progress notification left by a page Android killed mid-job.
++stopProgressService();
++
++// Notification taps open where the last job's results (completion) or progress are, without animation.
++let lastJobTarget = null;
++function scrollToForTap(el, how) {
++    if (!el) return;
++    const r = el.getBoundingClientRect();
++    const dock = document.querySelector('.glass-dock')?.getBoundingClientRect().top ?? window.innerHeight;
++    // 'centre' centres the element above the dock; otherwise its top sits just above the dock.
++    const y = how === 'centre' ? r.top + r.height / 2 - dock / 2 : r.top - dock + 8;
++    window.scrollTo({ top: Math.max(0, window.scrollY + y), behavior: 'instant' });
++}
++function openJobTarget(kind) {
++    const t = lastJobTarget;
++    if (!t) return;
++    const fs = document.getElementById('fullScreenModal');
++    if (fs && !fs.classList.contains('hidden') && typeof window.closeFsModal === 'function') window.closeFsModal();
++    window.switchTab(t.tab);
++    if (t.tab === 'que') return;
++    if (t.tab === 'gen' && t.mode && typeof setMode === 'function') setMode(t.mode);
++    if (t.tab === 'inp' && t.sub && typeof setInpaintTopMode === 'function') setInpaintTopMode(t.sub);
++    const inp = t.tab === 'inp';
++    requestAnimationFrame(() => {
++        if (kind === 'complete') {
++            // The batch's first image is the one directly under the button.
++            scrollToForTap(document.getElementById(inp ? 'inpGallery' : 'gallery')?.firstElementChild, 'centre');
++            return;
++        }
++        const preview = document.getElementById(inp ? 'inpLivePreviewImg' : 'livePreviewImg');
++        if (preview && !preview.classList.contains('hidden')) scrollToForTap(preview, 'centre');
++        // No preview: the rows above the results strip sit just above the dock, as when there are no images.
++        else scrollToForTap(document.getElementById(inp ? 'inpGallery' : 'gallery'), 'above-dock');
++    });
++}
++window.Capacitor?.Plugins?.ResolverDevice?.addListener?.('notificationTap', () => openJobTarget('progress'));
++if (LocalNotifications && LocalNotifications.addListener) {
++    LocalNotifications.addListener('localNotificationActionPerformed', a => {
++        if (a?.notification?.id === 2002) openJobTarget('complete');
++    });
++}
++
+ // Cancels the current server-side generation; shared by the ABORT button and the batch queue's ABORT.
+ function sendInterrupt() {
+     return timedFetch(`${HOST}/sdapi/v1/interrupt`, { method: 'POST', headers: getHeaders() }, 8000)
+@@ -793,9 +938,10 @@ function sendInterrupt() {
+ async function dropJobWhenIdle(job) {
+     let idleMs = 0, busyMs = 0;
+     while (activeJobs.has(job) && !job.signal.aborted) {
+-        await new Promise(r => setTimeout(r, 500));
++        await new Promise(r => BgTimer.set(r, 500));
+         // Waits up to a minute for a busy server; a downloading reply always.
+-        if (job.responseStarted || (job.serverBusy && (busyMs += 500) < 60000)) { idleMs = 0; continue; }
++        // A pending native reply may still be downloading.
++        if (job.responseStarted || ((job.serverBusy || job.replyPending) && (busyMs += 500) < 60000)) { idleMs = 0; continue; }
+         idleMs += 500;
+         if (idleMs >= ABORT_GRACE_MS) {
+             job.abort();
+@@ -805,6 +951,7 @@ async function dropJobWhenIdle(job) {
+ }
+ 
+ window.interruptGeneration = async function() {
++    dlog(`ABORT pressed (${activeJobs.size} job(s) running)`);
+     activeJobs.forEach(job => {
+         if (job.dropAtOnce || job.abortRequested || !job.requestSent || !job.serverSawJob) {
+             // Upscale, second press, still settling, or not on the server yet: drop now.
+@@ -1095,7 +1242,12 @@ window.processQueue = async function() {
+     renderQueueAll();
+ 
+     isQueueRunning = true;
++    lastJobTarget = { tab: 'que' };
++    if (window.JobAbort) JobAbort.started();
++    let connectionLost = false;
+     isAborting = false;
++    let usage = window.DataUsage ? DataUsage.begin('gen', 'QUEUE') : null;
++    let usageStatus = 'ok';
+ 
+     // --- 1. START PROTECTION ---
+     if (typeof window.activateKeepAlive === 'function') window.activateKeepAlive();
+@@ -1125,19 +1277,24 @@ window.processQueue = async function() {
+         btn.disabled = true;
+         setAbortButtonState('abortQueueBtn', true);
+ 
+-        if (document.hidden) updateBatchNotification("Starting batch job...", true, `0 / ${totalBatchSteps} steps`);
++        queueJobsDone = 0;
++        updateBatchNotification("Starting queue", true, `0 / ${totalBatchSteps}`);
+ 
+         // --- 4. The Loop (Only ONE loop) ---
++        dlog(`queue start: ${queueState.ongoing.length} jobs, ${totalBatchSteps} steps`);
++        runDiag('queue start');
+         while (queueState.ongoing.length > 0) {
+             const job = queueState.ongoing[0];
+             try {
++                dlog(`queue job start (${queueState.ongoing.length} left)`);
+                 await runJob(job, true);
+ 
+                 // If aborted while this job ran, don't record it as completed (abortQueue() already cleared the array).
+-                if (isAborting) break;
++                if (isAborting) { usageStatus = 'aborted'; break; }
+ 
+                 const finishedJob = queueState.ongoing.shift();
+                 if (!finishedJob) break;
++                queueJobsDone++;
+                 finishedJob.finishedAt = new Date().toLocaleString();
+                 finishedJob.payload = stripLargePayloadFields(finishedJob.payload);
+                 queueState.completed.push(finishedJob);
+@@ -1147,8 +1304,15 @@ window.processQueue = async function() {
+                 saveQueueState();
+                 renderQueueAll();
+             } catch (e) {
+-                if (isAborting) break; // expected - user-initiated, not a real error
+-                if (e.name === 'AbortError') break; // ABORT on the Generate tab during a batch
++                if (isAborting || e.name === 'AbortError') {
++                    // ABORT from the queue, or from the Generate tab during a batch.
++                    dlog('queue aborted');
++                    usageStatus = 'aborted';
++                    break;
++                }
++                usageStatus = 'failed';
++                connectionLost = !!e.connectionLost;
++                dlog('queue job failed: ' + e.message);
+                 console.error(e);
+                 updateBatchNotification("Batch Paused", true, "Error occurred");
+                 await window.appAlert("Batch paused: " + e.message);
+@@ -1157,13 +1321,20 @@ window.processQueue = async function() {
+         }
+ 
+         // Runs when the loop exits without an uncaught throw (normal completion, abort, or an in-loop error turned into a break).
++        dlog(`queue end (${queueState.ongoing.length} left)`);
++        // Recorded now, not after the popups below are dismissed.
++        if (usage) { DataUsage.end(usage, usageStatus); usage = null; }
+         if (typeof sendCompletionNotification === 'function') {
++            // Clears the progress notification first; the popup below waits for the app to be opened.
++            await stopProgressService();
+             await sendCompletionNotification("Images ready");
+         }
+         if (queueState.ongoing.length === 0) await window.appAlert("Batch Complete!");
+     } finally {
+         // --- 5+6. Cleanup + STOP PROTECTION ---
+         // In finally, so a throw above can't leave the queue state, button and wake lock stuck.
++        if (window.JobAbort) JobAbort.ended(connectionLost);
++        if (usage) DataUsage.end(usage, usageStatus);
+         isQueueRunning = false;
+         isAborting = false;
+         if (btn) {
+@@ -1174,15 +1345,7 @@ window.processQueue = async function() {
+         const progressBox = document.getElementById('queueProgressBox');
+         if (progressBox) progressBox.classList.add('hidden');
+ 
+-        if (window.ResolverService) {
+-            try {
+-                await window.ResolverService.stop();
+-            } catch (e) {}
+-        } else if (window.Capacitor && window.Capacitor.Plugins.ResolverService) {
+-            try {
+-                 window.Capacitor.Plugins.ResolverService.stop();
+-            } catch (e) {}
+-        }
++        await stopProgressService();
+ 
+         if (typeof window.deactivateKeepAlive === 'function') window.deactivateKeepAlive();
+     }
+@@ -1241,19 +1404,29 @@ window.generate = async function() {
+     if (typeof window.activateKeepAlive === 'function') window.activateKeepAlive();
+ 
+     isSingleJobRunning = true;
++    lastJobTarget = { tab: job.mode === 'inp' ? 'inp' : 'gen', mode: job.mode, sub: job.inpSubMode };
++    if (window.JobAbort) JobAbort.started();
++    let connectionLost = false;
+     setAbortButtonState('abortGenBtn', true);
+     setAbortButtonState('abortInpGenBtn', true);
++    const usage = window.DataUsage ? DataUsage.begin('gen', dataUsageLabel(job), { mode: job.mode }) : null;
++    let usageStatus = 'ok';
+ 
+     try {
+         // Run the job
+         await runJob(job, false);
+     } catch (e) {
++        usageStatus = e.name === 'AbortError' ? 'aborted' : 'failed';
++        connectionLost = !!e.connectionLost;
++        dlog(`generation ${usageStatus}: ${e.message}`);
+         // Aborted: no error popup and no completion notification (finally still cleans up).
+         if (e.name === 'AbortError') return;
+         console.error("Generation Error:", e);
+         // This native alert (the "Error: Failed to fetch" popup) is shared by every mode, so use the in-app dialog.
+         await window.appAlert("Error: " + e.message, { title: 'Generation Failed', danger: true });
+     } finally {
++        if (window.JobAbort) JobAbort.ended(connectionLost);
++        if (usage) DataUsage.end(usage, usageStatus);
+         // --- 2. ALWAYS CLEAN UP ---
+         isSingleJobRunning = false;
+         setAbortButtonState('abortGenBtn', false);
+@@ -1262,16 +1435,7 @@ window.generate = async function() {
+         // --- 3. STOP PROTECTION ---
+         if (typeof window.deactivateKeepAlive === 'function') window.deactivateKeepAlive();
+ 
+-        // Stop persistent notification (Robust Check)
+-        if (window.ResolverService) {
+-            try {
+-                await window.ResolverService.stop();
+-            } catch (e) {}
+-        } else if (window.Capacitor && window.Capacitor.Plugins.ResolverService) {
+-            try {
+-                 window.Capacitor.Plugins.ResolverService.stop();
+-            } catch (e) {}
+-        }
++        await stopProgressService();
+     }
+ 
+     // Send completion notification
+@@ -1557,6 +1721,12 @@ function galleryBadgesFor(job) {
+     return badges;
+ }
+ 
++// Data Usage history label for a job.
++function dataUsageLabel(job) {
++    if (job.mode === 'inp') return (job.inpSubMode || (job.payload && job.payload.mask ? 'inpaint' : 'img2img')) === 'img2img' ? 'IMG2IMG' : 'INPAINT';
++    return { xl: 'SDXL', anima: 'ANIMA', qwen: 'QWEN', flux: 'FLUX', krea: 'KREA' }[job.mode] || String(job.mode || '').toUpperCase();
++}
++
+ // True when /progress answers and shows no job running; false if it can't be reached.
+ async function serverLooksIdle(signal) {
+     try {
+@@ -1594,6 +1764,9 @@ async function runJob(job, isBatch = false) {
+     try {
+         // The button reads "SETTLING..." from the start of the job until the first real step count. The finally block below restores the real label on every exit.
+         btn.innerText = "SETTLING...";
++        // Start the background service while the app is in front; Android 12+ blocks it from the background.
++        if (!isBatch) updateBatchNotification("Settling...", true, "");
++        dlog(`job start: ${describeJob(job)}`);
+ 
+         // Unload before an SDXL job that follows a diffusers-based one (Flux/Qwen/Anima/Krea), to avoid a stuck "patch LoRAs on-the-fly" state.
+         if (job.mode === 'xl' && lastGeneratedMode && ['flux', 'qwen', 'anima', 'krea'].includes(lastGeneratedMode)) {
+@@ -1606,6 +1779,7 @@ async function runJob(job, isBatch = false) {
+         const thisJobLoraSet = extractLoraTags(job.payload?.prompt);
+         if (lastGeneratedLoraSet !== null && loraSetChanged(lastGeneratedLoraSet, thisJobLoraSet)) {
+             btn.innerText = "SETTLING...";
++            dlog('LoRA set changed: unloading the model');
+             if (typeof unloadModel === 'function') {
+                 await withDeadline(unloadModel(true).catch(() => {}), 15000, sig);
+             }
+@@ -1626,7 +1800,7 @@ async function runJob(job, isBatch = false) {
+                 optsFailures = 0;
+             } catch (e) {
+                 if (e.name === 'AbortError') throw e;
+-                if (++optsFailures >= 5) throw new Error("Couldn't reach the server: " + e.message);
++                if (++optsFailures >= 5) throw connectionLostError("Couldn't reach the server: " + e.message);
+                 attempts++;
+                 await abortableSleep(1500, sig);
+                 continue;
+@@ -1663,6 +1837,7 @@ async function runJob(job, isBatch = false) {
+             await abortableSleep(1500, sig);
+         }
+         if (!isReady) throw new Error("Timeout: Server failed to load model.");
++        dlog(`model ready${attempts ? ` after ${attempts} checks (switched)` : ''}`);
+ 
+         await withDeadline(syncJobServerOptions(job, serverOpts), 30000, sig);
+ 
+@@ -1674,7 +1849,8 @@ async function runJob(job, isBatch = false) {
+ 
+         // Re-asserts "SETTLING..." as the request goes out.
+         btn.innerText = "SETTLING...";
+-        await updateBatchNotification("Starting Generation", true, "Initializing...");
++        // A queue keeps showing its running step count between jobs.
++        if (!isBatch) await updateBatchNotification("Starting Generation", true, "Initializing...");
+ 
+         // Base and Hi-Res second-pass step totals come from settings, not Forge's progress. img2img/Inpaint under 1.0 denoising run fewer steps (same formula as the Denoising hint).
+         const effectiveBaseSteps = job.mode === 'inp' && typeof job.payload.denoising_strength === 'number'
+@@ -1782,7 +1958,7 @@ async function runJob(job, isBatch = false) {
+         const onProgressVisibilityChange = () => {
+             if (!document.hidden && !jobFinished && !sig.aborted) {
+                 // Poll immediately when returning to the foreground.
+-                clearTimeout(progressPollTimeout);
++                BgTimer.clear(progressPollTimeout);
+                 pollProgressOnce();
+             }
+         };
+@@ -1792,7 +1968,7 @@ async function runJob(job, isBatch = false) {
+         // Makes a second call while one is running a no-op.
+         let pollInFlight = false;
+         // Failed polls in a row, and idle polls after this job started (the result is on its way).
+-        let pollFailures = 0;
++        let pollFailures = 0, pollCount = 0, lastPollStage = '';
+         let idleSince = 0;
+         // Whether a poll has shown this job running.
+         let serverSawJob = false;
+@@ -1808,7 +1984,13 @@ async function runJob(job, isBatch = false) {
+                     : `${HOST}/sdapi/v1/progress?skip_current_image=true`;
+                 const { data } = await timedFetch(progressUrl, { headers: getHeaders() }, 10000, sig, true);
+                 if (jobFinished || sig.aborted) return; // finished while the fetch was in flight
++                if (pollFailures) dlog(`progress check working again after ${pollFailures} failure(s)`);
+                 pollFailures = 0;
++                // Logged on the first check, each new stage and every tenth check.
++                const stage = `${data.state?.sampling_steps}|${data.state?.job_no}|${data.state?.job}`;
++                if (++pollCount % 10 === 1 || stage !== lastPollStage) dlog(`progress check ${pollCount}: ${Math.round((data.progress || 0) * 100)}%, step ${data.state?.sampling_step}/${data.state?.sampling_steps}, ${data.state?.job || 'idle'}`);
++                lastPollStage = stage;
++                if (livePreviewActive && window.DataUsage) DataUsage.markLive('gen');
+                 if (livePreviewActive && data.current_image) {
+                     updateLivePreviewImage(data.current_image);
+                 }
+@@ -1977,7 +2159,7 @@ async function runJob(job, isBatch = false) {
+                     displayTotal = deterministicPerImage;
+                 } else {
+                     if (btn.innerText.includes("Step")) {
+-                        updateBatchNotification("Finalizing...", false, "Receiving Images...");
++                        if (!isBatch) updateBatchNotification("Finalizing...", false, "Receiving Images...");
+                     }
+                     return;
+                 }
+@@ -2055,24 +2237,25 @@ async function runJob(job, isBatch = false) {
+                     maxBatchTotalShown = Math.max(maxBatchTotalShown, batchTotalDisplay);
+                     batchTotalDisplay = maxBatchTotalShown;
+                     document.getElementById('queueProgressText').innerText = `Step ${actualTotal} / ${batchTotalDisplay}`;
+-                    updateBatchNotification("Batch Running", false, `Step ${actualTotal} / ${batchTotalDisplay}`);
++                    updateBatchNotification(`Queue ${queueJobsDone + 1}/${queueJobsDone + queueState.ongoing.length}`, false, `${actualTotal} / ${batchTotalDisplay}`);
+                 } else {
+-                    updateBatchNotification(nIterCount > 1 ? `Generating ${currentBatchNumber}/${nIterCount}...` : "Generating...", false, msg);
++                    updateBatchNotification(nIterCount > 1 ? `Batch ${currentBatchNumber}/${nIterCount}` : "Generating...", false, msg);
+                 }
+             } catch (e) {
+                 jobAbort.serverBusy = false;
+                 // Shown after a few failed polls; the next good poll replaces it.
++                if (!jobFinished && e.name !== 'AbortError') { dlog('progress check failed: ' + e.message); runDiag('progress check failed'); }
+                 if (!jobFinished && e.name !== 'AbortError' && ++pollFailures >= 3) btn.innerText = 'RECONNECTING...';
+             } finally {
+                 pollInFlight = false;
+                 if (!jobFinished && !sig.aborted) {
+                     // Shares the user-configurable polling rate with the upscale poll (Settings > Generation Polling Rate).
+                     const delay = document.hidden ? getBackgroundPollingRate() : getGenerationPollingRate();
+-                    progressPollTimeout = setTimeout(pollProgressOnce, delay);
++                    progressPollTimeout = BgTimer.set(pollProgressOnce, delay);
+                 }
+             }
+         }
+-        progressPollTimeout = setTimeout(pollProgressOnce, getGenerationPollingRate());
++        progressPollTimeout = BgTimer.set(pollProgressOnce, getGenerationPollingRate());
+ 
+         const endpoint = job.mode === 'inp' ? '/sdapi/v1/img2img' : '/sdapi/v1/txt2img';
+ 
+@@ -2080,28 +2263,34 @@ async function runJob(job, isBatch = false) {
+         let res;
+         for (let sendAttempt = 0; ; sendAttempt++) {
+             jobAbort.requestSent = true;
++            dlog(`request sent${sendAttempt ? ` (resend ${sendAttempt})` : ''}`);
+             try {
++                // Native replies give no sign of downloading, so ABORT's grace period allows for them.
++                jobAbort.replyPending = !!(window.Capacitor?.isNativePlatform?.() && window.Capacitor.Plugins?.CapacitorHttp);
+                 res = await fetch(`${HOST}${endpoint}`, {
+                     method: 'POST',
+                     headers: getHeaders(),
+                     body: JSON.stringify(job.payload),
+-                    signal: sig
+-                });
++                    signal: sig,
++                    preferNative: true
++                }).finally(() => { jobAbort.replyPending = false; });
+                 jobAbort.responseStarted = true;
++                dlog(`reply ${res.status}`);
+             } catch (e) {
++                dlog('request failed: ' + e.message);
+                 if (sig.aborted) throw makeAbortError();
+                 if (sendAttempt < 3 && !serverSawJob && !thisJobConfirmedStarted && await serverLooksIdle(sig)) {
+                     await abortableSleep(1500 * (sendAttempt + 1), sig);
+                     continue;
+                 }
+-                throw new Error(serverSawJob || thisJobConfirmedStarted
++                throw connectionLostError(serverSawJob || thisJobConfirmedStarted
+                     ? "The connection dropped while the server was working on this image, so it couldn't be collected. Check your connection and try again."
+                     : "Couldn't send the job to the server: " + e.message);
+             }
+             break;
+         }
+ 
+-        clearTimeout(progressPollTimeout);
++        BgTimer.clear(progressPollTimeout);
+         document.removeEventListener('visibilitychange', progressVisibilityHandler);
+         jobFinished = true;
+         // On success the last live-preview frame stays on screen until the first real image is shown (addResult()). A failed response clears it at once; finally{} clears it on any other exit.
+@@ -2120,12 +2309,13 @@ async function runJob(job, isBatch = false) {
+         // Remembers which main tab last generated, for boot.js to restore.
+         if (['xl', 'flux', 'qwen', 'anima', 'krea'].includes(job.mode)) localStorage.setItem('bojroLastGenTab', job.mode);
+ 
++        if (window.DataUsage) DataUsage.addSteps('gen', lastDisplayTotal);
+         let data;
+         try {
+             data = await res.json();
+         } catch (e) {
+             if (sig.aborted) throw makeAbortError();
+-            throw new Error("The image was generated, but the connection dropped while downloading it.");
++            throw connectionLostError("The image was generated, but the connection dropped while downloading it.");
+         }
+         if (isBatch) {
+             currentBatchProgress += lastDisplayTotal;
+@@ -2133,6 +2323,7 @@ async function runJob(job, isBatch = false) {
+             queueADetailerGrowthCarried += Math.max(0, lastDisplayTotal - (nIterCount * deterministicPerImage));
+         }
+ 
++        dlog(`${data.images ? data.images.length : 0} image(s) received`);
+         if (data.images) {
+             const expectedImages = (job.payload.batch_size || 1) * (job.payload.n_iter || 1);
+ 
+@@ -2177,6 +2368,7 @@ async function runJob(job, isBatch = false) {
+             for (const b64 of data.images) {
+                 addResult("data:image/png;base64," + b64, false);
+             }
++            if (window.DataUsage && data.images.length) DataUsage.addImages('gen', data.images.length, "data:image/png;base64," + data.images[0]);
+ 
+             // Show & Download Batch Grids: Forge was asked for no grid, so one is built here from the received images (see batchGridsEnabled(), utils.js), only when exactly the expected number came back. Not awaited, so the job and queue don't wait; added when ready.
+             if (job.gridMaxEdge > 0 && expectedImages > 1 && data.images.length === expectedImages) {
+@@ -2194,10 +2386,11 @@ async function runJob(job, isBatch = false) {
+     } catch (e) {
+         throw e;
+     } finally {
++        dlog('job end');
+         activeJobs.delete(jobAbort);
+         // Also stops any poll still in flight from relabelling the button.
+         jobAbort.abort();
+-        if (progressPollTimeout) clearTimeout(progressPollTimeout);
++        if (progressPollTimeout) BgTimer.clear(progressPollTimeout);
+         if (progressVisibilityHandler) document.removeEventListener('visibilitychange', progressVisibilityHandler);
+         // No stale in-progress frame outlives the job.
+         if (typeof clearLivePreviewImage === 'function') clearLivePreviewImage();
+@@ -2615,6 +2808,15 @@ window.runUpscaleJob = async function() {
+     const upSig = upAbort.signal;
+     upAbort.dropAtOnce = true;
+     activeJobs.add(upAbort);
++    const usage = window.DataUsage ? DataUsage.begin('up', 'UPSCALE') : null;
++    let usageStatus = 'ok';
++    // Started while the app is in front (Android 12+ blocks it from the background); left alone while a generation owns it,
++    // including one started during the upscale.
++    const upNotify = !isQueueRunning && !isSingleJobRunning;
++    const upOwnsNotification = () => upNotify && !isQueueRunning && !isSingleJobRunning;
++    if (upNotify) { updateBatchNotification("Upscaling...", true, ""); lastJobTarget = { tab: 'inp', sub: 'upscale' }; }
++    if (window.JobAbort) JobAbort.started();
++    let connectionLost = false;
+ 
+     // A second pass is only guessed when this image has not been upscaled before; marked immediately.
+     const imageHash = window.LoraManager.simpleHash(sourceImageB64);
+@@ -2640,14 +2842,15 @@ window.runUpscaleJob = async function() {
+             const { numerator, denominator } = upscaleTileTracker(bridge.upscale.current, bridge.upscale.total);
+             lastKnownTotal = denominator;
+             if (btn) btn.innerText = `Step ${numerator} / ${denominator}`;
++            if (upOwnsNotification()) updateBatchNotification("Upscaling", false, `${numerator} / ${denominator}`);
+         } else if (bridge && bridgeSawActive && !bridge.upscale?.active && btn) {
+             // Upscale finished on the server; the image is still coming down.
+             if (!upscaleDoneAt) upscaleDoneAt = Date.now();
+             if (Date.now() - upscaleDoneAt >= DOWNLOADING_LABEL_DELAY_MS) btn.innerText = 'DOWNLOADING...';
+         }
+-        if (!upscaleJobDone && !upSig.aborted) upscalePollTimeout = setTimeout(pollUpscaleBridge, document.hidden ? getBackgroundPollingRate() : getGenerationPollingRate());
++        if (!upscaleJobDone && !upSig.aborted) upscalePollTimeout = BgTimer.set(pollUpscaleBridge, document.hidden ? getBackgroundPollingRate() : getGenerationPollingRate());
+     }
+-    if (localStorage.getItem('bojroProgressBridgeEnabled') === 'true') upscalePollTimeout = setTimeout(pollUpscaleBridge, getGenerationPollingRate());
++    if (localStorage.getItem('bojroProgressBridgeEnabled') === 'true') upscalePollTimeout = BgTimer.set(pollUpscaleBridge, getGenerationPollingRate());
+ 
+     try {
+         const isFactorMode = document.getElementById('upscale_resize_mode').value === '0';
+@@ -2685,17 +2888,19 @@ window.runUpscaleJob = async function() {
+ 
+         // Never resent automatically: a resend uploads the image again and can upscale it twice.
+         upAbort.requestSent = true;
++        dlog('upscale request sent');
+         let res, data;
+         try {
+             res = await fetch(`${HOST}/sdapi/v1/extra-single-image`, {
+                 method: 'POST',
+                 headers: getHeaders(),
+                 body: JSON.stringify(payload),
+-                signal: upSig
++                signal: upSig,
++                preferNative: true
+             });
+         } catch (e) {
+             if (upSig.aborted) throw makeAbortError();
+-            throw new Error("The connection dropped, so the upscale couldn't be completed. Check your connection and try again.");
++            throw connectionLostError("The connection dropped, so the upscale couldn't be completed. Check your connection and try again.");
+         }
+         if (!res.ok) {
+             if (res.status === 502 || res.status === 504 || (res.status >= 520 && res.status <= 527)) {
+@@ -2713,10 +2918,11 @@ window.runUpscaleJob = async function() {
+ 
+         // A successful request means every tile finished, whatever the last poll caught.
+         upscaleJobDone = true;
+-        clearTimeout(upscalePollTimeout);
++        BgTimer.clear(upscalePollTimeout);
+         if (lastKnownTotal !== null && btn) btn.innerText = `Step ${lastKnownTotal} / ${lastKnownTotal}`;
+ 
+         let finalB64 = "data:image/png;base64," + data.image;
++        if (window.DataUsage) DataUsage.addImages('up', 1, finalB64);
+         // Copy Metadata from Source.
+         if (document.getElementById('upscale_copy_metadata')?.checked && inpSourceTextChunks) {
+             finalB64 = await embedPngTextChunks(finalB64, inpSourceTextChunks);
+@@ -2759,16 +2965,24 @@ window.runUpscaleJob = async function() {
+         const autoDl = document.getElementById('autoDlCheck');
+         if (autoDl && autoDl.checked) saveToMobileGallery(finalB64, 'bojro', upscaleScaleTag, upscaleSourceSeed);
+         // Sends a completion notification for Upscale jobs (only fires while backgrounded).
++        dlog('upscale done');
++        if (upOwnsNotification()) await stopProgressService();
+         await sendCompletionNotification("Upscaled image ready");
+     } catch (e) {
++        usageStatus = e.name === 'AbortError' ? 'aborted' : 'failed';
++        connectionLost = !!e.connectionLost;
+         if (e.name === 'AbortError') return;
+         console.error("Upscale Error:", e);
++        dlog('upscale failed: ' + e.message);
+         await window.appAlert("Upscale failed: " + e.message, { title: 'Upscale Failed', danger: true });
+     } finally {
++        if (window.JobAbort) JobAbort.ended(connectionLost);
++        if (usage) DataUsage.end(usage, usageStatus);
+         activeJobs.delete(upAbort);
+         upAbort.abort();
+         upscaleJobDone = true;
+-        clearTimeout(upscalePollTimeout);
++        BgTimer.clear(upscalePollTimeout);
++        if (upOwnsNotification()) stopProgressService();
+         if (btn) { btn.disabled = false; btn.innerText = oldText; }
+         if (spinner) spinner.style.display = 'none';
+         setAbortButtonState('abortInpGenBtn', false);
+@@ -2929,6 +3143,9 @@ window.setupLightboxSwipe = function() {
+     let lastTapTime = 0;
+     let lastTapX = 0;
+     let lastTapY = 0;
++    // A single tap away from the edges hides/shows the toolbar and status bar (after the double-tap window).
++    let tapCandidate = null;
++    let pendingToggle = null;
+ 
+     // Cache once - avoids 3x getElementById() per touchmove
+     const container = document.getElementById('lightboxContainer');
+@@ -2985,6 +3202,21 @@ window.setupLightboxSwipe = function() {
+         img.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+     }
+ 
++    window.setLightboxImmersive = function(on) {
++        const modal = document.getElementById('fullScreenModal');
++        if (!modal || modal.classList.contains('fs-immersive') === on) return;
++        modal.classList.toggle('fs-immersive', on);
++        const p = window.Capacitor?.Plugins?.ResolverDevice?.setStatusBarHidden?.({ hidden: on });
++        if (p && p.catch) p.catch(() => {});
++        // The image area changes size, so a zoomed image is re-clamped.
++        requestAnimationFrame(() => { if (scale > 1) { clampPan(); applyZoomTransform(false); } });
++    };
++    // Leaving the viewer by any route brings the bars back.
++    new MutationObserver(() => {
++        const modal = document.getElementById('fullScreenModal');
++        if (modal.classList.contains('hidden')) window.setLightboxImmersive(false);
++    }).observe(document.getElementById('fullScreenModal'), { attributes: true, attributeFilter: ['class'] });
++
+     window.resetLightboxZoom = function(animate) {
+         scale = 1;
+         panX = 0;
+@@ -3077,7 +3309,10 @@ window.setupLightboxSwipe = function() {
+ 
+     container.addEventListener('touchstart', (e) => {
+         if (e.cancelable) e.preventDefault();
++        // Any new touch (second tap, pinch) cancels a pending show/hide.
++        clearTimeout(pendingToggle);
+         if (e.touches.length === 2) {
++            tapCandidate = null;
+             isDragging = false; // cancel any in-progress swipe drag
+             // Also cancels any in-progress pan so a stale edge tap can't fire after a pinch.
+             isPanning = false;
+@@ -3105,6 +3340,7 @@ window.setupLightboxSwipe = function() {
+         lastTapTime = now;
+         lastTapX = t.clientX;
+         lastTapY = t.clientY;
++        tapCandidate = isDoubleTap ? null : { x: t.clientX, y: t.clientY, time: now, edge: nearEdgeForDoubleTap };
+ 
+         if (isDoubleTap) {
+             lastTapTime = 0; // consumed - don't let a 3rd tap chain into another toggle
+@@ -3144,6 +3380,7 @@ window.setupLightboxSwipe = function() {
+ 
+     container.addEventListener('touchmove', (e) => {
+         if (e.cancelable) e.preventDefault();
++        if (tapCandidate && e.touches.length === 1 && Math.max(Math.abs(e.touches[0].clientX - tapCandidate.x), Math.abs(e.touches[0].clientY - tapCandidate.y)) >= TAP_MOVE_THRESHOLD) tapCandidate = null;
+         if (isPinching && e.touches.length === 2) {
+             const newDist = touchDist(e.touches[0], e.touches[1]);
+             // Clamps the scale before recalculating pan.
+@@ -3177,6 +3414,17 @@ window.setupLightboxSwipe = function() {
+ 
+     container.addEventListener('touchend', (e) => {
+         if (e.cancelable) e.preventDefault();
++        if (tapCandidate && e.touches.length === 0) {
++            if (!tapCandidate.edge && Date.now() - tapCandidate.time < 500) {
++                clearTimeout(pendingToggle);
++                pendingToggle = setTimeout(() => {
++                    const modal = document.getElementById('fullScreenModal');
++                    // Not if the viewer closed in the meantime.
++                    if (!modal.classList.contains('hidden')) window.setLightboxImmersive(!modal.classList.contains('fs-immersive'));
++                }, DOUBLE_TAP_MAX_DELAY);
++            }
++            tapCandidate = null;
++        }
+         if (isPinching) {
+             isPinching = false;
+             if (scale <= 1.02) window.resetLightboxZoom(true); // snap back if barely zoomed
+@@ -3212,6 +3460,7 @@ window.setupLightboxSwipe = function() {
+ 
+     // Handles touchcancel by abandoning the gesture.
+     container.addEventListener('touchcancel', () => {
++        tapCandidate = null;
+         isDragging = false;
+         isPanning = false;
+         isPinching = false;
+diff --git a/www/js/globals.js b/www/js/globals.js
+index 62b178c..67c8c49 100644
+--- a/www/js/globals.js
++++ b/www/js/globals.js
+@@ -221,6 +221,8 @@ let totalBatchSteps = 0;
+ let currentBatchProgress = 0;
+ // Sum of each finished job's real ADetailer growth, carried across jobs within one queue run.
+ let queueADetailerGrowthCarried = 0;
++// Queue jobs finished in the current run, for the notification's "Queue 3/4".
++let queueJobsDone = 0;
+ let isSingleJobRunning = false;
+ 
+ let isSelectionMode = false;
+diff --git a/www/js/jobabort.js b/www/js/jobabort.js
+new file mode 100644
+index 0000000..9f7c85f
+--- /dev/null
++++ b/www/js/jobabort.js
+@@ -0,0 +1,60 @@
++// Abort Job If App Closes or Disconnects (Config > Experimental, off by default): Forge's job is stopped when the
++// app is swiped away (native, ResolverForegroundService), on the next launch after the app closed or crashed
++// mid-job, and once the connection is back after it was lost mid-job.
++(function () {
++    'use strict';
++
++    const ENABLED_KEY = 'bojroAbortJobOnClose';
++    // Set while a job runs here; still set at launch means the app closed mid-job.
++    const RUNNING_KEY = 'bojroJobRunning';
++    const RETRY_MS = 5000, GIVE_UP_MS = 10 * 60 * 1000;
++
++    const enabled = () => localStorage.getItem(ENABLED_KEY) === 'true';
++    const busyHere = () => isQueueRunning || isSingleJobRunning || activeJobs.size > 0;
++
++    // While a job runs: the server the native side stops if the app is swiped away.
++    function tellNative(running) {
++        const dev = window.Capacitor?.Plugins?.ResolverDevice;
++        if (!dev || typeof dev.setJobServer !== 'function') return;
++        dev.setJobServer(running && enabled() ? { url: HOST, headers: getHeaders() } : { url: '' }).catch(() => {});
++    }
++
++    // Retries until Forge answers, for up to 10 minutes. Gives up if a job is started here meanwhile, as that's what it would stop.
++    let retrying = false;
++    async function interruptWhenReachable() {
++        if (retrying) return;
++        retrying = true;
++        try {
++            for (const end = Date.now() + GIVE_UP_MS; Date.now() < end;) {
++                if (busyHere()) return;
++                try {
++                    const { res } = await timedFetch(`${HOST}/sdapi/v1/interrupt`, { method: 'POST', headers: getHeaders() }, RETRY_MS);
++                    if (res.ok) return;
++                } catch (e) {}
++                await new Promise(r => setTimeout(r, RETRY_MS));
++            }
++        } finally {
++            retrying = false;
++            localStorage.removeItem(RUNNING_KEY);
++        }
++    }
++
++    window.JobAbort = {
++        started() {
++            localStorage.setItem(RUNNING_KEY, '1');
++            tellNative(true);
++        },
++        // connectionLost: the job failed because the connection dropped, so Forge may still be running it.
++        ended(connectionLost) {
++            tellNative(false);
++            // After the job's own clean-up (it's still marked as running here).
++            if (connectionLost && enabled()) setTimeout(interruptWhenReachable);
++            else localStorage.removeItem(RUNNING_KEY);
++        },
++        checkOnLaunch() {
++            if (!localStorage.getItem(RUNNING_KEY)) return;
++            if (enabled()) interruptWhenReachable();
++            else localStorage.removeItem(RUNNING_KEY);
++        }
++    };
++})();
+diff --git a/www/js/network.js b/www/js/network.js
+index 2d3c28c..b99419f 100644
+--- a/www/js/network.js
++++ b/www/js/network.js
+@@ -38,16 +38,30 @@ async function performNativeRequest(url, options = {}) {
+         }
+     } catch (e) {}
+ 
++    const t0 = Date.now();
+     try {
+-        const response = await window.Capacitor.Plugins.CapacitorHttp.request({
++        const request = window.Capacitor.Plugins.CapacitorHttp.request({
+             method: method,
+             url: url,
+             headers: headers,
+             data: data
+         });
++        // The native request can't be cancelled; an aborted signal just stops waiting for it.
++        const signal = options.signal;
++        if (signal && signal.aborted) throw new DOMException('Aborted', 'AbortError');
++        const response = !signal ? await request : await new Promise((resolve, reject) => {
++            const onAbort = () => reject(new DOMException('Aborted', 'AbortError'));
++            signal.addEventListener('abort', onAbort, { once: true });
++            request.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort));
++        });
+ 
++        // Debug log: slow native requests.
++        if (window.dbg && Date.now() - t0 > 15000) window.dbg(`native ${method} ${String(url).replace(/^https?:\/\/[^/]+/, '')} took ${Math.round((Date.now() - t0) / 1000)}s`);
+         // Return a Fetch-Compatible Response Object
++        const raw = response.data;
+         return {
++            // Reply size for the Data Usage Tracker; only worked out when read.
++            get nativeBytes() { return raw == null ? 0 : (typeof raw === 'string' ? raw.length : JSON.stringify(raw).length); },
+             ok: response.status >= 200 && response.status < 300,
+             status: response.status,
+             statusText: response.status >= 200 && response.status < 300 ? "OK" : "Error",
+@@ -58,7 +72,8 @@ async function performNativeRequest(url, options = {}) {
+         };
+ 
+     } catch (error) {
+-        console.error("[NativeProxy] Request Failed:", error);
++        if (window.dbg && error?.name !== 'AbortError') window.dbg(`native ${method} ${String(url).replace(/^https?:\/\/[^/]+/, '')} failed after ${Date.now() - t0}ms: ${error?.message || error}`);
++        if (error?.name !== 'AbortError') console.error("[NativeProxy] Request Failed:", error);
+         throw error;
+     }
+ }
+@@ -105,6 +120,13 @@ window.fetch = async function(input, init) {
+     }
+     // ---------------------------------
+ 
++    // Job requests (marked preferNative) always go through native HTTP on the device:
++    // the WebView stops getting replies about a minute after the app goes into the background.
++    if (init && init.preferNative && window.Capacitor?.isNativePlatform?.() && window.Capacitor.Plugins?.CapacitorHttp) {
++        const nativeUrl = typeof input === 'string' ? input : (input && input.url) || String(input);
++        return performNativeRequest(nativeUrl, init);
++    }
++
+     // A. VALIDATION CHECK: Only run if Remote + Cloudflare are ON
+     if (typeof connectionConfig === 'undefined' || !connectionConfig.isRemote) {
+         return window.originalFetch(input, init);
+diff --git a/www/js/ui.js b/www/js/ui.js
+index cfd85f4..a6d9bd5 100644
+--- a/www/js/ui.js
++++ b/www/js/ui.js
+@@ -1566,6 +1566,7 @@ window.addEventListener('resize', () => {
+         if (window.StyleManager) window.StyleManager.fitListHeight();
+         if (window.SaacManager && typeof window.SaacManager.refitGrid === 'function') window.SaacManager.refitGrid();
+         if (typeof fitCheckpointListHeight === 'function') fitCheckpointListHeight();
++        if (typeof fitDataUsageListHeight === 'function') fitDataUsageListHeight();
+     }, 150);
+ });
+ 
+diff --git a/www/js/utils.js b/www/js/utils.js
+index 69d50d8..06e0e4c 100644
+--- a/www/js/utils.js
++++ b/www/js/utils.js
+@@ -231,8 +231,14 @@ function setupBackgroundListeners() {
+ 
+ let lastNotifTime = 0; // Tracks the last time we updated Android
+ let lastProgress = -1; // Tracks the last progress % we sent
++let progressNotifStopped = false; // set by stopProgressService() (engine.js)
+ 
+ async function updateBatchNotification(title, force = false, body = "") {
++    if (progressNotifStopped && !force) {
++        if (window.dbg) window.dbg(`late notification update dropped: ${title}`);
++        return;
++    }
++    progressNotifStopped = false;
+     let progressVal = 0;
+     
+     // 1. Calculate Progress %
+@@ -266,14 +272,24 @@ async function updateBatchNotification(title, force = false, body = "") {
+     const svc = (typeof ResolverService !== 'undefined' ? ResolverService : null) || 
+                 (window.Capacitor && window.Capacitor.Plugins ? window.Capacitor.Plugins.ResolverService : null);
+ 
++    // Step counts go in the title, which Android shows even when collapsed; "Step" dropped so 4-digit counts fit.
++    if (body && body.includes(" / ")) {
++        title = `${title.replace(/\.+$/, '')}: ${body.replace(/^Step /, '').replace(/\s*\/\s*/, '/')}`;
++        body = "";
++    }
++
+     if (svc) {
+         try {
++            const t0 = Date.now();
+             await svc.updateProgress({
+                 title: title,
+                 body: body,
+                 progress: progressVal
+             });
++            // Debug log: a slow reply from the native side.
++            if (window.dbg && Date.now() - t0 > 1000) window.dbg(`native notification update took ${Date.now() - t0}ms`);
+         } catch (e) {
++            if (window.dbg) window.dbg('native notification update failed: ' + e);
+             console.error("Native Service Error:", e);
+         }
+     }
+@@ -886,7 +902,8 @@ window.toggleLivePreview = function(source) {
+ // Registered once at boot: re-runs refreshLivePreviewToggleInteractivity() on a live WiFi/mobile-data change. No-op without the native plugin.
+ function initLivePreviewNetworkListener() {
+     if (window.Capacitor?.Plugins?.ResolverService?.addListener) {
+-        Capacitor.Plugins.ResolverService.addListener('networkTypeChanged', () => {
++        Capacitor.Plugins.ResolverService.addListener('networkTypeChanged', (e) => {
++            if (window.dbg) window.dbg('network changed: ' + (e?.type || '?'));
+             if (typeof refreshLivePreviewToggleInteractivity === 'function') refreshLivePreviewToggleInteractivity();
+         });
+     }
+diff --git a/www/style.css b/www/style.css
+index 299a6a9..669f20f 100644
+--- a/www/style.css
++++ b/www/style.css
+@@ -1331,7 +1331,7 @@ body.hide-gallery-badges .gal-badges {
+ }
+ 
+ /* Modals with text inputs are anchored to the top rather than centred, so the keyboard and varying content height don't push them out of view. */
+-#loraModal, #img2imgPresetModal, #styleModal, #saacModal, #loraConfigModal, #styleEditorModal, #llmModal, #checkpointManagerModal, #checkpointConfigModal {
++#loraModal, #img2imgPresetModal, #styleModal, #saacModal, #loraConfigModal, #styleEditorModal, #llmModal, #checkpointManagerModal, #checkpointConfigModal, #dataUsageModal {
+     justify-content: flex-start;
+     padding-top: 40px;
+ }
+@@ -1928,6 +1928,11 @@ body.fs-viewer-open .dock-wrapper {
+ body.lp-fs-open .container { content-visibility: hidden; }
+ body.lp-fs-open .dock-wrapper { visibility: hidden; }
+ 
++/* Tap the image to hide the toolbar (the status bar is hidden natively). */
++#fullScreenModal.fs-immersive .lightbox-controls {
++    display: none;
++}
++
+ .lightbox-controls {
+     width: 100%;
+     padding: 20px;
+@@ -2921,3 +2926,125 @@ button[onclick*="setComfyLoraStrength"] {
+     opacity: 1;
+     transition: none;
+ }
++
++/* Data Usage Tracker (datausage.js). */
++.data-usage-pill {
++    position: fixed;
++    top: calc(env(safe-area-inset-top) + 8px);
++    left: 50%;
++    transform: translateX(-50%);
++    padding: 5px 12px;
++    border-radius: 14px;
++    background: rgba(12, 12, 15, 0.85);
++    border: 1px solid var(--border-color);
++    color: #fff;
++    font-size: 14px; /* as .app-toast */
++    font-weight: 700;
++    white-space: pre;
++    z-index: 150;
++    pointer-events: none;
++    opacity: 0;
++    transition: opacity 0.3s ease;
++}
++.data-usage-pill.visible {
++    opacity: 1;
++}
++.data-usage-summary {
++    font-size: 12px;
++    color: var(--text-muted);
++    margin-bottom: 10px;
++}
++.data-usage-row {
++    display: flex;
++    align-items: center;
++    gap: 12px;
++    padding: 8px;
++    margin-bottom: 8px;
++    border: 1px solid var(--border-color);
++    border-radius: var(--radius-sm);
++    background: var(--bg-panel);
++}
++.data-usage-thumb {
++    position: relative;
++    flex: 0 0 56px;
++    height: 56px;
++    border-radius: 6px;
++    overflow: hidden;
++    background: rgba(255, 255, 255, 0.05);
++    display: flex;
++    align-items: center;
++    justify-content: center;
++    color: var(--text-muted);
++}
++.data-usage-thumb img {
++    width: 100%;
++    height: 100%;
++    object-fit: cover;
++}
++.data-usage-count {
++    position: absolute;
++    left: 3px;
++    bottom: 3px;
++}
++.data-usage-info {
++    flex: 1;
++    min-width: 0;
++    display: flex;
++    flex-direction: column;
++    gap: 5px;
++}
++/* Always three single lines of the same height, evenly spaced. */
++.data-usage-info > div {
++    height: 18px;
++    white-space: nowrap;
++    overflow: hidden;
++}
++.data-usage-title {
++    font-size: 12px;
++    font-weight: 700;
++    color: var(--text-main);
++    display: flex;
++    align-items: center;
++    gap: 5px;
++}
++.data-usage-live {
++    background: rgba(244, 67, 54, 0.35);
++}
++.data-usage-status {
++    position: absolute;
++    top: 3px;
++    left: 50%;
++    transform: translateX(-50%);
++    padding: 2px 3px;
++    font-size: 8px;
++    letter-spacing: 0;
++    background: rgba(244, 67, 54, 0.85);
++}
++.data-usage-when {
++    font-size: 11px;
++    color: var(--text-muted);
++    display: flex;
++    align-items: center;
++    gap: 6px;
++}
++.data-usage-net {
++    background: rgba(33, 150, 243, 0.25);
++}
++.data-usage-net.mobile {
++    background: rgba(255, 152, 0, 0.3);
++}
++.data-usage-figures {
++    display: flex;
++    align-items: center;
++    gap: 8px;
++    font-size: 12px;
++    color: var(--text-main);
++}
++.data-usage-total {
++    margin-left: auto;
++    font-weight: 800;
++    color: var(--accent-primary);
++}
++
++/* Debug log (Config > Experimental). */
++.debug-log-text { flex: 1; min-height: 200px; overflow: auto; margin: 0; font-size: 10px; line-height: 1.4; white-space: pre-wrap; word-break: break-all; color: var(--text-main); user-select: text; -webkit-user-select: text; }

@@ -160,6 +160,8 @@ window.onload = function() {
         if (typeof initModelPickers === 'function') initModelPickers();
         if (typeof loadHostIp === 'function') loadHostIp();
         if (typeof loadQueueState === 'function') loadQueueState();
+        // The app closed mid-job: stop Forge's job if that's turned on (jobabort.js).
+        if (window.JobAbort) JobAbort.checkOnLaunch();
         if (typeof renderQueueAll === 'function') renderQueueAll();
         if (typeof loadAutoDlState === 'function') loadAutoDlState();
         if (typeof loadLlmSettings === 'function') loadLlmSettings();
@@ -185,6 +187,8 @@ window.onload = function() {
         if (typeof LocalNotifications !== 'undefined' && LocalNotifications) {
             LocalNotifications.checkPermissions().then(perm => {
                 console.log("Notification Perm Status:", perm.display);
+                // Asked once on first launch; Android remembers a refusal ('denied') and doesn't ask again.
+                if (perm.display === 'prompt' || perm.display === 'prompt-with-rationale') return LocalNotifications.requestPermissions();
             }).catch(e => console.warn("Notif check failed:", e));
         }
         
@@ -251,6 +255,7 @@ window.onload = function() {
             // Correct an invalid or 0 gallery cache limit to the default (30) when CFG is left.
             if (leavingCfg && typeof enforceGalleryCacheLimitDefault === 'function') enforceGalleryCacheLimitDefault();
             if (leavingCfg && typeof enforceGenerationPollingRateDefault === 'function') enforceGenerationPollingRateDefault();
+            if (leavingCfg && typeof enforceBackgroundPollingRateDefault === 'function') enforceBackgroundPollingRateDefault();
 
             // List of all valid view IDs
             const views = ['gen', 'inp', 'que', 'gal', 'ana', 'cfg', 'comfy'];
@@ -331,11 +336,17 @@ window.onload = function() {
             const rawTrigger = config && config.trigger
                 ? String(config.trigger).split('\n').map(line => line.trim().replace(/[ \t]+/g, ' ')).filter(line => line.length > 0).join('\n')
                 : "";
-            const trigger = rawTrigger ? ` ${rawTrigger}` : "";
+            // Trigger words already in the box (in any weight or case) aren't added again.
+            // Removed segment by segment, so the trigger's own line breaks stay.
+            const presentTags = boxTagSet(textArea);
+            const formattedTrigger = window.formatInsertedTags ? window.formatInsertedTags(rawTrigger, textArea.id.replace(/_prompt$/, '')) : rawTrigger;
+            const triggerText = removeTagsFromText(formattedTrigger, new Set(parseTagList(formattedTrigger).map(normaliseTag).filter(n => presentTags.has(n))));
+            const addedTriggers = parseTagList(triggerText);
+            const trigger = triggerText ? ` ${triggerText}` : "";
             const loraTag = `<lora:${alias}:${weight}>${trigger}`;
 
             if (!textArea.value.includes(`<lora:${alias}:`)) {
-                // Add a leading separator only when there is content to separate from (as StyleManager.appendSegment()).
+                // Add a leading separator only when there is content to separate from (as appendTagsToBox(), utils.js).
                 const trimmed = textArea.value.replace(/\s+$/, "");
                 let sep;
                 if (!trimmed) sep = "";
@@ -350,7 +361,8 @@ window.onload = function() {
                 const mode = textArea.id.replace(/_prompt$/, '');
                 if (window.LoraManager) {
                     if (!window.LoraManager.appliedInsertions[mode]) window.LoraManager.appliedInsertions[mode] = {};
-                    window.LoraManager.appliedInsertions[mode][alias] = { insertion, trigger: rawTrigger };
+                    // inserted: the trigger words it added, which are the ones removed with it (toggle()).
+                    window.LoraManager.appliedInsertions[mode][alias] = { insertion, trigger: rawTrigger, inserted: addedTriggers };
                     window.LoraManager.saveInsertions(mode);
                 }
 
@@ -526,46 +538,95 @@ if (window.visualViewport) {
     });
 }
 
-// Hardware back closes the topmost open modal (LoRA/Styles/SAAC/img2img Preset Manager/Magic Prompt and their sub-modals) using its own close function.
-if (App) {
-    App.addListener('backButton', () => {
-        const loraConfigModal = document.getElementById('loraConfigModal');
-        const styleEditorModal = document.getElementById('styleEditorModal');
-        const loraModal = document.getElementById('loraModal');
-        const styleModal = document.getElementById('styleModal');
-        const saacModal = document.getElementById('saacModal');
-        const img2imgPresetModal = document.getElementById('img2imgPresetModal');
-        const llmModal = document.getElementById('llmModal');
+// Drop a field's focus when the app view loses or regains focus without the keyboard, so a later touch can't revive it.
+window.addEventListener('blur', () => { if (!isKeyboardUp()) blurActiveTextField(); });
+window.addEventListener('focus', () => { if (!isKeyboardUp()) blurActiveTextField(); });
+document.addEventListener('touchstart', () => {
+    if (!document.hasFocus()) blurActiveTextField();
+}, { capture: true, passive: true });
 
-        if (loraConfigModal && !loraConfigModal.classList.contains('hidden')) {
-            if (typeof window.closeConfigModal === 'function') window.closeConfigModal();
-            return;
-        }
-        if (styleEditorModal && !styleEditorModal.classList.contains('hidden')) {
-            if (typeof window.closeStyleEditor === 'function') window.closeStyleEditor();
-            return;
-        }
-        if (loraModal && !loraModal.classList.contains('hidden')) {
-            if (typeof window.closeLoraModal === 'function') window.closeLoraModal();
-            return;
-        }
-        if (styleModal && !styleModal.classList.contains('hidden')) {
-            if (typeof window.closeStyleModal === 'function') window.closeStyleModal();
-            return;
-        }
-        if (saacModal && !saacModal.classList.contains('hidden')) {
-            if (window.SaacManager && typeof window.SaacManager.close === 'function') window.SaacManager.close();
-            return;
-        }
-        if (img2imgPresetModal && !img2imgPresetModal.classList.contains('hidden')) {
-            if (typeof window.closeImg2imgPresetModal === 'function') window.closeImg2imgPresetModal();
-            return;
-        }
-        if (llmModal && !llmModal.classList.contains('hidden')) {
-            if (typeof window.closeLlmModal === 'function') window.closeLlmModal();
-            return;
-        }
+// Hardware back (or the back gesture) closes the topmost open window or selector the same way its own close button does, and only exits the app when nothing is open.
+const BACK_CLOSERS = {
+    appConfirmModal: () => window.__appConfirmResolve(false),
+    noticeBoardModal: () => document.getElementById('noticeBoardDismiss')?.click(),
+    batteryModal: () => window.skipBatteryPerm && window.skipBatteryPerm(),
+    'saac-img-modal': () => window.SaacManager.closeImage(),
+    lpFullscreen: () => window.closeLivePreviewFullscreen(),
+    autoDeleteModal: () => window.answerAutoDelete(false),
+};
 
-        App.exitApp();
+// Tapping outside these windows closes them, as their × does. The tap must start and end outside, so a drag that ends
+// there (the scroll bar, selecting text) doesn't. The Auto-Delete Warning deliberately has no such close.
+const BACKDROP_CLOSERS = {
+    img2imgPresetModal: () => window.closeImg2imgPresetModal(),
+    loraModal: () => window.closeLoraModal(),
+    saacModal: () => window.SaacManager.close(),
+    styleModal: () => window.closeStyleModal(),
+    dataUsageModal: () => window.closeDataUsageHistory(),
+    debugLogModal: () => window.closeDebugLog(),
+};
+Object.entries(BACKDROP_CLOSERS).forEach(([id, close]) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    let downOnBackdrop = false;
+    el.addEventListener('pointerdown', e => { downOnBackdrop = e.target === el; });
+    el.addEventListener('click', e => {
+        if (downOnBackdrop && e.target === el) close();
+        downOnBackdrop = false;
     });
+});
+
+function topmostOverlay() {
+    const open = [...document.querySelectorAll('.modal:not(.hidden), #saac-img-modal.active')]
+        .filter(el => el.getClientRects().length && getComputedStyle(el).display !== 'none');
+    if (!open.length) return null;
+    const z = el => parseInt(getComputedStyle(el).zIndex, 10) || 0;
+    // Highest layer wins; on the same layer, the later one in the page sits on top.
+    return open.reduce((top, el) => (z(el) > z(top) || (z(el) === z(top) && (top.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING))) ? el : top);
 }
+
+window.closeTopmostOverlay = function() {
+    const el = topmostOverlay();
+    if (!el) return typeof window.closeAnaStickyMenu === 'function' && window.closeAnaStickyMenu();
+    if (BACK_CLOSERS[el.id]) {
+        BACK_CLOSERS[el.id]();
+        return true;
+    }
+    const btn = el.querySelector('.close-btn, .saac-close-btn')
+        || [...el.querySelectorAll('button[onclick]')].find(b => /close|classList\.add\('hidden'\)/i.test(b.getAttribute('onclick')));
+    if (btn) btn.click();
+    else el.classList.add('hidden');
+    return true;
+};
+
+// Two back presses to exit. Closing a window or leaving a text box doesn't count.
+const EXIT_WINDOW_MS = 2500;
+let exitArmedUntil = 0;
+function blurFocusedTextEntry() {
+    const el = document.activeElement;
+    if (!el) return false;
+    const isText = el.tagName === 'TEXTAREA' || el.isContentEditable
+        || (el.tagName === 'INPUT' && /^(text|search|number|email|url|password|tel)$/i.test(el.type || 'text'));
+    if (!isText) return false;
+    el.blur();
+    return true;
+}
+window.handleBackPress = function() {
+    if (window.closeTopmostOverlay() || blurFocusedTextEntry()) {
+        exitArmedUntil = 0;
+        return 'handled';
+    }
+    if (typeof isComfyMaskingMode !== 'undefined' && isComfyMaskingMode && typeof cancelComfyMasking === 'function') {
+        cancelComfyMasking();
+        exitArmedUntil = 0;
+        return 'handled';
+    }
+    if (Date.now() < exitArmedUntil) {
+        if (App) App.exitApp();
+        return 'exit';
+    }
+    exitArmedUntil = Date.now() + EXIT_WINDOW_MS;
+    Toast.show({ text: 'Back again to exit', duration: 'short' });
+    return 'armed';
+};
+if (App) App.addListener('backButton', () => window.handleBackPress());
