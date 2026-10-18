@@ -576,6 +576,43 @@ Object.entries(BACKDROP_CLOSERS).forEach(([id, close]) => {
     });
 });
 
+// A touch held past Android's long-press time (about half a second) doesn't produce a click in the WebView, so a button
+// held and then let go did nothing. As a native button does, it now fires on release if the finger is still on it and
+// hasn't moved. Only for buttons, the dock and other tappable controls (not images, which can have their own long-press
+// action, inputs, the canvas or text, which keeps its selection). The click goes to what was touched, so holding inside a
+// window can't close it the way a tap on its backdrop does; if the WebView does send the click, nothing more is sent.
+;(function () {
+    const TAPPABLE = 'button, .dock-item, [role="button"], [onclick]:not(.modal)';
+    const SKIP = 'img, input, textarea, select, canvas, [contenteditable="true"]';
+    const HOLD_MS = 400, SLOP = 12;
+    let press = null;
+    document.addEventListener('pointerdown', e => {
+        press = null;
+        if (e.pointerType !== 'touch' || !e.isPrimary || !e.target.closest) return;
+        const el = e.target.closest(TAPPABLE);
+        if (!el || el.disabled || e.target.closest(SKIP)) return;
+        press = { el, target: e.target, x: e.clientX, y: e.clientY, t: performance.now(), clicked: false };
+    }, true);
+    document.addEventListener('pointermove', e => {
+        if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > SLOP) press = null;
+    }, true);
+    document.addEventListener('pointercancel', () => { press = null; }, true);
+    document.addEventListener('click', () => { if (press) press.clicked = true; }, true);
+    // No context menu or text selection for a held control.
+    document.addEventListener('contextmenu', e => { if (press) e.preventDefault(); }, true);
+    document.addEventListener('pointerup', e => {
+        const p = press;
+        if (!p || performance.now() - p.t < HOLD_MS) return;
+        const under = document.elementFromPoint(e.clientX, e.clientY);
+        if (!under || !p.el.contains(under)) { press = null; return; }
+        setTimeout(() => {
+            if (press === p) press = null;
+            if (p.clicked || !p.target.isConnected || p.el.disabled) return;
+            p.target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window, clientX: e.clientX, clientY: e.clientY }));
+        }, 60);
+    }, true);
+})();
+
 function topmostOverlay() {
     const open = [...document.querySelectorAll('.modal:not(.hidden), #saac-img-modal.active')]
         .filter(el => el.getClientRects().length && getComputedStyle(el).display !== 'none');

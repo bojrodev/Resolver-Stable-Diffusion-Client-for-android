@@ -211,7 +211,7 @@ function loadConnectionConfig() {
     const livePreviewSwitch = document.getElementById('cfgShowLivePreviewSwitch');
     if (livePreviewSwitch) livePreviewSwitch.checked = showLivePreview;
     // livePreviewToggleRow visibility/position is handled by reorganizeGenRowLayout() (utils.js).
-    document.getElementById('livePreviewMobileDataRow')?.classList.toggle('hidden', !showLivePreview);
+    document.querySelectorAll('.lp-option-row').forEach(r => r.classList.toggle('hidden', !showLivePreview));
 
     // Always interactive when visible; a standing preference, not tied to the main toggle.
     const mobileDataAllowed = localStorage.getItem('bojroLivePreviewMobileDataAllowed') === 'true';
@@ -427,7 +427,7 @@ const RESET_KEYS = [
     // Generation
     'bojroAutoDeleteWarning', 'bojroAutoSave', 'bojroGenerationPollingRate', 'bojroBackgroundPollingRate',
     'bojroKeepSourceSeed', 'bojroProgressBridgeEnabled', 'bojroShowBatchGrids', 'bojroLimitBatchGrid',
-    'bojroShowLivePreviewToggle', 'bojroLivePreviewMobileDataAllowed',
+    'bojroShowLivePreviewToggle', 'bojroLivePreviewMobileDataAllowed', 'bojroLpMethod', 'bojroLpEveryN', 'bojroLpBorder',
     // Models
     'bojroShowAdetailer', 'bojroShowAdetailerOther', 'bojroShowAdetailerSdxlAnima', 'bojroAdetailerControlNet',
     'bojroShowControlnet', 'bojroShowControlnetOther', 'bojroShowControlnetSdxlAnima', 'bojroShowExtraAdetailerPasses',
@@ -478,6 +478,42 @@ window.togglePromptBoxHeight = function(field, on) {
     applyPromptBoxHeights();
 };
 applyPromptBoxHeights();
+
+// Live Preview Border (Config > Generation, on by default): the ring round the preview image (style.css).
+function applyLivePreviewBorder() {
+    const on = localStorage.getItem('bojroLpBorder') !== 'false';
+    document.body.classList.toggle('lp-border-off', !on);
+    const sw = document.getElementById('cfgLpBorderSwitch');
+    if (sw) sw.checked = on;
+}
+window.toggleLivePreviewBorder = function(on) {
+    localStorage.setItem('bojroLpBorder', on ? 'true' : 'false');
+    applyLivePreviewBorder();
+};
+applyLivePreviewBorder();
+
+// Live Preview Method / Live Preview Every N Steps (Config > Generation). Sent with each job while Live Preview is on, as
+// per-job overrides that Forge Neo puts back afterwards, so its own settings are left alone. Empty = Forge's setting.
+window.saveLivePreviewOverride = function(sel) {
+    localStorage.setItem(sel.dataset.key, sel.value);
+};
+function livePreviewOverrides() {
+    const out = {};
+    const method = localStorage.getItem('bojroLpMethod');
+    const everyN = parseInt(localStorage.getItem('bojroLpEveryN'), 10);
+    if (['RGB', 'Approx NN', 'TAESD'].includes(method)) out.show_progress_type = method;
+    if (everyN >= 1 && everyN <= 5) out.show_progress_every_n_steps = everyN;
+    return out;
+}
+;(function () {
+    ['cfgLpMethod', 'cfgLpEveryN'].forEach(id => {
+        const sel = document.getElementById(id);
+        if (!sel) return;
+        const saved = localStorage.getItem(sel.dataset.key) || '';
+        sel.value = [...sel.options].some(o => o.value === saved) ? saved : '';
+        if (typeof updateModelPickerTriggerText === 'function') updateModelPickerTriggerText(id);
+    });
+})();
 
 // Backs up every localStorage key, independent of what resetAppConfig() resets.
 window.backupAppSettings = async function() {
@@ -1097,7 +1133,7 @@ window.toggleFluxCacheVisibility = function() {
     document.getElementById('fluxCacheSection')?.classList.toggle('hidden', !isChecked);
 }
 
-// Show Live Preview Toggle: gates the livePreviewCheck row (Generate tab) and the Allow Live Preview On Mobile Data row below it. Turning it off also switches live preview off (toggleLivePreview(), which stops fetching).
+// Show Live Preview Toggle: gates the livePreviewCheck row (Generate tab) and the Live Preview rows indented below it (.lp-option-row). Turning it off also switches live preview off (toggleLivePreview(), which stops fetching).
 // Allow Live Preview On Mobile Data is deliberately not gated on livePreviewCheck, which is set on another screen; it is a standing preference.
 window.toggleLivePreviewButtonVisibility = function() {
     const isChecked = document.getElementById('cfgShowLivePreviewSwitch').checked;
@@ -1105,7 +1141,7 @@ window.toggleLivePreviewButtonVisibility = function() {
     // reorganizeGenRowLayout() (utils.js) owns showing and positioning livePreviewToggleRow.
     if (typeof reorganizeGenRowLayout === 'function') reorganizeGenRowLayout();
     if (typeof updateInpPreviewToggleVisibility === 'function') updateInpPreviewToggleVisibility();
-    document.getElementById('livePreviewMobileDataRow')?.classList.toggle('hidden', !isChecked);
+    document.querySelectorAll('.lp-option-row').forEach(r => r.classList.toggle('hidden', !isChecked));
     if (!isChecked) {
         // Switching the feature off also clears the remembered live preview choice (see toggleLivePreview(), utils.js).
         localStorage.setItem('bojroLivePreviewOn', 'false');

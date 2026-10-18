@@ -1330,6 +1330,14 @@ body.hide-gallery-badges .gal-badges {
     z-index: 300;
 }
 
+/* Live Preview Border: a ring in the tab's accent colour round the preview image (shown only while a job runs). It's drawn
+   over the preview's outer 3px rather than outside it, so the preview is the result's size and nothing moves when the
+   result replaces it (its container also clips anything wider). Off with Config > Generation > Live Preview Border. */
+body:not(.lp-border-off) #livePreviewImg, body:not(.lp-border-off) #inpLivePreviewImg {
+    outline: 3px solid var(--accent-primary);
+    outline-offset: -3px;
+}
+
 /* Modals with text inputs are anchored to the top rather than centred, so the keyboard and varying content height don't push them out of view. */
 #loraModal, #img2imgPresetModal, #styleModal, #saacModal, #loraConfigModal, #styleEditorModal, #llmModal, #checkpointManagerModal, #checkpointConfigModal {
     justify-content: flex-start;
@@ -1860,6 +1868,11 @@ body.fs-viewer-open .container {
 }
 body.fs-viewer-open .dock-wrapper {
     visibility: hidden;
+}
+/* A just-closed viewer or Live Preview full screen, kept drawn until the app behind it is (coverUntilAppDrawn(), engine.js). */
+#fullScreenModal.hidden.closing-cover, #lpFullscreen.hidden.closing-cover {
+    display: flex !important;
+    pointer-events: none;
 }
 
 .lightbox-container {

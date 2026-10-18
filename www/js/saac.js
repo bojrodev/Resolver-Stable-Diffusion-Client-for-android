@@ -55,7 +55,7 @@ window.SaacManager = {
         }
     },
 
-    // Deletes the cached database from disk (used by "Reset App Configuration").
+    // Deletes the cached database from disk. Not called at the moment: Reset App Configuration keeps the database.
     clearCache: async function() {
         this.imgDb = null;
         this.isLoaded = false;

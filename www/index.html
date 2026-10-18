@@ -7430,9 +7430,23 @@
                             <label for="cfgShowLivePreviewSwitch" style="margin: 0; color: var(--text-main); font-size: 13px;">Show Live Preview Toggle</label>
                             <input type="checkbox" id="cfgShowLivePreviewSwitch" class="bojro-switch" onchange="toggleLivePreviewButtonVisibility()">
                         </div>
-                        <div id="livePreviewMobileDataRow" class="row hidden" style="justify-content: space-between; align-items: center; padding: 0 5px 0 17px;">
+                        <div id="livePreviewMobileDataRow" class="row hidden lp-option-row" style="justify-content: space-between; align-items: center; padding: 0 5px 0 17px;">
                             <label for="cfgLivePreviewMobileDataSwitch" style="margin: 0; color: var(--text-main); font-size: 13px;">Allow Live Preview On Mobile Data</label>
                             <input type="checkbox" id="cfgLivePreviewMobileDataSwitch" class="bojro-switch" onchange="saveLivePreviewMobileDataAllowed()">
+                        </div>
+                        <div class="row hidden lp-option-row" style="justify-content: space-between; align-items: center; padding: 0 5px 0 17px;">
+                            <label for="cfgLpBorderSwitch" style="margin: 0; color: var(--text-main); font-size: 13px;">Live Preview Border</label>
+                            <input type="checkbox" id="cfgLpBorderSwitch" class="bojro-switch" onchange="toggleLivePreviewBorder(this.checked)">
+                        </div>
+                        <div class="row hidden lp-option-row" style="justify-content: space-between; align-items: center; padding: 0 5px 0 17px; gap: 10px;">
+                            <label for="cfgLpEveryN" style="margin: 0; color: var(--text-main); font-size: 13px;">Live Preview Every N Steps</label>
+                            <select id="cfgLpEveryN" data-key="bojroLpEveryN" onchange="saveLivePreviewOverride(this)"><option value="">Forge's Setting</option><option value="1">Every Step</option><option value="2">Every 2 Steps</option><option value="3">Every 3 Steps</option><option value="4">Every 4 Steps</option><option value="5">Every 5 Steps</option></select>
+                            <button type="button" class="model-picker-trigger hidden" data-target="cfgLpEveryN" data-kind="option" data-custom-order=",1,2,3,4,5" data-modal-title="Live Preview Every N Steps" onclick="openModelPicker(this)" style="flex: 0 0 140px; width: 140px;"><span class="model-picker-trigger-primary"></span><span class="model-picker-trigger-subtitle hidden"></span></button>
+                        </div>
+                        <div class="row hidden lp-option-row" style="justify-content: space-between; align-items: center; padding: 0 5px 0 17px; gap: 10px;">
+                            <label for="cfgLpMethod" style="margin: 0; color: var(--text-main); font-size: 13px;">Live Preview Method</label>
+                            <select id="cfgLpMethod" data-key="bojroLpMethod" onchange="saveLivePreviewOverride(this)"><option value="">Forge's Setting</option><option value="RGB">RGB</option><option value="Approx NN">Approx NN</option><option value="TAESD">TAESD</option></select>
+                            <button type="button" class="model-picker-trigger hidden" data-target="cfgLpMethod" data-kind="option" data-custom-order=",Approx NN,RGB,TAESD" data-modal-title="Live Preview Method" onclick="openModelPicker(this)" style="flex: 0 0 140px; width: 140px;"><span class="model-picker-trigger-primary"></span><span class="model-picker-trigger-subtitle hidden"></span></button>
                         </div>
                     </div>
                 </div>

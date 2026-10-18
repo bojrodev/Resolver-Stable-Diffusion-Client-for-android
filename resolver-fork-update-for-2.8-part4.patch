@@ -1,0 +1,498 @@
+diff --git a/www/index.html b/www/index.html
+index 386bda4..3887c03 100644
+--- a/www/index.html
++++ b/www/index.html
+@@ -7430,10 +7430,24 @@
+                             <label for="cfgShowLivePreviewSwitch" style="margin: 0; color: var(--text-main); font-size: 13px;">Show Live Preview Toggle</label>
+                             <input type="checkbox" id="cfgShowLivePreviewSwitch" class="bojro-switch" onchange="toggleLivePreviewButtonVisibility()">
+                         </div>
+-                        <div id="livePreviewMobileDataRow" class="row hidden" style="justify-content: space-between; align-items: center; padding: 0 5px 0 17px;">
++                        <div id="livePreviewMobileDataRow" class="row hidden lp-option-row" style="justify-content: space-between; align-items: center; padding: 0 5px 0 17px;">
+                             <label for="cfgLivePreviewMobileDataSwitch" style="margin: 0; color: var(--text-main); font-size: 13px;">Allow Live Preview On Mobile Data</label>
+                             <input type="checkbox" id="cfgLivePreviewMobileDataSwitch" class="bojro-switch" onchange="saveLivePreviewMobileDataAllowed()">
+                         </div>
++                        <div class="row hidden lp-option-row" style="justify-content: space-between; align-items: center; padding: 0 5px 0 17px;">
++                            <label for="cfgLpBorderSwitch" style="margin: 0; color: var(--text-main); font-size: 13px;">Live Preview Border</label>
++                            <input type="checkbox" id="cfgLpBorderSwitch" class="bojro-switch" onchange="toggleLivePreviewBorder(this.checked)">
++                        </div>
++                        <div class="row hidden lp-option-row" style="justify-content: space-between; align-items: center; padding: 0 5px 0 17px; gap: 10px;">
++                            <label for="cfgLpEveryN" style="margin: 0; color: var(--text-main); font-size: 13px;">Live Preview Every N Steps</label>
++                            <select id="cfgLpEveryN" data-key="bojroLpEveryN" onchange="saveLivePreviewOverride(this)"><option value="">Forge's Setting</option><option value="1">Every Step</option><option value="2">Every 2 Steps</option><option value="3">Every 3 Steps</option><option value="4">Every 4 Steps</option><option value="5">Every 5 Steps</option></select>
++                            <button type="button" class="model-picker-trigger hidden" data-target="cfgLpEveryN" data-kind="option" data-custom-order=",1,2,3,4,5" data-modal-title="Live Preview Every N Steps" onclick="openModelPicker(this)" style="flex: 0 0 140px; width: 140px;"><span class="model-picker-trigger-primary"></span><span class="model-picker-trigger-subtitle hidden"></span></button>
++                        </div>
++                        <div class="row hidden lp-option-row" style="justify-content: space-between; align-items: center; padding: 0 5px 0 17px; gap: 10px;">
++                            <label for="cfgLpMethod" style="margin: 0; color: var(--text-main); font-size: 13px;">Live Preview Method</label>
++                            <select id="cfgLpMethod" data-key="bojroLpMethod" onchange="saveLivePreviewOverride(this)"><option value="">Forge's Setting</option><option value="RGB">RGB</option><option value="Approx NN">Approx NN</option><option value="TAESD">TAESD</option></select>
++                            <button type="button" class="model-picker-trigger hidden" data-target="cfgLpMethod" data-kind="option" data-custom-order=",Approx NN,RGB,TAESD" data-modal-title="Live Preview Method" onclick="openModelPicker(this)" style="flex: 0 0 140px; width: 140px;"><span class="model-picker-trigger-primary"></span><span class="model-picker-trigger-subtitle hidden"></span></button>
++                        </div>
+                     </div>
+                 </div>
+                 <div class="glass-box cfg-card cfg-theme-general">
+diff --git a/www/js/boot.js b/www/js/boot.js
+index 4880da8..49a5d18 100644
+--- a/www/js/boot.js
++++ b/www/js/boot.js
+@@ -576,6 +576,43 @@ Object.entries(BACKDROP_CLOSERS).forEach(([id, close]) => {
+     });
+ });
+ 
++// A touch held past Android's long-press time (about half a second) doesn't produce a click in the WebView, so a button
++// held and then let go did nothing. As a native button does, it now fires on release if the finger is still on it and
++// hasn't moved. Only for buttons, the dock and other tappable controls (not images, which can have their own long-press
++// action, inputs, the canvas or text, which keeps its selection). The click goes to what was touched, so holding inside a
++// window can't close it the way a tap on its backdrop does; if the WebView does send the click, nothing more is sent.
++;(function () {
++    const TAPPABLE = 'button, .dock-item, [role="button"], [onclick]:not(.modal)';
++    const SKIP = 'img, input, textarea, select, canvas, [contenteditable="true"]';
++    const HOLD_MS = 400, SLOP = 12;
++    let press = null;
++    document.addEventListener('pointerdown', e => {
++        press = null;
++        if (e.pointerType !== 'touch' || !e.isPrimary || !e.target.closest) return;
++        const el = e.target.closest(TAPPABLE);
++        if (!el || el.disabled || e.target.closest(SKIP)) return;
++        press = { el, target: e.target, x: e.clientX, y: e.clientY, t: performance.now(), clicked: false };
++    }, true);
++    document.addEventListener('pointermove', e => {
++        if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > SLOP) press = null;
++    }, true);
++    document.addEventListener('pointercancel', () => { press = null; }, true);
++    document.addEventListener('click', () => { if (press) press.clicked = true; }, true);
++    // No context menu or text selection for a held control.
++    document.addEventListener('contextmenu', e => { if (press) e.preventDefault(); }, true);
++    document.addEventListener('pointerup', e => {
++        const p = press;
++        if (!p || performance.now() - p.t < HOLD_MS) return;
++        const under = document.elementFromPoint(e.clientX, e.clientY);
++        if (!under || !p.el.contains(under)) { press = null; return; }
++        setTimeout(() => {
++            if (press === p) press = null;
++            if (p.clicked || !p.target.isConnected || p.el.disabled) return;
++            p.target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window, clientX: e.clientX, clientY: e.clientY }));
++        }, 60);
++    }, true);
++})();
++
+ function topmostOverlay() {
+     const open = [...document.querySelectorAll('.modal:not(.hidden), #saac-img-modal.active')]
+         .filter(el => el.getClientRects().length && getComputedStyle(el).display !== 'none');
+diff --git a/www/js/cfg.js b/www/js/cfg.js
+index c88047a..fa0af75 100644
+--- a/www/js/cfg.js
++++ b/www/js/cfg.js
+@@ -211,7 +211,7 @@ function loadConnectionConfig() {
+     const livePreviewSwitch = document.getElementById('cfgShowLivePreviewSwitch');
+     if (livePreviewSwitch) livePreviewSwitch.checked = showLivePreview;
+     // livePreviewToggleRow visibility/position is handled by reorganizeGenRowLayout() (utils.js).
+-    document.getElementById('livePreviewMobileDataRow')?.classList.toggle('hidden', !showLivePreview);
++    document.querySelectorAll('.lp-option-row').forEach(r => r.classList.toggle('hidden', !showLivePreview));
+ 
+     // Always interactive when visible; a standing preference, not tied to the main toggle.
+     const mobileDataAllowed = localStorage.getItem('bojroLivePreviewMobileDataAllowed') === 'true';
+@@ -427,7 +427,7 @@ const RESET_KEYS = [
+     // Generation
+     'bojroAutoDeleteWarning', 'bojroAutoSave', 'bojroGenerationPollingRate', 'bojroBackgroundPollingRate',
+     'bojroKeepSourceSeed', 'bojroProgressBridgeEnabled', 'bojroShowBatchGrids', 'bojroLimitBatchGrid',
+-    'bojroShowLivePreviewToggle', 'bojroLivePreviewMobileDataAllowed',
++    'bojroShowLivePreviewToggle', 'bojroLivePreviewMobileDataAllowed', 'bojroLpMethod', 'bojroLpEveryN', 'bojroLpBorder',
+     // Models
+     'bojroShowAdetailer', 'bojroShowAdetailerOther', 'bojroShowAdetailerSdxlAnima', 'bojroAdetailerControlNet',
+     'bojroShowControlnet', 'bojroShowControlnetOther', 'bojroShowControlnetSdxlAnima', 'bojroShowExtraAdetailerPasses',
+@@ -479,6 +479,42 @@ window.togglePromptBoxHeight = function(field, on) {
+ };
+ applyPromptBoxHeights();
+ 
++// Live Preview Border (Config > Generation, on by default): the ring round the preview image (style.css).
++function applyLivePreviewBorder() {
++    const on = localStorage.getItem('bojroLpBorder') !== 'false';
++    document.body.classList.toggle('lp-border-off', !on);
++    const sw = document.getElementById('cfgLpBorderSwitch');
++    if (sw) sw.checked = on;
++}
++window.toggleLivePreviewBorder = function(on) {
++    localStorage.setItem('bojroLpBorder', on ? 'true' : 'false');
++    applyLivePreviewBorder();
++};
++applyLivePreviewBorder();
++
++// Live Preview Method / Live Preview Every N Steps (Config > Generation). Sent with each job while Live Preview is on, as
++// per-job overrides that Forge Neo puts back afterwards, so its own settings are left alone. Empty = Forge's setting.
++window.saveLivePreviewOverride = function(sel) {
++    localStorage.setItem(sel.dataset.key, sel.value);
++};
++function livePreviewOverrides() {
++    const out = {};
++    const method = localStorage.getItem('bojroLpMethod');
++    const everyN = parseInt(localStorage.getItem('bojroLpEveryN'), 10);
++    if (['RGB', 'Approx NN', 'TAESD'].includes(method)) out.show_progress_type = method;
++    if (everyN >= 1 && everyN <= 5) out.show_progress_every_n_steps = everyN;
++    return out;
++}
++;(function () {
++    ['cfgLpMethod', 'cfgLpEveryN'].forEach(id => {
++        const sel = document.getElementById(id);
++        if (!sel) return;
++        const saved = localStorage.getItem(sel.dataset.key) || '';
++        sel.value = [...sel.options].some(o => o.value === saved) ? saved : '';
++        if (typeof updateModelPickerTriggerText === 'function') updateModelPickerTriggerText(id);
++    });
++})();
++
+ // Backs up every localStorage key, independent of what resetAppConfig() resets.
+ window.backupAppSettings = async function() {
+     try {
+@@ -1097,7 +1133,7 @@ window.toggleFluxCacheVisibility = function() {
+     document.getElementById('fluxCacheSection')?.classList.toggle('hidden', !isChecked);
+ }
+ 
+-// Show Live Preview Toggle: gates the livePreviewCheck row (Generate tab) and the Allow Live Preview On Mobile Data row below it. Turning it off also switches live preview off (toggleLivePreview(), which stops fetching).
++// Show Live Preview Toggle: gates the livePreviewCheck row (Generate tab) and the Live Preview rows indented below it (.lp-option-row). Turning it off also switches live preview off (toggleLivePreview(), which stops fetching).
+ // Allow Live Preview On Mobile Data is deliberately not gated on livePreviewCheck, which is set on another screen; it is a standing preference.
+ window.toggleLivePreviewButtonVisibility = function() {
+     const isChecked = document.getElementById('cfgShowLivePreviewSwitch').checked;
+@@ -1105,7 +1141,7 @@ window.toggleLivePreviewButtonVisibility = function() {
+     // reorganizeGenRowLayout() (utils.js) owns showing and positioning livePreviewToggleRow.
+     if (typeof reorganizeGenRowLayout === 'function') reorganizeGenRowLayout();
+     if (typeof updateInpPreviewToggleVisibility === 'function') updateInpPreviewToggleVisibility();
+-    document.getElementById('livePreviewMobileDataRow')?.classList.toggle('hidden', !isChecked);
++    document.querySelectorAll('.lp-option-row').forEach(r => r.classList.toggle('hidden', !isChecked));
+     if (!isChecked) {
+         // Switching the feature off also clears the remembered live preview choice (see toggleLivePreview(), utils.js).
+         localStorage.setItem('bojroLivePreviewOn', 'false');
+diff --git a/www/js/engine.js b/www/js/engine.js
+index 7629188..7013866 100644
+--- a/www/js/engine.js
++++ b/www/js/engine.js
+@@ -1475,11 +1475,73 @@ function livePreviewAreaVisible(mode) {
+     const limit = hidden ? window.innerHeight : (document.querySelector('.glass-dock')?.getBoundingClientRect().top ?? window.innerHeight);
+     return bottom > 0 && r.top < limit;
+ }
++// Live Preview frames from Forge Neo's own preview endpoint, the one its WebUI page uses (/internal/progress). It encodes
++// them in its Live Preview Format (JPEG by default) and sends one only when it's new, while /sdapi/v1/progress uses the
++// saved-image format (PNG by default). It isn't part of the public API (it's missing when Forge runs API-only, and an
++// update could change it), so the job's frames go back to coming with the progress checks if it doesn't answer as
++// expected: for the rest of the app session if it isn't there or doesn't know the job, for the rest of the job if the
++// connection drops or the server answers with an error (5xx). The job is matched by the ID sent with it (force_task_id).
++let internalPreviewOff = false;
++function newPreviewTaskId() {
++    return `task(bojro-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)})`;
++}
++// Live Preview Method / Every N Steps (livePreviewOverrides(), cfg.js), added to the job's own overrides while Live Preview is on.
++function livePreviewJobSettings(payload) {
++    const extra = document.getElementById('livePreviewCheck')?.checked === true && typeof livePreviewOverrides === 'function' ? livePreviewOverrides() : {};
++    return Object.keys(extra).length ? { override_settings: { ...(payload.override_settings || {}), ...extra } } : {};
++}
++// Returns 'frame' (shown), 'none' (job finished, nothing to show), 'wait' (no new frame yet; ask again) or 'fail'.
++async function fetchInternalPreview(pv, sig) {
++    let res, data = null;
++    try {
++        ({ res } = await timedFetch(`${HOST}/internal/progress`, {
++            method: 'POST',
++            headers: { ...getHeaders(), 'Content-Type': 'application/json' },
++            body: JSON.stringify({ id_task: pv.taskId, id_live_preview: pv.lastId, live_preview: true })
++        }, 5000, sig, false));
++        const text = await res.text();
++        try { data = JSON.parse(text); } catch (e) { /* not JSON, e.g. an HTML error page */ }
++    } catch (e) {
++        if (sig.aborted) throw e;
++        return offForJob('unreachable');
++    }
++    // A server error is passing (a restart, a gateway timeout); anything else means the endpoint isn't what it should be.
++    if (res.status >= 500) return offForJob(`HTTP ${res.status}`);
++    if (!res.ok || !data || typeof data.active !== 'boolean') return offForSession(`HTTP ${res.status}${data ? '' : ', not JSON'}`);
++    if (data.completed) return 'none';
++    if (!data.active) {
++        // Not started yet, or Forge doesn't know the job. Once the progress checks have seen it running, three answers
++        // in a row that it's unknown mean the ID isn't being used.
++        if (!data.queued && pv.jobRunning() && ++pv.unknown >= 3) return offForSession('job not recognised');
++        return 'wait';
++    }
++    pv.unknown = 0;
++    if (typeof data.id_live_preview === 'number') pv.lastId = data.id_live_preview;
++    if (typeof data.live_preview === 'string' && data.live_preview.startsWith('data:image/')) {
++        updateLivePreviewImage(data.live_preview);
++        return 'frame';
++    }
++    return 'wait';
++    function offForSession(why) {
++        internalPreviewOff = true;
++        dlog(`Live Preview: preview endpoint unusable (${why}), using progress checks from now on`);
++        return 'fail';
++    }
++    function offForJob(why) {
++        pv.off = true;
++        dlog(`Live Preview: preview endpoint ${why}, using progress checks for this job`);
++        return 'fail';
++    }
++}
++
++// Results added but not yet shown (still decoding); while any are, the job's end leaves the preview to them (addResult()).
++let resultRevealsPending = 0;
+ // Counts frames, so a slow decode can't replace a newer frame or reappear after the preview was cleared.
+ let livePreviewFrameSeq = 0;
+ function updateLivePreviewImage(base64Data) {
+     // Both the main tab's frame and the Inpaint/img2img tab's, as a job started on one tab can finish while the other is open.
+-    const src = `data:image/png;base64,${base64Data}`;
++    // Takes a whole data: URI (the preview endpoint's) or bare base64 (the progress checks').
++    const src = base64Data.startsWith('data:') ? base64Data : `data:image/png;base64,${base64Data}`;
+     const seq = ++livePreviewFrameSeq;
+     // Decoded off screen first: swapping an undecoded image in showed nothing for a moment (e.g. a new ADetailer pass's first frame).
+     const next = new Image();
+@@ -1496,6 +1558,28 @@ function updateLivePreviewImage(base64Data) {
+     });
+ }
+ 
++// An overlay that hides the app behind it (the image viewer, Live Preview full screen) stays drawn for a moment after it
++// closes, until the images now on screen have decoded (0.4s at most): the app behind is skipped while it's open, so its
++// images were blank for a few frames otherwise. It already counts as closed (.hidden) and lets taps through. Not when
++// another window has opened in its place.
++function coverUntilAppDrawn(el) {
++    if (!el || document.querySelector('.modal:not(.hidden)')) return;
++    el.classList.add('closing-cover');
++    const onScreen = [...document.querySelectorAll('.container img')].filter(i => {
++        if (!i.getAttribute('src') || !i.getClientRects().length) return false;
++        const r = i.getBoundingClientRect();
++        return r.bottom > 0 && r.top < window.innerHeight;
++    });
++    let done = false;
++    const uncover = () => {
++        if (done) return;
++        done = true;
++        requestAnimationFrame(() => el.classList.remove('closing-cover'));
++    };
++    Promise.all(onScreen.map(i => (i.decode ? i.decode() : Promise.resolve()).catch(() => {}))).then(uncover);
++    BgTimer.set(uncover, 400);
++}
++
+ // The real ABORT and GENERATE buttons are moved into the fullscreen view and back, so they look and behave exactly
+ // as on the tab. No gestures; tapping the image, back or the job ending closes it.
+ window.openLivePreviewFullscreen = function(fromImg) {
+@@ -1511,7 +1595,13 @@ window.openLivePreviewFullscreen = function(fromImg) {
+     document.getElementById('lpFsControls').append(abort, gen);
+     document.getElementById('lpFullscreen').classList.remove('hidden');
+     document.body.classList.add('lp-fs-open');
++    setLivePreviewStatusBarHidden(true);
+ };
++// Android's status bar is hidden while it's full screen, as in the image viewer.
++function setLivePreviewStatusBarHidden(hidden) {
++    const p = window.Capacitor?.Plugins?.ResolverDevice?.setStatusBarHidden?.({ hidden });
++    if (p && p.catch) p.catch(() => {});
++}
+ window.closeLivePreviewFullscreen = function() {
+     if (!lpFullscreenReturn) return;
+     lpFullscreenReturn.forEach(({ el, parent, next }) => {
+@@ -1521,6 +1611,8 @@ window.closeLivePreviewFullscreen = function() {
+     lpFullscreenReturn = null;
+     document.getElementById('lpFullscreen').classList.add('hidden');
+     document.body.classList.remove('lp-fs-open');
++    coverUntilAppDrawn(document.getElementById('lpFullscreen'));
++    setLivePreviewStatusBarHidden(false);
+ };
+ function clearLivePreviewImage() {
+     livePreviewFrameSeq++;
+@@ -1972,6 +2064,11 @@ async function runJob(job, isBatch = false) {
+         let idleSince = 0;
+         // Whether a poll has shown this job running.
+         let serverSawJob = false;
++        // Live Preview: the step the last check reported, and the step of the last frame downloaded. Forge sends the
++        // latest frame with every check, so one is only asked for when the step has moved on since the last.
++        let previewSeenStep = '', previewFrameStep = null;
++        // This job's state for the preview endpoint (fetchInternalPreview()).
++        const previewEndpoint = { taskId: newPreviewTaskId(), lastId: -1, unknown: 0, off: false, jobRunning: () => thisJobConfirmedStarted };
+ 
+         async function pollProgressOnce() {
+             if (jobFinished || pollInFlight || sig.aborted) return;
+@@ -1979,7 +2076,10 @@ async function runJob(job, isBatch = false) {
+             try {
+                 // No preview image unless Live Preview is on and its area could be seen.
+                 const livePreviewActive = document.getElementById('livePreviewCheck')?.checked === true && livePreviewAreaVisible(job.mode);
+-                const progressUrl = livePreviewActive
++                const viaEndpoint = !internalPreviewOff && !previewEndpoint.off;
++                // Frames come with this check only when the preview endpoint isn't being used.
++                const wantFrame = livePreviewActive && !viaEndpoint && previewSeenStep !== previewFrameStep;
++                const progressUrl = wantFrame
+                     ? `${HOST}/sdapi/v1/progress`
+                     : `${HOST}/sdapi/v1/progress?skip_current_image=true`;
+                 const { data } = await timedFetch(progressUrl, { headers: getHeaders() }, 10000, sig, true);
+@@ -1990,10 +2090,18 @@ async function runJob(job, isBatch = false) {
+                 const stage = `${data.state?.sampling_steps}|${data.state?.job_no}|${data.state?.job}`;
+                 if (++pollCount % 10 === 1 || stage !== lastPollStage) dlog(`progress check ${pollCount}: ${Math.round((data.progress || 0) * 100)}%, step ${data.state?.sampling_step}/${data.state?.sampling_steps}, ${data.state?.job || 'idle'}`);
+                 lastPollStage = stage;
++                previewSeenStep = `${stage}|${data.state?.sampling_step}`;
++                if (wantFrame) previewFrameStep = previewSeenStep;
+                 if (livePreviewActive && window.DataUsage) DataUsage.markLive('gen');
+-                if (livePreviewActive && data.current_image) {
++                if (wantFrame && data.current_image) {
+                     updateLivePreviewImage(data.current_image);
+                 }
++                // Via the preview endpoint: asked once the step has moved on, and again each check until the new frame is in.
++                if (livePreviewActive && viaEndpoint && previewSeenStep !== previewFrameStep) {
++                    const got = await fetchInternalPreview(previewEndpoint, sig);
++                    if (jobFinished || sig.aborted) return;
++                    if (got === 'frame' || got === 'none') previewFrameStep = previewSeenStep;
++                }
+                 const bridge = await fetchBridgeStatus();
+                 if (jobFinished || sig.aborted) return;
+                 const state = data.state || {};
+@@ -2270,7 +2378,8 @@ async function runJob(job, isBatch = false) {
+                 res = await fetch(`${HOST}${endpoint}`, {
+                     method: 'POST',
+                     headers: getHeaders(),
+-                    body: JSON.stringify(job.payload),
++                    // The ID lets the preview endpoint find this job (fetchInternalPreview()); the stored payload is left as it is.
++                    body: JSON.stringify({ ...job.payload, force_task_id: previewEndpoint.taskId, ...livePreviewJobSettings(job.payload) }),
+                     signal: sig,
+                     preferNative: true
+                 }).finally(() => { jobAbort.replyPending = false; });
+@@ -2336,7 +2445,8 @@ async function runJob(job, isBatch = false) {
+                 img.src = finalB64;
+                 img.className = 'gen-result';
+                 setImageSizeFromPng(img, finalB64);
+-                img.loading = "lazy";
++                // Loaded straight away, not lazily: it's kept hidden until decoded (below), and a hidden lazy image never loads.
++                img.loading = "eager";
+                 img.dataset.dbId = '';
+                 if (!isGrid && jobBadges.length) img.dataset.badges = jobBadges.join(',');
+                 if (isGrid) img.dataset.grid = '1';
+@@ -2359,8 +2469,23 @@ async function runJob(job, isBatch = false) {
+                 if (gal.firstChild) gal.insertBefore(img, gal.firstChild);
+                 else gal.appendChild(img);
+                 trimResultStrip(gal);
+-                // Clears the last live frame, except for the grid, which can land after the next queued job has started.
+-                if (!isGrid && typeof clearLivePreviewImage === 'function') clearLivePreviewImage();
++                // Kept out of sight until it's decoded, then shown in the same frame the last live frame goes (not for the grid,
++                // which can land after the next queued job has started); shown half-drawn, it flashed. Shown anyway after 1.5s.
++                img.style.display = 'none';
++                let shown = false;
++                if (!isGrid) resultRevealsPending++;
++                const reveal = () => {
++                    if (shown) return;
++                    shown = true;
++                    requestAnimationFrame(() => {
++                        img.style.display = '';
++                        if (isGrid) return;
++                        resultRevealsPending--;
++                        if (typeof clearLivePreviewImage === 'function') clearLivePreviewImage();
++                    });
++                };
++                (img.decode ? img.decode() : Promise.resolve()).catch(() => {}).then(reveal);
++                BgTimer.set(reveal, 1500);
+                 const autoDl = document.getElementById('autoDlCheck');
+                 if (autoDl && autoDl.checked) saveToMobileGallery(finalB64);
+             };
+@@ -2392,8 +2517,8 @@ async function runJob(job, isBatch = false) {
+         jobAbort.abort();
+         if (progressPollTimeout) BgTimer.clear(progressPollTimeout);
+         if (progressVisibilityHandler) document.removeEventListener('visibilitychange', progressVisibilityHandler);
+-        // No stale in-progress frame outlives the job.
+-        if (typeof clearLivePreviewImage === 'function') clearLivePreviewImage();
++        // No stale in-progress frame outlives the job; a result still decoding clears it when it's shown (addResult()).
++        if (!resultRevealsPending && typeof clearLivePreviewImage === 'function') clearLivePreviewImage();
+         spinner.style.display = 'none';
+         btn.disabled = false;
+         // --- NEO HOOK: BUTTON TEXT ---
+@@ -3074,8 +3199,15 @@ window.openFullscreen = function(items, index) {
+ // While the viewer is open the app behind it is skipped (style.css), so a busy tab does not slow zoom and pan.
+ ;(function () {
+     const modal = document.getElementById('fullScreenModal');
+-    if (modal) new MutationObserver(() => document.body.classList.toggle('fs-viewer-open', !modal.classList.contains('hidden')))
+-        .observe(modal, { attributes: true, attributeFilter: ['class'] });
++    if (modal) new MutationObserver(() => {
++        const open = !modal.classList.contains('hidden');
++        // Closed: the app is drawn again behind the viewer before it goes (coverUntilAppDrawn()).
++        if (!open && document.body.classList.contains('fs-viewer-open')) {
++            document.body.classList.remove('fs-viewer-open');
++            coverUntilAppDrawn(modal);
++        }
++        document.body.classList.toggle('fs-viewer-open', open);
++    }).observe(modal, { attributes: true, attributeFilter: ['class'] });
+ })();
+ 
+ window.updateLightboxImage = function() {
+@@ -3202,19 +3334,25 @@ window.setupLightboxSwipe = function() {
+         img.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+     }
+ 
++    // Tapping the image hides or shows the toolbar; Android's status bar stays hidden while the viewer is open (below).
+     window.setLightboxImmersive = function(on) {
+         const modal = document.getElementById('fullScreenModal');
+         if (!modal || modal.classList.contains('fs-immersive') === on) return;
+         modal.classList.toggle('fs-immersive', on);
+-        const p = window.Capacitor?.Plugins?.ResolverDevice?.setStatusBarHidden?.({ hidden: on });
+-        if (p && p.catch) p.catch(() => {});
+         // The image area changes size, so a zoomed image is re-clamped.
+         requestAnimationFrame(() => { if (scale > 1) { clampPan(); applyZoomTransform(false); } });
+     };
+-    // Leaving the viewer by any route brings the bars back.
++    // The status bar is hidden while the viewer is open, so a tall image never sits under it; leaving the viewer by any
++    // route brings it and the toolbar back.
++    let viewerOpen = false;
+     new MutationObserver(() => {
+         const modal = document.getElementById('fullScreenModal');
+-        if (modal.classList.contains('hidden')) window.setLightboxImmersive(false);
++        const open = !modal.classList.contains('hidden');
++        if (!open) window.setLightboxImmersive(false);
++        if (open === viewerOpen) return;
++        viewerOpen = open;
++        const p = window.Capacitor?.Plugins?.ResolverDevice?.setStatusBarHidden?.({ hidden: open });
++        if (p && p.catch) p.catch(() => {});
+     }).observe(document.getElementById('fullScreenModal'), { attributes: true, attributeFilter: ['class'] });
+ 
+     window.resetLightboxZoom = function(animate) {
+diff --git a/www/js/saac.js b/www/js/saac.js
+index 0ea8d6d..d7a2fdb 100644
+--- a/www/js/saac.js
++++ b/www/js/saac.js
+@@ -55,7 +55,7 @@ window.SaacManager = {
+         }
+     },
+ 
+-    // Deletes the cached database from disk (used by "Reset App Configuration").
++    // Deletes the cached database from disk. Not called at the moment: Reset App Configuration keeps the database.
+     clearCache: async function() {
+         this.imgDb = null;
+         this.isLoaded = false;
+diff --git a/www/js/updater.js b/www/js/updater.js
+index d3e4595..78828bd 100644
+--- a/www/js/updater.js
++++ b/www/js/updater.js
+@@ -16,7 +16,7 @@ window.resetNativeUpdater = async function() {
+         return;
+     }
+     
+-    // We assume the user already confirmed in cfg.js
++    // Not called at the moment (Reset App Configuration keeps app updates); a caller must confirm with the user first.
+     try {
+         await window.Capacitor.Plugins.CapacitorUpdater.reset();
+         // Reloading will switch back to the built-in bundle
+diff --git a/www/style.css b/www/style.css
+index b360bd7..d1128b5 100644
+--- a/www/style.css
++++ b/www/style.css
+@@ -1330,6 +1330,14 @@ body.hide-gallery-badges .gal-badges {
+     z-index: 300;
+ }
+ 
++/* Live Preview Border: a ring in the tab's accent colour round the preview image (shown only while a job runs). It's drawn
++   over the preview's outer 3px rather than outside it, so the preview is the result's size and nothing moves when the
++   result replaces it (its container also clips anything wider). Off with Config > Generation > Live Preview Border. */
++body:not(.lp-border-off) #livePreviewImg, body:not(.lp-border-off) #inpLivePreviewImg {
++    outline: 3px solid var(--accent-primary);
++    outline-offset: -3px;
++}
++
+ /* Modals with text inputs are anchored to the top rather than centred, so the keyboard and varying content height don't push them out of view. */
+ #loraModal, #img2imgPresetModal, #styleModal, #saacModal, #loraConfigModal, #styleEditorModal, #llmModal, #checkpointManagerModal, #checkpointConfigModal {
+     justify-content: flex-start;
+@@ -1861,6 +1869,11 @@ body.fs-viewer-open .container {
+ body.fs-viewer-open .dock-wrapper {
+     visibility: hidden;
+ }
++/* A just-closed viewer or Live Preview full screen, kept drawn until the app behind it is (coverUntilAppDrawn(), engine.js). */
++#fullScreenModal.hidden.closing-cover, #lpFullscreen.hidden.closing-cover {
++    display: flex !important;
++    pointer-events: none;
++}
+ 
+ .lightbox-container {
+     position: relative;

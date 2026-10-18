@@ -1475,11 +1475,73 @@ function livePreviewAreaVisible(mode) {
     const limit = hidden ? window.innerHeight : (document.querySelector('.glass-dock')?.getBoundingClientRect().top ?? window.innerHeight);
     return bottom > 0 && r.top < limit;
 }
+// Live Preview frames from Forge Neo's own preview endpoint, the one its WebUI page uses (/internal/progress). It encodes
+// them in its Live Preview Format (JPEG by default) and sends one only when it's new, while /sdapi/v1/progress uses the
+// saved-image format (PNG by default). It isn't part of the public API (it's missing when Forge runs API-only, and an
+// update could change it), so the job's frames go back to coming with the progress checks if it doesn't answer as
+// expected: for the rest of the app session if it isn't there or doesn't know the job, for the rest of the job if the
+// connection drops or the server answers with an error (5xx). The job is matched by the ID sent with it (force_task_id).
+let internalPreviewOff = false;
+function newPreviewTaskId() {
+    return `task(bojro-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)})`;
+}
+// Live Preview Method / Every N Steps (livePreviewOverrides(), cfg.js), added to the job's own overrides while Live Preview is on.
+function livePreviewJobSettings(payload) {
+    const extra = document.getElementById('livePreviewCheck')?.checked === true && typeof livePreviewOverrides === 'function' ? livePreviewOverrides() : {};
+    return Object.keys(extra).length ? { override_settings: { ...(payload.override_settings || {}), ...extra } } : {};
+}
+// Returns 'frame' (shown), 'none' (job finished, nothing to show), 'wait' (no new frame yet; ask again) or 'fail'.
+async function fetchInternalPreview(pv, sig) {
+    let res, data = null;
+    try {
+        ({ res } = await timedFetch(`${HOST}/internal/progress`, {
+            method: 'POST',
+            headers: { ...getHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id_task: pv.taskId, id_live_preview: pv.lastId, live_preview: true })
+        }, 5000, sig, false));
+        const text = await res.text();
+        try { data = JSON.parse(text); } catch (e) { /* not JSON, e.g. an HTML error page */ }
+    } catch (e) {
+        if (sig.aborted) throw e;
+        return offForJob('unreachable');
+    }
+    // A server error is passing (a restart, a gateway timeout); anything else means the endpoint isn't what it should be.
+    if (res.status >= 500) return offForJob(`HTTP ${res.status}`);
+    if (!res.ok || !data || typeof data.active !== 'boolean') return offForSession(`HTTP ${res.status}${data ? '' : ', not JSON'}`);
+    if (data.completed) return 'none';
+    if (!data.active) {
+        // Not started yet, or Forge doesn't know the job. Once the progress checks have seen it running, three answers
+        // in a row that it's unknown mean the ID isn't being used.
+        if (!data.queued && pv.jobRunning() && ++pv.unknown >= 3) return offForSession('job not recognised');
+        return 'wait';
+    }
+    pv.unknown = 0;
+    if (typeof data.id_live_preview === 'number') pv.lastId = data.id_live_preview;
+    if (typeof data.live_preview === 'string' && data.live_preview.startsWith('data:image/')) {
+        updateLivePreviewImage(data.live_preview);
+        return 'frame';
+    }
+    return 'wait';
+    function offForSession(why) {
+        internalPreviewOff = true;
+        dlog(`Live Preview: preview endpoint unusable (${why}), using progress checks from now on`);
+        return 'fail';
+    }
+    function offForJob(why) {
+        pv.off = true;
+        dlog(`Live Preview: preview endpoint ${why}, using progress checks for this job`);
+        return 'fail';
+    }
+}
+
+// Results added but not yet shown (still decoding); while any are, the job's end leaves the preview to them (addResult()).
+let resultRevealsPending = 0;
 // Counts frames, so a slow decode can't replace a newer frame or reappear after the preview was cleared.
 let livePreviewFrameSeq = 0;
 function updateLivePreviewImage(base64Data) {
     // Both the main tab's frame and the Inpaint/img2img tab's, as a job started on one tab can finish while the other is open.
-    const src = `data:image/png;base64,${base64Data}`;
+    // Takes a whole data: URI (the preview endpoint's) or bare base64 (the progress checks').
+    const src = base64Data.startsWith('data:') ? base64Data : `data:image/png;base64,${base64Data}`;
     const seq = ++livePreviewFrameSeq;
     // Decoded off screen first: swapping an undecoded image in showed nothing for a moment (e.g. a new ADetailer pass's first frame).
     const next = new Image();
@@ -1494,6 +1556,28 @@ function updateLivePreviewImage(base64Data) {
         });
         if (lpFullscreenReturn) document.getElementById('lpFsImage').src = src;
     });
+}
+
+// An overlay that hides the app behind it (the image viewer, Live Preview full screen) stays drawn for a moment after it
+// closes, until the images now on screen have decoded (0.4s at most): the app behind is skipped while it's open, so its
+// images were blank for a few frames otherwise. It already counts as closed (.hidden) and lets taps through. Not when
+// another window has opened in its place.
+function coverUntilAppDrawn(el) {
+    if (!el || document.querySelector('.modal:not(.hidden)')) return;
+    el.classList.add('closing-cover');
+    const onScreen = [...document.querySelectorAll('.container img')].filter(i => {
+        if (!i.getAttribute('src') || !i.getClientRects().length) return false;
+        const r = i.getBoundingClientRect();
+        return r.bottom > 0 && r.top < window.innerHeight;
+    });
+    let done = false;
+    const uncover = () => {
+        if (done) return;
+        done = true;
+        requestAnimationFrame(() => el.classList.remove('closing-cover'));
+    };
+    Promise.all(onScreen.map(i => (i.decode ? i.decode() : Promise.resolve()).catch(() => {}))).then(uncover);
+    BgTimer.set(uncover, 400);
 }
 
 // The real ABORT and GENERATE buttons are moved into the fullscreen view and back, so they look and behave exactly
@@ -1511,7 +1595,13 @@ window.openLivePreviewFullscreen = function(fromImg) {
     document.getElementById('lpFsControls').append(abort, gen);
     document.getElementById('lpFullscreen').classList.remove('hidden');
     document.body.classList.add('lp-fs-open');
+    setLivePreviewStatusBarHidden(true);
 };
+// Android's status bar is hidden while it's full screen, as in the image viewer.
+function setLivePreviewStatusBarHidden(hidden) {
+    const p = window.Capacitor?.Plugins?.ResolverDevice?.setStatusBarHidden?.({ hidden });
+    if (p && p.catch) p.catch(() => {});
+}
 window.closeLivePreviewFullscreen = function() {
     if (!lpFullscreenReturn) return;
     lpFullscreenReturn.forEach(({ el, parent, next }) => {
@@ -1521,6 +1611,8 @@ window.closeLivePreviewFullscreen = function() {
     lpFullscreenReturn = null;
     document.getElementById('lpFullscreen').classList.add('hidden');
     document.body.classList.remove('lp-fs-open');
+    coverUntilAppDrawn(document.getElementById('lpFullscreen'));
+    setLivePreviewStatusBarHidden(false);
 };
 function clearLivePreviewImage() {
     livePreviewFrameSeq++;
@@ -1972,6 +2064,11 @@ async function runJob(job, isBatch = false) {
         let idleSince = 0;
         // Whether a poll has shown this job running.
         let serverSawJob = false;
+        // Live Preview: the step the last check reported, and the step of the last frame downloaded. Forge sends the
+        // latest frame with every check, so one is only asked for when the step has moved on since the last.
+        let previewSeenStep = '', previewFrameStep = null;
+        // This job's state for the preview endpoint (fetchInternalPreview()).
+        const previewEndpoint = { taskId: newPreviewTaskId(), lastId: -1, unknown: 0, off: false, jobRunning: () => thisJobConfirmedStarted };
 
         async function pollProgressOnce() {
             if (jobFinished || pollInFlight || sig.aborted) return;
@@ -1979,7 +2076,10 @@ async function runJob(job, isBatch = false) {
             try {
                 // No preview image unless Live Preview is on and its area could be seen.
                 const livePreviewActive = document.getElementById('livePreviewCheck')?.checked === true && livePreviewAreaVisible(job.mode);
-                const progressUrl = livePreviewActive
+                const viaEndpoint = !internalPreviewOff && !previewEndpoint.off;
+                // Frames come with this check only when the preview endpoint isn't being used.
+                const wantFrame = livePreviewActive && !viaEndpoint && previewSeenStep !== previewFrameStep;
+                const progressUrl = wantFrame
                     ? `${HOST}/sdapi/v1/progress`
                     : `${HOST}/sdapi/v1/progress?skip_current_image=true`;
                 const { data } = await timedFetch(progressUrl, { headers: getHeaders() }, 10000, sig, true);
@@ -1990,9 +2090,17 @@ async function runJob(job, isBatch = false) {
                 const stage = `${data.state?.sampling_steps}|${data.state?.job_no}|${data.state?.job}`;
                 if (++pollCount % 10 === 1 || stage !== lastPollStage) dlog(`progress check ${pollCount}: ${Math.round((data.progress || 0) * 100)}%, step ${data.state?.sampling_step}/${data.state?.sampling_steps}, ${data.state?.job || 'idle'}`);
                 lastPollStage = stage;
+                previewSeenStep = `${stage}|${data.state?.sampling_step}`;
+                if (wantFrame) previewFrameStep = previewSeenStep;
                 if (livePreviewActive && window.DataUsage) DataUsage.markLive('gen');
-                if (livePreviewActive && data.current_image) {
+                if (wantFrame && data.current_image) {
                     updateLivePreviewImage(data.current_image);
+                }
+                // Via the preview endpoint: asked once the step has moved on, and again each check until the new frame is in.
+                if (livePreviewActive && viaEndpoint && previewSeenStep !== previewFrameStep) {
+                    const got = await fetchInternalPreview(previewEndpoint, sig);
+                    if (jobFinished || sig.aborted) return;
+                    if (got === 'frame' || got === 'none') previewFrameStep = previewSeenStep;
                 }
                 const bridge = await fetchBridgeStatus();
                 if (jobFinished || sig.aborted) return;
@@ -2270,7 +2378,8 @@ async function runJob(job, isBatch = false) {
                 res = await fetch(`${HOST}${endpoint}`, {
                     method: 'POST',
                     headers: getHeaders(),
-                    body: JSON.stringify(job.payload),
+                    // The ID lets the preview endpoint find this job (fetchInternalPreview()); the stored payload is left as it is.
+                    body: JSON.stringify({ ...job.payload, force_task_id: previewEndpoint.taskId, ...livePreviewJobSettings(job.payload) }),
                     signal: sig,
                     preferNative: true
                 }).finally(() => { jobAbort.replyPending = false; });
@@ -2336,7 +2445,8 @@ async function runJob(job, isBatch = false) {
                 img.src = finalB64;
                 img.className = 'gen-result';
                 setImageSizeFromPng(img, finalB64);
-                img.loading = "lazy";
+                // Loaded straight away, not lazily: it's kept hidden until decoded (below), and a hidden lazy image never loads.
+                img.loading = "eager";
                 img.dataset.dbId = '';
                 if (!isGrid && jobBadges.length) img.dataset.badges = jobBadges.join(',');
                 if (isGrid) img.dataset.grid = '1';
@@ -2359,8 +2469,23 @@ async function runJob(job, isBatch = false) {
                 if (gal.firstChild) gal.insertBefore(img, gal.firstChild);
                 else gal.appendChild(img);
                 trimResultStrip(gal);
-                // Clears the last live frame, except for the grid, which can land after the next queued job has started.
-                if (!isGrid && typeof clearLivePreviewImage === 'function') clearLivePreviewImage();
+                // Kept out of sight until it's decoded, then shown in the same frame the last live frame goes (not for the grid,
+                // which can land after the next queued job has started); shown half-drawn, it flashed. Shown anyway after 1.5s.
+                img.style.display = 'none';
+                let shown = false;
+                if (!isGrid) resultRevealsPending++;
+                const reveal = () => {
+                    if (shown) return;
+                    shown = true;
+                    requestAnimationFrame(() => {
+                        img.style.display = '';
+                        if (isGrid) return;
+                        resultRevealsPending--;
+                        if (typeof clearLivePreviewImage === 'function') clearLivePreviewImage();
+                    });
+                };
+                (img.decode ? img.decode() : Promise.resolve()).catch(() => {}).then(reveal);
+                BgTimer.set(reveal, 1500);
                 const autoDl = document.getElementById('autoDlCheck');
                 if (autoDl && autoDl.checked) saveToMobileGallery(finalB64);
             };
@@ -2392,8 +2517,8 @@ async function runJob(job, isBatch = false) {
         jobAbort.abort();
         if (progressPollTimeout) BgTimer.clear(progressPollTimeout);
         if (progressVisibilityHandler) document.removeEventListener('visibilitychange', progressVisibilityHandler);
-        // No stale in-progress frame outlives the job.
-        if (typeof clearLivePreviewImage === 'function') clearLivePreviewImage();
+        // No stale in-progress frame outlives the job; a result still decoding clears it when it's shown (addResult()).
+        if (!resultRevealsPending && typeof clearLivePreviewImage === 'function') clearLivePreviewImage();
         spinner.style.display = 'none';
         btn.disabled = false;
         // --- NEO HOOK: BUTTON TEXT ---
@@ -3074,8 +3199,15 @@ window.openFullscreen = function(items, index) {
 // While the viewer is open the app behind it is skipped (style.css), so a busy tab does not slow zoom and pan.
 ;(function () {
     const modal = document.getElementById('fullScreenModal');
-    if (modal) new MutationObserver(() => document.body.classList.toggle('fs-viewer-open', !modal.classList.contains('hidden')))
-        .observe(modal, { attributes: true, attributeFilter: ['class'] });
+    if (modal) new MutationObserver(() => {
+        const open = !modal.classList.contains('hidden');
+        // Closed: the app is drawn again behind the viewer before it goes (coverUntilAppDrawn()).
+        if (!open && document.body.classList.contains('fs-viewer-open')) {
+            document.body.classList.remove('fs-viewer-open');
+            coverUntilAppDrawn(modal);
+        }
+        document.body.classList.toggle('fs-viewer-open', open);
+    }).observe(modal, { attributes: true, attributeFilter: ['class'] });
 })();
 
 window.updateLightboxImage = function() {
@@ -3202,19 +3334,25 @@ window.setupLightboxSwipe = function() {
         img.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
     }
 
+    // Tapping the image hides or shows the toolbar; Android's status bar stays hidden while the viewer is open (below).
     window.setLightboxImmersive = function(on) {
         const modal = document.getElementById('fullScreenModal');
         if (!modal || modal.classList.contains('fs-immersive') === on) return;
         modal.classList.toggle('fs-immersive', on);
-        const p = window.Capacitor?.Plugins?.ResolverDevice?.setStatusBarHidden?.({ hidden: on });
-        if (p && p.catch) p.catch(() => {});
         // The image area changes size, so a zoomed image is re-clamped.
         requestAnimationFrame(() => { if (scale > 1) { clampPan(); applyZoomTransform(false); } });
     };
-    // Leaving the viewer by any route brings the bars back.
+    // The status bar is hidden while the viewer is open, so a tall image never sits under it; leaving the viewer by any
+    // route brings it and the toolbar back.
+    let viewerOpen = false;
     new MutationObserver(() => {
         const modal = document.getElementById('fullScreenModal');
-        if (modal.classList.contains('hidden')) window.setLightboxImmersive(false);
+        const open = !modal.classList.contains('hidden');
+        if (!open) window.setLightboxImmersive(false);
+        if (open === viewerOpen) return;
+        viewerOpen = open;
+        const p = window.Capacitor?.Plugins?.ResolverDevice?.setStatusBarHidden?.({ hidden: open });
+        if (p && p.catch) p.catch(() => {});
     }).observe(document.getElementById('fullScreenModal'), { attributes: true, attributeFilter: ['class'] });
 
     window.resetLightboxZoom = function(animate) {

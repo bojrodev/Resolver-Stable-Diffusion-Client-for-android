@@ -16,7 +16,7 @@ window.resetNativeUpdater = async function() {
         return;
     }
     
-    // We assume the user already confirmed in cfg.js
+    // Not called at the moment (Reset App Configuration keeps app updates); a caller must confirm with the user first.
     try {
         await window.Capacitor.Plugins.CapacitorUpdater.reset();
         // Reloading will switch back to the built-in bundle
