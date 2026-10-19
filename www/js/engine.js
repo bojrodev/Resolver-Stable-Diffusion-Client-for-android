@@ -2,33 +2,159 @@
 // JOB BUILDER & GENERATION ENGINE
 // -----------------------------------------------------------
 
-// --- NEW HELPER: RETRY FETCH ---
-// This tool tries to connect 5 times before giving up.
-async function fetchWithRetry(url, options, retries = 5, backoff = 1000) {
+// Running jobs' local cancel switches, so ABORT works on a stalled connection.
+const activeJobs = new Set();
+// Debug log (Config > Experimental); does nothing while it's off.
+const dlog = (m) => { if (window.dbg) window.dbg(m); };
+// Debug log: process and network state, and the same server request made natively and from the WebView.
+let diagLast = 0;
+function runDiag(reason) {
+    const d = window.Capacitor?.Plugins?.ResolverDevice;
+    if (localStorage.getItem('bojroDebugLogEnabled') !== 'true' || !d?.diag || Date.now() - diagLast < 30000) return;
+    diagLast = Date.now();
+    const headers = { ...getHeaders() };
+    if (connectionConfig?.isRemote && connectionConfig.isCloudflare) {
+        if (connectionConfig.cfClientId) headers['CF-Access-Client-Id'] = connectionConfig.cfClientId;
+        if (connectionConfig.cfClientSecret) headers['CF-Access-Client-Secret'] = connectionConfig.cfClientSecret;
+    }
+    const url = `${HOST}/sdapi/v1/progress?skip_current_image=true`;
+    const webview = (async () => {
+        const ctrl = new AbortController(), t0 = Date.now();
+        const t = setTimeout(() => ctrl.abort(), 5000);
+        try {
+            const res = await window.originalFetch(url, { headers, signal: ctrl.signal });
+            await res.text();
+            return `HTTP ${res.status} in ${Date.now() - t0}ms`;
+        } catch (e) {
+            return `${ctrl.signal.aborted ? 'no answer' : e.message} after ${Date.now() - t0}ms`;
+        } finally { clearTimeout(t); }
+    })();
+    Promise.all([d.diag({ url, headers }), webview])
+        .then(([r, wv]) => dlog(`diag (${reason}): importance ${r.importance}, network ${r.net}, data saver ${{ 1: 'off', 2: 'on (exempt)', 3: 'on' }[r.restrictBg] || r.restrictBg}, power saving ${r.powerSave ? 'on' : 'off'}, doze ${r.idle ? 'on' : 'off'}; native request ${r.probe}; WebView request ${wv}`))
+        .catch(e => dlog('diag failed: ' + e));
+}
+// Debug log: one line describing a job.
+function describeJob(job) {
+    const p = job.payload || {};
+    const ad = (p.alwayson_scripts?.ADetailer?.args || []).filter(a => a && typeof a === 'object').length;
+    const cn = (p.alwayson_scripts?.ControlNet?.args || []).filter(u => u && u.enabled).length;
+    return `${job.mode}${job.mode === 'inp' ? '/' + (job.inpSubMode || '') : ''}, ${job.modelTitle || '?'}, ${p.width}x${p.height}, ${p.steps} steps, sampler ${p.sampler_name}/${p.scheduler || '-'}`
+        + `${p.enable_hr ? `, Hi-Res x${p.hr_scale} ${p.hr_second_pass_steps || p.steps} steps` : ''}${ad ? `, ADetailer ${ad} passes` : ''}${cn ? `, ControlNet ${cn}` : ''}`
+        + `, batch ${p.n_iter || 1}x${p.batch_size || 1}${p.denoising_strength != null && job.mode === 'inp' ? `, denoise ${p.denoising_strength}` : ''}`;
+}
+// A finished image that takes longer than this to arrive shows DOWNLOADING... on the button.
+const DOWNLOADING_LABEL_DELAY_MS = 1500;
+// A failure caused by the connection, not the server: Forge may still be running the job (jobabort.js).
+function connectionLostError(message) {
+    const e = new Error(message);
+    e.connectionLost = true;
+    return e;
+}
+// After ABORT, idle time before the job is dropped locally.
+const ABORT_GRACE_MS = 5000;
+
+function makeAbortError() {
+    const e = new Error('Aborted');
+    e.name = 'AbortError';
+    return e;
+}
+
+// Timers for the job path. Android's WebView slows hidden-page timers to about one a minute after 5 min,
+// so while hidden a native tick (ResolverDevice) also fires any that are overdue.
+const BgTimer = (() => {
+    const pending = new Map();
+    let nextId = 1, ticking = false, idleTicks = 0, listening = false;
+    const device = () => window.Capacitor?.Plugins?.ResolverDevice;
+    function fire(id) {
+        const e = pending.get(id);
+        if (!e) return;
+        pending.delete(id);
+        clearTimeout(e.t);
+        e.fn();
+    }
+    let lastTick = 0;
+    function onTick() {
+        const now = Date.now();
+        if (lastTick && now - lastTick > 3000) dlog(`native tick gap ${now - lastTick}ms`);
+        lastTick = now;
+        for (const [id, e] of [...pending]) if (e.due <= now) fire(id);
+        if (pending.size) idleTicks = 0;
+        else if (++idleTicks >= 6) stop();
+    }
+    function start() {
+        const d = device();
+        if (ticking || !d?.startTicks) return;
+        ticking = true; idleTicks = 0; lastTick = 0;
+        if (!listening) { listening = true; d.addListener('tick', onTick); }
+        d.startTicks().catch(e => { ticking = false; dlog('native ticks failed to start: ' + e); });
+    }
+    function stop() {
+        if (!ticking) return;
+        ticking = false;
+        device()?.stopTicks().catch(() => {});
+    }
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) stop();
+        else if (pending.size) start();
+    });
+    return {
+        set(fn, ms) {
+            const id = nextId++;
+            pending.set(id, { fn, due: Date.now() + ms, t: setTimeout(() => fire(id), ms) });
+            if (document.hidden) start();
+            return id;
+        },
+        clear(id) {
+            const e = pending.get(id);
+            if (e) { clearTimeout(e.t); pending.delete(id); }
+        }
+    };
+})();
+
+// fetch() with a time limit that also stops when jobSignal aborts.
+async function timedFetch(url, options, ms, jobSignal, readJson) {
+    const ctrl = new AbortController();
+    const timer = BgTimer.set(() => ctrl.abort(), ms);
+    const onJobAbort = () => ctrl.abort();
+    if (jobSignal) {
+        if (jobSignal.aborted) ctrl.abort();
+        else jobSignal.addEventListener('abort', onJobAbort);
+    }
     try {
-        const res = await fetch(url, options);
-        if (!res.ok) throw new Error("Server Status: " + res.status);
-        return res;
-    } catch (err) {
-        console.warn(`[Network] Fetch failed. Retries left: ${retries}. Error: ${err.message}`);
-        
-        // If we have no retries left, we finally fail
-        if (retries <= 0) throw err;
-        
-        // Wait a bit (1 second, then 1.5s, etc.) then try again
-        await new Promise(r => setTimeout(r, backoff));
-        return fetchWithRetry(url, options, retries - 1, backoff * 1.5);
+        const res = await fetch(url, { ...options, signal: ctrl.signal, preferNative: true });
+        const data = readJson ? await res.json() : null;
+        return { res, data };
+    } catch (e) {
+        if (jobSignal && jobSignal.aborted) throw makeAbortError();
+        if (ctrl.signal.aborted) throw new Error('The server took too long to answer.');
+        throw e;
+    } finally {
+        BgTimer.clear(timer);
+        if (jobSignal) jobSignal.removeEventListener('abort', onJobAbort);
     }
 }
 
+// setTimeout as a promise that rejects with AbortError if the job is aborted.
+function abortableSleep(ms, signal) {
+    return new Promise((resolve, reject) => {
+        if (signal && signal.aborted) return reject(makeAbortError());
+        const t = BgTimer.set(() => { if (signal) signal.removeEventListener('abort', onAbort); resolve(); }, ms);
+        const onAbort = () => { BgTimer.clear(t); reject(makeAbortError()); };
+        if (signal) signal.addEventListener('abort', onAbort, { once: true });
+    });
+}
+
+// Waits for promise, but gives up (resolving undefined) after ms, and rejects on abort.
+function withDeadline(promise, ms, signal) {
+    return Promise.race([promise, abortableSleep(ms, signal)]);
+}
 
 // Returns null on any failure (feature off, endpoint unreachable, bad response); callers fall back to no bridge data.
 async function fetchBridgeStatus() {
     if (localStorage.getItem('bojroProgressBridgeEnabled') !== 'true') return null;
     try {
-        const res = await fetch(`${HOST}/forge-neo-progress-bridge/status`, { headers: getHeaders() });
-        if (!res.ok) return null;
-        return await res.json();
+        const { res, data } = await timedFetch(`${HOST}/forge-neo-progress-bridge/status`, { headers: getHeaders() }, 8000, null, true);
+        return res.ok ? data : null;
     } catch (e) {
         return null;
     }
@@ -81,14 +207,10 @@ function createTileTracker(expectSecondPass) {
 // Source images already upscaled this session, by a cheap hash. Forge can cache a tiled pass keyed on image + settings and skip work (and bridge reporting), which is impossible only the first time an image is upscaled.
 const upscaledImageHashes = new Set();
 
-// Low Bits (Forge's "Diffusion in Low Bits", which also decides whether LoRAs are patched on the fly) is remembered per tab, so SDXL can use "Automatic" while Qwen/Flux use an "(fp16 LoRA)" option. Inpaint and img2img share one value ('inp'). Stored as bojro_low_bits_<tab>; a tab with nothing stored starts from the old global value (bojro_global_low_bits), otherwise plain "Automatic".
+// Low Bits (Forge's "Diffusion in Low Bits", which also decides whether LoRAs are patched on the fly) is set per checkpoint (Checkpoint Manager) and applies on every tab. A checkpoint with nothing set uses Automatic.
 const LOW_BITS_DEFAULT = "Automatic";
+const LOW_BITS_MIGRATED_KEY = 'bojro_low_bits_per_checkpoint';
 
-function lowBitsKeyFor(mode) {
-    return mode === 'img2img' ? 'inp' : (mode || 'xl');
-}
-
-// Inpaint and img2img are remembered per checkpoint (bojro_low_bits_model_<name>), falling back to the tab's value above.
 function lowBitsModelKey(title) {
     if (!title || /loading|link first/i.test(title)) return null;
     return 'bojro_low_bits_model_' + String(title).toLowerCase().replace(/\s*\[[0-9a-f]+\]\s*$/, '').trim();
@@ -101,23 +223,39 @@ function currentInpModelTitle() {
     return el ? el.value : '';
 }
 
+// The checkpoint selected for a tab ('inp'/'img2img' = whichever of the two is in front).
+function currentModelTitleFor(mode) {
+    if (mode === 'inp' || mode === 'img2img') return currentInpModelTitle();
+    const el = document.getElementById(`${mode || 'xl'}_modelSelect`);
+    return el ? el.value : '';
+}
+
 function getLowBitsForMode(mode, modelTitle) {
     try {
-        const key = lowBitsKeyFor(mode);
-        if (key === 'inp') {
-            const mk = lowBitsModelKey(modelTitle !== undefined ? modelTitle : currentInpModelTitle());
-            const perModel = mk && localStorage.getItem(mk);
-            if (perModel) return perModel;
-        }
-        const own = localStorage.getItem(`bojro_low_bits_${key}`);
-        if (own) return own;
-        const legacy = localStorage.getItem('bojro_global_low_bits');
-        if (legacy) return legacy;
+        const mk = lowBitsModelKey(modelTitle !== undefined ? modelTitle : currentModelTitleFor(mode));
+        const value = mk && localStorage.getItem(mk);
+        if (value) return value;
     } catch (e) { /* storage blocked: fall through to the default */ }
     return LOW_BITS_DEFAULT;
 }
 
-// The two selects (under the checkpoint box on the main tabs, and in Inpaint/img2img) show and edit the stored value of the tab / checkpoint in front.
+// One-off move from the old per-tab values: each checkpoint already on the server keeps the value its own type's tab had. Checkpoints added later start on Automatic.
+window.migrateLowBitsToCheckpoints = function (models) {
+    try {
+        if (localStorage.getItem(LOW_BITS_MIGRATED_KEY) || !Array.isArray(models) || !models.length) return;
+        models.forEach(m => {
+            const mk = lowBitsModelKey(m.title);
+            if (!mk || localStorage.getItem(mk)) return;
+            const arch = window.LoraManager ? window.LoraManager.detectCheckpointArchitecture(m.title) : 'xl';
+            const old = localStorage.getItem(`bojro_low_bits_${arch}`) || localStorage.getItem('bojro_global_low_bits');
+            if (old && old !== LOW_BITS_DEFAULT) localStorage.setItem(mk, old);
+        });
+        localStorage.setItem(LOW_BITS_MIGRATED_KEY, 'true');
+        ['xl', 'flux', 'qwen', 'anima', 'krea', 'inp', 'global'].forEach(k => localStorage.removeItem(`bojro_low_bits_${k}`));
+    } catch (e) { /* retried next launch */ }
+};
+
+// The optional Low Bits rows (Config > Models > Show Low Bits) show and edit the value of the checkpoint in front.
 window.refreshLowBitsControls = function () {
     const show = (selectId, mode) => {
         const sel = document.getElementById(selectId);
@@ -133,11 +271,11 @@ window.refreshLowBitsControls = function () {
 window.saveLowBits = function (which) {
     const sel = document.getElementById(which === 'inp' ? 'inp_low_bits' : 'gen_low_bits');
     if (!sel) return;
-    const mode = which === 'inp' ? 'inp' : currentMode;
     try {
-        const mk = which === 'inp' ? lowBitsModelKey(currentInpModelTitle()) : null;
-        // Inpaint/img2img: stored for the checkpoint shown; without a usable checkpoint (still loading) the tab-wide value is used.
-        localStorage.setItem(mk || `bojro_low_bits_${lowBitsKeyFor(mode)}`, sel.value);
+        const mk = lowBitsModelKey(currentModelTitleFor(which === 'inp' ? 'inp' : currentMode));
+        if (!mk) return;
+        if (sel.value === LOW_BITS_DEFAULT) localStorage.removeItem(mk);
+        else localStorage.setItem(mk, sel.value);
     } catch (e) { /* not persisted */ }
 };
 
@@ -309,11 +447,15 @@ function buildControlNetScriptPayload(mode, sourceImg) {
         const fallbackImg = (isMainTabMode && u > 0) ? unit0Image : sourceImg;
         const rawControlImg = dedicatedControlImg || fallbackImg;
 
-        cnUnits.push({
+        // Settings the preprocessor doesn't use are left out, so Forge uses its own defaults (see refreshControlNetParams(), network.js).
+        const cnModule = document.getElementById(`${mode}_cn_${u}_module`)?.value || "none";
+        const cnSpec = controlNetPreprocessorSpec(cnModule);
+        const cnNum = (f) => parseFloat(document.getElementById(`${mode}_cn_${u}_${f}`)?.value);
+        const cnUnit = {
             "enabled": isEnabled,
             // Forge's native ControlNet extension accepts "image", not "input_image" (a Mikubill alias that was being filtered out).
             "image": rawControlImg ? rawControlImg.split(',')[1] : "",
-            "module": document.getElementById(`${mode}_cn_${u}_module`)?.value || "none",
+            "module": cnModule,
             // A model select's "Loading..." placeholder has no value="", so its value is that text; treat it as unset rather than sending it as a model name.
             "model": (() => { const v = document.getElementById(`${mode}_cn_${u}_model`)?.value; return (!v || v === 'Loading...') ? "None" : v; })(),
             // Weight and Guidance End fall back to 1.0 only when unreadable (NaN), not when 0 (the sliders can land on 0.00).
@@ -321,14 +463,20 @@ function buildControlNetScriptPayload(mode, sourceImg) {
             "resize_mode": parseInt(document.getElementById(`${mode}_cn_${u}_resize`)?.value) || 0,
             "guidance_start": parseFloat(document.getElementById(`${mode}_cn_${u}_start`)?.value) || 0.0,
             "guidance_end": (() => { const g = parseFloat(document.getElementById(`${mode}_cn_${u}_end`)?.value); return isNaN(g) ? 1.0 : g; })(),
-            "control_mode": parseInt(document.getElementById(`${mode}_cn_${u}_control_mode`)?.value) || 0,
-            // Forge's bound_check_params() fills a preprocessor default only for negative values, so these three need a real positive value whenever sent.
-            "processor_res": parseInt(document.getElementById(`${mode}_cn_${u}_res`)?.value) || 512,
-            "threshold_a": parseInt(document.getElementById(`${mode}_cn_${u}_thresh_a`)?.value) || 100,
-            "threshold_b": parseInt(document.getElementById(`${mode}_cn_${u}_thresh_b`)?.value) || 200,
             // Forge returns the preprocessor visualisation (edge/pose/depth map) only when this is true.
             "save_detected_map": false
+        };
+        if (!cnSpec.model) delete cnUnit.model;
+        if (cnSpec.controlMode) cnUnit.control_mode = parseInt(document.getElementById(`${mode}_cn_${u}_control_mode`)?.value) || 0;
+        // Left out, these are -1, which Forge's bound_check_params() replaces with the preprocessor's default.
+        if (cnSpec.res) cnUnit.processor_res = parseInt(document.getElementById(`${mode}_cn_${u}_res`)?.value) || 512;
+        ['threshold_a', 'threshold_b'].forEach((key, i) => {
+            const s = cnSpec.sliders[i];
+            if (!s) return;
+            const v = cnNum(i === 0 ? 'thresh_a' : 'thresh_b');
+            cnUnit[key] = isNaN(v) ? s[3] : v;
         });
+        cnUnits.push(cnUnit);
     }
 
     if (!anyCnEnabled) return {};
@@ -409,6 +557,10 @@ function buildJobFromUIRaw() {
         payload.init_images = [sourceImageB64.split(',')[1]];
         payload.denoising_strength = parseFloat(document.getElementById('denoisingStrength').value);
         payload.resize_mode = 0;
+        if (localStorage.getItem('bojroKeepSourceSeed') === 'true') {
+            const sourceSeed = seedFromTextChunks(inpSourceTextChunks);
+            if (sourceSeed !== null) payload.seed = parseSeedValue(sourceSeed);
+        }
 
         // img2img sends no mask-related fields (which is what makes it whole-image); the mask/fill/padding/soft-inpaint logic below is Inpaint only.
         if (!isImg2img && maskCanvas) {
@@ -482,6 +634,7 @@ function buildJobFromUIRaw() {
 
         return {
             mode: 'inp',
+            inpSubMode: isImg2img ? 'img2img' : 'inpaint',
             modelTitle: model,
             payload: payload,
             desc: `${isImg2img ? 'img2img' : 'Inpaint'}: ${prompt.substring(0,20)}...`
@@ -726,17 +879,95 @@ function buildJobFromUIRaw() {
 // QUEUE MANAGEMENT
 // -----------------------------------------------------------
 
+// Stops the background service and its progress notification.
+async function stopProgressService() {
+    progressNotifStopped = true;
+    const svc = window.ResolverService || window.Capacitor?.Plugins?.ResolverService;
+    if (!svc) return;
+    try { await svc.stop(); } catch (e) { }
+}
+// A freshly loaded page has no job, so clear any progress notification left by a page Android killed mid-job.
+stopProgressService();
+
+// Notification taps open where the last job's results (completion) or progress are, without animation.
+let lastJobTarget = null;
+function scrollToForTap(el, how) {
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const dock = document.querySelector('.glass-dock')?.getBoundingClientRect().top ?? window.innerHeight;
+    // 'centre' centres the element above the dock; otherwise its top sits just above the dock.
+    const y = how === 'centre' ? r.top + r.height / 2 - dock / 2 : r.top - dock + 8;
+    window.scrollTo({ top: Math.max(0, window.scrollY + y), behavior: 'instant' });
+}
+function openJobTarget(kind) {
+    const t = lastJobTarget;
+    if (!t) return;
+    const fs = document.getElementById('fullScreenModal');
+    if (fs && !fs.classList.contains('hidden') && typeof window.closeFsModal === 'function') window.closeFsModal();
+    window.switchTab(t.tab);
+    if (t.tab === 'que') return;
+    if (t.tab === 'gen' && t.mode && typeof setMode === 'function') setMode(t.mode);
+    if (t.tab === 'inp' && t.sub && typeof setInpaintTopMode === 'function') setInpaintTopMode(t.sub);
+    const inp = t.tab === 'inp';
+    requestAnimationFrame(() => {
+        if (kind === 'complete') {
+            // The batch's first image is the one directly under the button.
+            scrollToForTap(document.getElementById(inp ? 'inpGallery' : 'gallery')?.firstElementChild, 'centre');
+            return;
+        }
+        const preview = document.getElementById(inp ? 'inpLivePreviewImg' : 'livePreviewImg');
+        if (preview && !preview.classList.contains('hidden')) scrollToForTap(preview, 'centre');
+        // No preview: the rows above the results strip sit just above the dock, as when there are no images.
+        else scrollToForTap(document.getElementById(inp ? 'inpGallery' : 'gallery'), 'above-dock');
+    });
+}
+window.Capacitor?.Plugins?.ResolverDevice?.addListener?.('notificationTap', () => openJobTarget('progress'));
+if (LocalNotifications && LocalNotifications.addListener) {
+    LocalNotifications.addListener('localNotificationActionPerformed', a => {
+        if (a?.notification?.id === 2002) openJobTarget('complete');
+    });
+}
+
 // Cancels the current server-side generation; shared by the ABORT button and the batch queue's ABORT.
-window.interruptGeneration = async function() {
-    try {
-        await fetch(`${HOST}/sdapi/v1/interrupt`, {
-            method: 'POST',
-            headers: getHeaders()
-        });
-        if (typeof Toast !== 'undefined' && Toast) Toast.show({ text: 'Aborted', duration: 'short' });
-    } catch (e) {
-        console.error("Interrupt failed:", e);
+function sendInterrupt() {
+    return timedFetch(`${HOST}/sdapi/v1/interrupt`, { method: 'POST', headers: getHeaders() }, 8000)
+        .catch(e => console.error("Interrupt failed:", e));
+}
+
+// Waits for the partial result while the server finishes or the reply downloads.
+async function dropJobWhenIdle(job) {
+    let idleMs = 0, busyMs = 0;
+    while (activeJobs.has(job) && !job.signal.aborted) {
+        await new Promise(r => BgTimer.set(r, 500));
+        // Waits up to a minute for a busy server; a downloading reply always.
+        // A pending native reply may still be downloading.
+        if (job.responseStarted || ((job.serverBusy || job.replyPending) && (busyMs += 500) < 60000)) { idleMs = 0; continue; }
+        idleMs += 500;
+        if (idleMs >= ABORT_GRACE_MS) {
+            job.abort();
+            sendInterrupt();
+        }
     }
+}
+
+window.interruptGeneration = async function() {
+    dlog(`ABORT pressed (${activeJobs.size} job(s) running)`);
+    activeJobs.forEach(job => {
+        if (job.dropAtOnce || job.abortRequested || !job.requestSent || !job.serverSawJob) {
+            // Upscale, second press, still settling, or not on the server yet: drop now.
+            job.abort();
+            activeJobs.delete(job);
+            // In case it arrives late, interrupt again unless a new job has started.
+            if (job.requestSent) setTimeout(() => { if (!activeJobs.size) sendInterrupt(); }, 3000);
+        } else {
+            job.abortRequested = true;
+            dropJobWhenIdle(job);
+        }
+    });
+    if (typeof Toast !== 'undefined' && Toast) Toast.show({ text: 'Aborted', duration: 'short' });
+    await sendInterrupt();
+    // Nothing running here (Forge's own job was stopped): ABORT goes back to disabled.
+    if (!activeJobs.size && !isQueueRunning && !isSingleJobRunning) ['abortGenBtn', 'abortInpGenBtn', 'abortQueueBtn'].forEach(id => setAbortButtonState(id, false));
 }
 
 // Enables or greys out an ABORT button depending on whether something is running.
@@ -955,20 +1186,48 @@ window.drop = function(e, targetType) {
     draggedItem = null;
 }
 
+// True while a generation, queue or upscale is running (Forge would hold a second request until it finished).
+function jobAlreadyRunning() {
+    if (!isQueueRunning && !isSingleJobRunning && !activeJobs.size) return false;
+    if (typeof Toast !== 'undefined' && Toast) Toast.show({ text: 'A job is already running', duration: 'short' });
+    return true;
+}
+
+// Forge runs one job at a time, so one it's still running would hold a new one back: says so and enables ABORT to stop it.
+// An unreachable server counts as free (the job's own errors cover that).
+async function forgeBusyWithOtherJob() {
+    try {
+        const { data } = await timedFetch(`${HOST}/sdapi/v1/progress?skip_current_image=true`, { headers: getHeaders() }, 3000, null, true);
+        if (!data || !data.state || !data.state.job) return false;
+    } catch (e) {
+        return false;
+    }
+    ['abortGenBtn', 'abortInpGenBtn', 'abortQueueBtn'].forEach(id => setAbortButtonState(id, true));
+    if (typeof Toast !== 'undefined' && Toast) Toast.show({ text: 'Forge is busy with another job. Tap ABORT to stop it', duration: 'long' });
+    return true;
+}
+
+// Images a job adds to the gallery: its batch, plus the batch grid when one is made.
+function jobGalleryImageCount(job) {
+    const n = ((job.payload && job.payload.n_iter) || 1) * ((job.payload && job.payload.batch_size) || 1);
+    return n + (job.gridMaxEdge > 0 && n > 1 ? 1 : 0);
+}
+
 window.processQueue = async function() {
-    if (isQueueRunning) return;
+    if (jobAlreadyRunning() || await forgeBusyWithOtherJob()) return;
     if (queueState.next.length === 0) {
         await window.appAlert("Queue empty!");
         return;
     }
 
-    // Only warns when the batch itself exceeds the cache limit (a normal batch against a full gallery just prunes the oldest).
-    const totalImagesThisBatch = queueState.next.reduce((acc, job) => {
-        return acc + ((job.payload.n_iter || 1) * (job.payload.batch_size || 1));
-    }, 0);
+    // Auto-Delete Warning for the whole queue's images, before the first job. With it off, only a batch that itself
+    // exceeds the cache limit is warned about (a normal batch against a full gallery just prunes the oldest).
+    const totalImagesThisBatch = queueState.next.reduce((acc, job) => acc + jobGalleryImageCount(job), 0);
     const cacheLimit = typeof getGalleryCacheLimit === 'function' ? getGalleryCacheLimit() : 30;
     const overflowCount = totalImagesThisBatch - cacheLimit;
-    if (overflowCount > 0) {
+    const autoDelete = await window.confirmAutoDelete(totalImagesThisBatch);
+    if (autoDelete === false) return;
+    if (autoDelete === null && overflowCount > 0) {
         const proceed = await window.appConfirm(
             `This batch will generate ${totalImagesThisBatch} images, the first ${overflowCount} will be deleted before the batch finishes as your Gallery Cache Limit is ${cacheLimit}.\n\nContinue anyway?`,
             { title: 'Gallery Cache Limit', okText: 'CONTINUE' }
@@ -983,7 +1242,12 @@ window.processQueue = async function() {
     renderQueueAll();
 
     isQueueRunning = true;
+    lastJobTarget = { tab: 'que' };
+    if (window.JobAbort) JobAbort.started();
+    let connectionLost = false;
     isAborting = false;
+    let usage = window.DataUsage ? DataUsage.begin('gen', 'QUEUE') : null;
+    let usageStatus = 'ok';
 
     // --- 1. START PROTECTION ---
     if (typeof window.activateKeepAlive === 'function') window.activateKeepAlive();
@@ -1013,19 +1277,24 @@ window.processQueue = async function() {
         btn.disabled = true;
         setAbortButtonState('abortQueueBtn', true);
 
-        if (document.hidden) updateBatchNotification("Starting batch job...", true, `0 / ${totalBatchSteps} steps`);
+        queueJobsDone = 0;
+        updateBatchNotification("Starting queue", true, `0 / ${totalBatchSteps}`);
 
         // --- 4. The Loop (Only ONE loop) ---
+        dlog(`queue start: ${queueState.ongoing.length} jobs, ${totalBatchSteps} steps`);
+        runDiag('queue start');
         while (queueState.ongoing.length > 0) {
             const job = queueState.ongoing[0];
             try {
+                dlog(`queue job start (${queueState.ongoing.length} left)`);
                 await runJob(job, true);
 
                 // If aborted while this job ran, don't record it as completed (abortQueue() already cleared the array).
-                if (isAborting) break;
+                if (isAborting) { usageStatus = 'aborted'; break; }
 
                 const finishedJob = queueState.ongoing.shift();
                 if (!finishedJob) break;
+                queueJobsDone++;
                 finishedJob.finishedAt = new Date().toLocaleString();
                 finishedJob.payload = stripLargePayloadFields(finishedJob.payload);
                 queueState.completed.push(finishedJob);
@@ -1035,7 +1304,15 @@ window.processQueue = async function() {
                 saveQueueState();
                 renderQueueAll();
             } catch (e) {
-                if (isAborting) break; // expected - user-initiated, not a real error
+                if (isAborting || e.name === 'AbortError') {
+                    // ABORT from the queue, or from the Generate tab during a batch.
+                    dlog('queue aborted');
+                    usageStatus = 'aborted';
+                    break;
+                }
+                usageStatus = 'failed';
+                connectionLost = !!e.connectionLost;
+                dlog('queue job failed: ' + e.message);
                 console.error(e);
                 updateBatchNotification("Batch Paused", true, "Error occurred");
                 await window.appAlert("Batch paused: " + e.message);
@@ -1044,13 +1321,20 @@ window.processQueue = async function() {
         }
 
         // Runs when the loop exits without an uncaught throw (normal completion, abort, or an in-loop error turned into a break).
+        dlog(`queue end (${queueState.ongoing.length} left)`);
+        // Recorded now, not after the popups below are dismissed.
+        if (usage) { DataUsage.end(usage, usageStatus); usage = null; }
         if (typeof sendCompletionNotification === 'function') {
-            await sendCompletionNotification("Batch Complete: All images ready.");
+            // Clears the progress notification first; the popup below waits for the app to be opened.
+            await stopProgressService();
+            await sendCompletionNotification("Images ready");
         }
         if (queueState.ongoing.length === 0) await window.appAlert("Batch Complete!");
     } finally {
         // --- 5+6. Cleanup + STOP PROTECTION ---
         // In finally, so a throw above can't leave the queue state, button and wake lock stuck.
+        if (window.JobAbort) JobAbort.ended(connectionLost);
+        if (usage) DataUsage.end(usage, usageStatus);
         isQueueRunning = false;
         isAborting = false;
         if (btn) {
@@ -1061,15 +1345,7 @@ window.processQueue = async function() {
         const progressBox = document.getElementById('queueProgressBox');
         if (progressBox) progressBox.classList.add('hidden');
 
-        if (window.ResolverService) {
-            try {
-                await window.ResolverService.stop();
-            } catch (e) {}
-        } else if (window.Capacitor && window.Capacitor.Plugins.ResolverService) {
-            try {
-                 window.Capacitor.Plugins.ResolverService.stop();
-            } catch (e) {}
-        }
+        await stopProgressService();
 
         if (typeof window.deactivateKeepAlive === 'function') window.deactivateKeepAlive();
     }
@@ -1077,7 +1353,8 @@ window.processQueue = async function() {
 
 // Cancels the running batch item and discards the rest of ACTIVE (not requeued); QUEUE is untouched.
 window.abortQueue = async function() {
-    if (!isQueueRunning) return;
+    // Not running here: ABORT was enabled for a job Forge is still running (forgeBusyWithOtherJob()).
+    if (!isQueueRunning) { await window.interruptGeneration(); return; }
 
     isAborting = true;
     queueState.ongoing = [];
@@ -1088,6 +1365,7 @@ window.abortQueue = async function() {
 }
 
 window.generate = async function() {
+    if (jobAlreadyRunning() || await forgeBusyWithOtherJob()) return;
     let job;
     // Set by buildJobFromUI()/Neo.buildJob() before a return null that already showed its own message, to avoid a second generic "Please select a model first." popup. Reset after being read.
     window.__buildJobOwnMessageShown = false;
@@ -1109,10 +1387,12 @@ window.generate = async function() {
     }
 
     // The same Gallery Cache Limit warning as processQueue(), for this job's image count (generate() bypasses processQueue()).
-    const genThisJobImages = (job.payload.n_iter || 1) * (job.payload.batch_size || 1);
+    const genThisJobImages = jobGalleryImageCount(job);
     const genCacheLimit = typeof getGalleryCacheLimit === 'function' ? getGalleryCacheLimit() : 30;
     const genOverflowCount = genThisJobImages - genCacheLimit;
-    if (genOverflowCount > 0) {
+    const genAutoDelete = await window.confirmAutoDelete(genThisJobImages);
+    if (genAutoDelete === false) return;
+    if (genAutoDelete === null && genOverflowCount > 0) {
         const proceed = await window.appConfirm(
             `This will generate ${genThisJobImages} image${genThisJobImages === 1 ? '' : 's'}, the first ${genOverflowCount} will be deleted before it finishes as your Gallery Cache Limit is ${genCacheLimit}.\n\nContinue anyway?`,
             { title: 'Gallery Cache Limit', okText: 'CONTINUE' }
@@ -1124,17 +1404,29 @@ window.generate = async function() {
     if (typeof window.activateKeepAlive === 'function') window.activateKeepAlive();
 
     isSingleJobRunning = true;
+    lastJobTarget = { tab: job.mode === 'inp' ? 'inp' : 'gen', mode: job.mode, sub: job.inpSubMode };
+    if (window.JobAbort) JobAbort.started();
+    let connectionLost = false;
     setAbortButtonState('abortGenBtn', true);
     setAbortButtonState('abortInpGenBtn', true);
+    const usage = window.DataUsage ? DataUsage.begin('gen', dataUsageLabel(job), { mode: job.mode }) : null;
+    let usageStatus = 'ok';
 
     try {
         // Run the job
         await runJob(job, false);
     } catch (e) {
+        usageStatus = e.name === 'AbortError' ? 'aborted' : 'failed';
+        connectionLost = !!e.connectionLost;
+        dlog(`generation ${usageStatus}: ${e.message}`);
+        // Aborted: no error popup and no completion notification (finally still cleans up).
+        if (e.name === 'AbortError') return;
         console.error("Generation Error:", e);
         // This native alert (the "Error: Failed to fetch" popup) is shared by every mode, so use the in-app dialog.
         await window.appAlert("Error: " + e.message, { title: 'Generation Failed', danger: true });
     } finally {
+        if (window.JobAbort) JobAbort.ended(connectionLost);
+        if (usage) DataUsage.end(usage, usageStatus);
         // --- 2. ALWAYS CLEAN UP ---
         isSingleJobRunning = false;
         setAbortButtonState('abortGenBtn', false);
@@ -1143,21 +1435,14 @@ window.generate = async function() {
         // --- 3. STOP PROTECTION ---
         if (typeof window.deactivateKeepAlive === 'function') window.deactivateKeepAlive();
 
-        // Stop persistent notification (Robust Check)
-        if (window.ResolverService) {
-            try {
-                await window.ResolverService.stop();
-            } catch (e) {}
-        } else if (window.Capacitor && window.Capacitor.Plugins.ResolverService) {
-            try {
-                 window.Capacitor.Plugins.ResolverService.stop();
-            } catch (e) {}
-        }
+        await stopProgressService();
     }
 
     // Send completion notification
     if (typeof sendCompletionNotification === 'function') {
-        await sendCompletionNotification("Generation Complete: Image Ready");
+        // "Images" for a Batch Count or Batch Size above 1.
+        const imageCount = job && job.payload ? (job.payload.n_iter || 1) * (job.payload.batch_size || 1) : 1;
+        await sendCompletionNotification(imageCount > 1 ? "Images ready" : "Image ready");
     }
 }
 
@@ -1173,17 +1458,166 @@ window.clearGenResults = function() {
 
 // Live Preview: shows the in-progress frame the API returns on each poll (fetched only when livePreviewCheck is checked; see pollProgressOnce) above the results gallery. clearLivePreviewImage() runs when the first real result is shown (addResult() in runJob()), holding the last frame until then, and whenever a job ends another way.
 const LIVE_PREVIEW_IMG_IDS = ['livePreviewImg', 'inpLivePreviewImg'];
+// While Live Preview is full screen: where its ABORT and GENERATE came from, to put them back.
+let lpFullscreenReturn = null;
+
+// True when some of the job's preview area is on screen: app in view, its tab shown, no window over it.
+function livePreviewAreaVisible(mode) {
+    if (lpFullscreenReturn) return !document.hidden;
+    const img = document.getElementById(mode === 'inp' ? 'inpLivePreviewImg' : 'livePreviewImg');
+    if (!img || document.hidden || !img.parentElement.getClientRects().length) return false;
+    if ([...document.querySelectorAll('.modal:not(.hidden)')].some(m => m.getClientRects().length)) return false;
+    // Before the first frame the image is hidden; its spot is just above the results strip and may sit behind the dock
+    // (scrolled to the bottom), so the screen's own bottom is the limit there.
+    const hidden = img.classList.contains('hidden');
+    const r = hidden ? img.nextElementSibling.getBoundingClientRect() : img.getBoundingClientRect();
+    const bottom = hidden ? r.top + img.parentElement.clientWidth : r.bottom;
+    const limit = hidden ? window.innerHeight : (document.querySelector('.glass-dock')?.getBoundingClientRect().top ?? window.innerHeight);
+    return bottom > 0 && r.top < limit;
+}
+// Live Preview frames from Forge Neo's own preview endpoint, the one its WebUI page uses (/internal/progress). It encodes
+// them in its Live Preview Format (JPEG by default) and sends one only when it's new, while /sdapi/v1/progress uses the
+// saved-image format (PNG by default). It isn't part of the public API (it's missing when Forge runs API-only, and an
+// update could change it), so the job's frames go back to coming with the progress checks if it doesn't answer as
+// expected: for the rest of the app session if it isn't there or doesn't know the job, for the rest of the job if the
+// connection drops or the server answers with an error (5xx). The job is matched by the ID sent with it (force_task_id).
+let internalPreviewOff = false;
+function newPreviewTaskId() {
+    return `task(bojro-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)})`;
+}
+// Live Preview Method / Every N Steps (livePreviewOverrides(), cfg.js), added to the job's own overrides while Live Preview is on.
+function livePreviewJobSettings(payload) {
+    const extra = document.getElementById('livePreviewCheck')?.checked === true && typeof livePreviewOverrides === 'function' ? livePreviewOverrides() : {};
+    return Object.keys(extra).length ? { override_settings: { ...(payload.override_settings || {}), ...extra } } : {};
+}
+// Returns 'frame' (shown), 'none' (job finished, nothing to show), 'wait' (no new frame yet; ask again) or 'fail'.
+async function fetchInternalPreview(pv, sig) {
+    let res, data = null;
+    try {
+        ({ res } = await timedFetch(`${HOST}/internal/progress`, {
+            method: 'POST',
+            headers: { ...getHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id_task: pv.taskId, id_live_preview: pv.lastId, live_preview: true })
+        }, 5000, sig, false));
+        const text = await res.text();
+        try { data = JSON.parse(text); } catch (e) { /* not JSON, e.g. an HTML error page */ }
+    } catch (e) {
+        if (sig.aborted) throw e;
+        return offForJob('unreachable');
+    }
+    // A server error is passing (a restart, a gateway timeout); anything else means the endpoint isn't what it should be.
+    if (res.status >= 500) return offForJob(`HTTP ${res.status}`);
+    if (!res.ok || !data || typeof data.active !== 'boolean') return offForSession(`HTTP ${res.status}${data ? '' : ', not JSON'}`);
+    if (data.completed) return 'none';
+    if (!data.active) {
+        // Not started yet, or Forge doesn't know the job. Once the progress checks have seen it running, three answers
+        // in a row that it's unknown mean the ID isn't being used.
+        if (!data.queued && pv.jobRunning() && ++pv.unknown >= 3) return offForSession('job not recognised');
+        return 'wait';
+    }
+    pv.unknown = 0;
+    if (typeof data.id_live_preview === 'number') pv.lastId = data.id_live_preview;
+    if (typeof data.live_preview === 'string' && data.live_preview.startsWith('data:image/')) {
+        updateLivePreviewImage(data.live_preview);
+        return 'frame';
+    }
+    return 'wait';
+    function offForSession(why) {
+        internalPreviewOff = true;
+        dlog(`Live Preview: preview endpoint unusable (${why}), using progress checks from now on`);
+        return 'fail';
+    }
+    function offForJob(why) {
+        pv.off = true;
+        dlog(`Live Preview: preview endpoint ${why}, using progress checks for this job`);
+        return 'fail';
+    }
+}
+
+// Results added but not yet shown (still decoding); while any are, the job's end leaves the preview to them (addResult()).
+let resultRevealsPending = 0;
+// Counts frames, so a slow decode can't replace a newer frame or reappear after the preview was cleared.
+let livePreviewFrameSeq = 0;
 function updateLivePreviewImage(base64Data) {
     // Both the main tab's frame and the Inpaint/img2img tab's, as a job started on one tab can finish while the other is open.
-    const src = `data:image/png;base64,${base64Data}`;
-    LIVE_PREVIEW_IMG_IDS.forEach(id => {
-        const img = document.getElementById(id);
-        if (!img) return;
-        img.src = src;
-        img.classList.remove('hidden');
+    // Takes a whole data: URI (the preview endpoint's) or bare base64 (the progress checks').
+    const src = base64Data.startsWith('data:') ? base64Data : `data:image/png;base64,${base64Data}`;
+    const seq = ++livePreviewFrameSeq;
+    // Decoded off screen first: swapping an undecoded image in showed nothing for a moment (e.g. a new ADetailer pass's first frame).
+    const next = new Image();
+    next.src = src;
+    (next.decode ? next.decode() : Promise.resolve()).catch(() => {}).then(() => {
+        if (seq !== livePreviewFrameSeq) return;
+        LIVE_PREVIEW_IMG_IDS.forEach(id => {
+            const img = document.getElementById(id);
+            if (!img) return;
+            img.src = src;
+            img.classList.remove('hidden');
+        });
+        if (lpFullscreenReturn) document.getElementById('lpFsImage').src = src;
     });
 }
+
+// An overlay that hides the app behind it (the image viewer, Live Preview full screen) stays drawn for a moment after it
+// closes, until the images now on screen have decoded (0.4s at most): the app behind is skipped while it's open, so its
+// images were blank for a few frames otherwise. It already counts as closed (.hidden) and lets taps through. Not when
+// another window has opened in its place.
+function coverUntilAppDrawn(el) {
+    if (!el || document.querySelector('.modal:not(.hidden)')) return;
+    el.classList.add('closing-cover');
+    const onScreen = [...document.querySelectorAll('.container img')].filter(i => {
+        if (!i.getAttribute('src') || !i.getClientRects().length) return false;
+        const r = i.getBoundingClientRect();
+        return r.bottom > 0 && r.top < window.innerHeight;
+    });
+    let done = false;
+    const uncover = () => {
+        if (done) return;
+        done = true;
+        requestAnimationFrame(() => el.classList.remove('closing-cover'));
+    };
+    Promise.all(onScreen.map(i => (i.decode ? i.decode() : Promise.resolve()).catch(() => {}))).then(uncover);
+    BgTimer.set(uncover, 400);
+}
+
+// The real ABORT and GENERATE buttons are moved into the fullscreen view and back, so they look and behave exactly
+// as on the tab. No gestures; tapping the image, back or the job ending closes it.
+window.openLivePreviewFullscreen = function(fromImg) {
+    if (lpFullscreenReturn || !fromImg.getAttribute('src')) return;
+    const inp = fromImg.id === 'inpLivePreviewImg';
+    const abort = document.getElementById(inp ? 'abortInpGenBtn' : 'abortGenBtn');
+    const gen = document.getElementById(inp ? 'inpGenBtn' : 'genBtn');
+    if (!abort || !gen) return;
+    document.getElementById('lpFsImage').src = fromImg.src;
+    lpFullscreenReturn = [abort, gen].map(el => ({ el, parent: el.parentNode, next: el.nextSibling }));
+    abort.classList.add('lp-fs-abort');
+    gen.classList.add('lp-fs-gen');
+    document.getElementById('lpFsControls').append(abort, gen);
+    document.getElementById('lpFullscreen').classList.remove('hidden');
+    document.body.classList.add('lp-fs-open');
+    setLivePreviewStatusBarHidden(true);
+};
+// Android's status bar is hidden while it's full screen, as in the image viewer.
+function setLivePreviewStatusBarHidden(hidden) {
+    const p = window.Capacitor?.Plugins?.ResolverDevice?.setStatusBarHidden?.({ hidden });
+    if (p && p.catch) p.catch(() => {});
+}
+window.closeLivePreviewFullscreen = function() {
+    if (!lpFullscreenReturn) return;
+    lpFullscreenReturn.forEach(({ el, parent, next }) => {
+        el.classList.remove('lp-fs-abort', 'lp-fs-gen');
+        parent.insertBefore(el, next);
+    });
+    lpFullscreenReturn = null;
+    document.getElementById('lpFullscreen').classList.add('hidden');
+    document.body.classList.remove('lp-fs-open');
+    coverUntilAppDrawn(document.getElementById('lpFullscreen'));
+    setLivePreviewStatusBarHidden(false);
+};
 function clearLivePreviewImage() {
+    livePreviewFrameSeq++;
+    // The job is over, so a full screen preview closes too.
+    window.closeLivePreviewFullscreen?.();
     LIVE_PREVIEW_IMG_IDS.forEach(id => {
         const img = document.getElementById(id);
         if (!img) return;
@@ -1255,7 +1689,7 @@ async function sendSeedFromResultImage(img) {
     const mode = typeof currentMode !== 'undefined' ? currentMode : null;
     const seedEl = mode ? document.getElementById(`${mode}_seed`) : null;
     if (!seedEl) return false;
-    const seed = await extractSeedFromDataUrl(img.src);
+    const seed = await extractSeedFromDataUrl(resultFullSrc(img));
     if (seed === null) return false;
     seedEl.value = seed;
     if (typeof normalizeSeedField === 'function') normalizeSeedField(seedEl);
@@ -1264,7 +1698,7 @@ async function sendSeedFromResultImage(img) {
 
 // Long-pressing a result in the Inpaint / img2img / Upscale tab sends it to the Upscaler, replacing the loaded image.
 function sendResultToUpscaler(img) {
-    return sendImageToUpscaler(img.src, img.dataset.badges ? img.dataset.badges.split(',') : null);
+    return sendImageToUpscaler(resultFullSrc(img), img.dataset.badges ? img.dataset.badges.split(',') : null);
 }
 
 // Runs onLongPress after a long press on a result thumbnail, and suppresses the click that follows so the fullscreen viewer doesn't also open.
@@ -1368,14 +1802,32 @@ async function syncJobServerOptions(job, serverOpts) {
     }
 }
 
-// Gallery badges for a job: HR, INP, AD, CN (main ControlNet only).
+// Gallery badges for a job: HR, INP (Inpaint) or IMG (img2img), AD, CN (main ControlNet only).
 function galleryBadgesFor(job) {
     const badges = [];
     if (job.payload && job.payload.enable_hr) badges.push('HR');
     if (job.payload && job.payload.alwayson_scripts && job.payload.alwayson_scripts.ADetailer) badges.push('AD');
     if (job.payload && job.payload.alwayson_scripts && Object.keys(job.payload.alwayson_scripts).some(k => k.toLowerCase() === 'controlnet')) badges.push('CN');
-    if (job.mode === 'inp') badges.push('INP');
+    // A job without inpSubMode (queued before it existed) is img2img when it sends no mask.
+    if (job.mode === 'inp') badges.push((job.inpSubMode || (job.payload && job.payload.mask ? 'inpaint' : 'img2img')) === 'img2img' ? 'IMG' : 'INP');
     return badges;
+}
+
+// Data Usage history label for a job.
+function dataUsageLabel(job) {
+    if (job.mode === 'inp') return (job.inpSubMode || (job.payload && job.payload.mask ? 'inpaint' : 'img2img')) === 'img2img' ? 'IMG2IMG' : 'INPAINT';
+    return { xl: 'SDXL', anima: 'ANIMA', qwen: 'QWEN', flux: 'FLUX', krea: 'KREA' }[job.mode] || String(job.mode || '').toUpperCase();
+}
+
+// True when /progress answers and shows no job running; false if it can't be reached.
+async function serverLooksIdle(signal) {
+    try {
+        const { data } = await timedFetch(`${HOST}/sdapi/v1/progress?skip_current_image=true`, { headers: getHeaders() }, 10000, signal, true);
+        return !!data && (!data.state || data.state.job === '');
+    } catch (e) {
+        if (e.name === 'AbortError') throw e;
+        return false;
+    }
 }
 
 async function runJob(job, isBatch = false) {
@@ -1397,15 +1849,21 @@ async function runJob(job, isBatch = false) {
     // Declared outside try/finally so cleanup can always reach it.
     let progressPollTimeout = null;
     let progressVisibilityHandler = null;
+    const jobAbort = new AbortController();
+    const sig = jobAbort.signal;
+    activeJobs.add(jobAbort);
 
     try {
         // The button reads "SETTLING..." from the start of the job until the first real step count. The finally block below restores the real label on every exit.
         btn.innerText = "SETTLING...";
+        // Start the background service while the app is in front; Android 12+ blocks it from the background.
+        if (!isBatch) updateBatchNotification("Settling...", true, "");
+        dlog(`job start: ${describeJob(job)}`);
 
         // Unload before an SDXL job that follows a diffusers-based one (Flux/Qwen/Anima/Krea), to avoid a stuck "patch LoRAs on-the-fly" state.
         if (job.mode === 'xl' && lastGeneratedMode && ['flux', 'qwen', 'anima', 'krea'].includes(lastGeneratedMode)) {
             if (typeof unloadModel === 'function') {
-                try { await unloadModel(true); } catch (e) {}
+                await withDeadline(unloadModel(true).catch(() => {}), 15000, sig);
             }
         }
 
@@ -1413,22 +1871,32 @@ async function runJob(job, isBatch = false) {
         const thisJobLoraSet = extractLoraTags(job.payload?.prompt);
         if (lastGeneratedLoraSet !== null && loraSetChanged(lastGeneratedLoraSet, thisJobLoraSet)) {
             btn.innerText = "SETTLING...";
+            dlog('LoRA set changed: unloading the model');
             if (typeof unloadModel === 'function') {
-                try { await unloadModel(true); } catch (e) {}
+                await withDeadline(unloadModel(true).catch(() => {}), 15000, sig);
             }
-            await new Promise(r => setTimeout(r, 2500));
+            await abortableSleep(2500, sig);
         }
 
         let isReady = false;
         let attempts = 0;
         // Last options reported by Forge, reused by the module sync.
         let serverOpts = null;
+        // Failed or timed-out options reads in a row; a few are tolerated on a patchy connection.
+        let optsFailures = 0;
         // Check whether the requested model is loaded: fetch options, normalise names, POST options on mismatch.
         while (!isReady && attempts < 40) {
-            const optsReq = await fetch(`${HOST}/sdapi/v1/options`, {
-                headers: getHeaders()
-            });
-            const opts = await optsReq.json();
+            let opts;
+            try {
+                ({ data: opts } = await timedFetch(`${HOST}/sdapi/v1/options`, { headers: getHeaders() }, 15000, sig, true));
+                optsFailures = 0;
+            } catch (e) {
+                if (e.name === 'AbortError') throw e;
+                if (++optsFailures >= 5) throw connectionLostError("Couldn't reach the server: " + e.message);
+                attempts++;
+                await abortableSleep(1500, sig);
+                continue;
+            }
             serverOpts = opts;
 
             // Normalize: lowercase, remove hash, remove path
@@ -1440,7 +1908,7 @@ async function runJob(job, isBatch = false) {
             if (attempts % 5 === 0) {
                 // Unload before the first checkpoint-switch attempt only, so an in-progress load isn't interrupted.
                 if (attempts === 0 && typeof unloadModel === 'function') {
-                    await unloadModel(true);
+                    await withDeadline(unloadModel(true).catch(() => {}), 15000, sig);
                 }
 
                 // Force overrides here as well to ensure alignment
@@ -1455,24 +1923,26 @@ async function runJob(job, isBatch = false) {
                     loadPayload["sd_vae"] = "Automatic";
                 }
 
-                await postOption(loadPayload);
+                await withDeadline(postOption(loadPayload), 15000, sig);
             }
             attempts++;
-            await new Promise(r => setTimeout(r, 1500));
+            await abortableSleep(1500, sig);
         }
         if (!isReady) throw new Error("Timeout: Server failed to load model.");
+        dlog(`model ready${attempts ? ` after ${attempts} checks (switched)` : ''}`);
 
-        await syncJobServerOptions(job, serverOpts);
+        await withDeadline(syncJobServerOptions(job, serverOpts), 30000, sig);
 
         // Short settle delay after a real checkpoint switch.
         if (attempts > 0) {
             btn.innerText = "SETTLING...";
-            await new Promise(r => setTimeout(r, 2500));
+            await abortableSleep(2500, sig);
         }
 
         // Re-asserts "SETTLING..." as the request goes out.
         btn.innerText = "SETTLING...";
-        await updateBatchNotification("Starting Generation", true, "Initializing...");
+        // A queue keeps showing its running step count between jobs.
+        if (!isBatch) await updateBatchNotification("Starting Generation", true, "Initializing...");
 
         // Base and Hi-Res second-pass step totals come from settings, not Forge's progress. img2img/Inpaint under 1.0 denoising run fewer steps (same formula as the Denoising hint).
         const effectiveBaseSteps = job.mode === 'inp' && typeof job.payload.denoising_strength === 'number'
@@ -1521,9 +1991,9 @@ async function runJob(job, isBatch = false) {
 
         // Stall detection: step count unchanged for several consecutive polls (e.g. a server-side tiled Hi-Res upscale, which exposes no progress).
         let lastShownMsg = '';
-        let stalledPollCount = 0;
-        // 13 polls is roughly 5s at the foreground rate.
-        const STALL_POLLS_BEFORE_INDICATOR = 13;
+        let lastMsgChangedAt = Date.now();
+        // Measured in time, so the polling rate doesn't change it.
+        const STALL_MS_BEFORE_INDICATOR = 5000;
         // Requires a minimum step count so normal startup latency isn't read as a stall.
         const MIN_STEP_BEFORE_STALL_INDICATOR = 5;
 
@@ -1576,11 +2046,11 @@ async function runJob(job, isBatch = false) {
         // Race guard: discards a straggler poll's result once the job is done.
         let jobFinished = false;
 
-        // Self-rescheduling timeout: 400ms in the foreground, 4s backgrounded. The finally block in pollProgressOnce() reschedules on every exit path.
+        // Self-rescheduling timeout at the Generation Polling Rate, or the background rate while hidden. The finally block in pollProgressOnce() reschedules on every exit path.
         const onProgressVisibilityChange = () => {
-            if (!document.hidden && !jobFinished) {
+            if (!document.hidden && !jobFinished && !sig.aborted) {
                 // Poll immediately when returning to the foreground.
-                clearTimeout(progressPollTimeout);
+                BgTimer.clear(progressPollTimeout);
                 pollProgressOnce();
             }
         };
@@ -1589,28 +2059,64 @@ async function runJob(job, isBatch = false) {
 
         // Makes a second call while one is running a no-op.
         let pollInFlight = false;
+        // Failed polls in a row, and idle polls after this job started (the result is on its way).
+        let pollFailures = 0, pollCount = 0, lastPollStage = '';
+        let idleSince = 0;
+        // Whether a poll has shown this job running.
+        let serverSawJob = false;
+        // Live Preview: the step the last check reported, and the step of the last frame downloaded. Forge sends the
+        // latest frame with every check, so one is only asked for when the step has moved on since the last.
+        let previewSeenStep = '', previewFrameStep = null;
+        // This job's state for the preview endpoint (fetchInternalPreview()).
+        const previewEndpoint = { taskId: newPreviewTaskId(), lastId: -1, unknown: 0, off: false, jobRunning: () => thisJobConfirmedStarted };
 
         async function pollProgressOnce() {
-            if (jobFinished || pollInFlight) return;
+            if (jobFinished || pollInFlight || sig.aborted) return;
             pollInFlight = true;
             try {
-                // Requests skip_current_image=true to avoid downloading the preview on every poll, unless Live Preview is on.
-                const livePreviewActive = document.getElementById('livePreviewCheck')?.checked === true;
-                const progressUrl = livePreviewActive
+                // No preview image unless Live Preview is on and its area could be seen.
+                const livePreviewActive = document.getElementById('livePreviewCheck')?.checked === true && livePreviewAreaVisible(job.mode);
+                const viaEndpoint = !internalPreviewOff && !previewEndpoint.off;
+                // Frames come with this check only when the preview endpoint isn't being used.
+                const wantFrame = livePreviewActive && !viaEndpoint && previewSeenStep !== previewFrameStep;
+                const progressUrl = wantFrame
                     ? `${HOST}/sdapi/v1/progress`
                     : `${HOST}/sdapi/v1/progress?skip_current_image=true`;
-                const res = await fetch(progressUrl, {
-                    headers: getHeaders()
-                });
-                if (jobFinished) return; // job may have finished WHILE this fetch was in flight
-                const data = await res.json();
-                if (jobFinished) return; // and again, to be thorough
-                if (livePreviewActive && data.current_image) {
+                const { data } = await timedFetch(progressUrl, { headers: getHeaders() }, 10000, sig, true);
+                if (jobFinished || sig.aborted) return; // finished while the fetch was in flight
+                if (pollFailures) dlog(`progress check working again after ${pollFailures} failure(s)`);
+                pollFailures = 0;
+                // Logged on the first check, each new stage and every tenth check.
+                const stage = `${data.state?.sampling_steps}|${data.state?.job_no}|${data.state?.job}`;
+                if (++pollCount % 10 === 1 || stage !== lastPollStage) dlog(`progress check ${pollCount}: ${Math.round((data.progress || 0) * 100)}%, step ${data.state?.sampling_step}/${data.state?.sampling_steps}, ${data.state?.job || 'idle'}`);
+                lastPollStage = stage;
+                previewSeenStep = `${stage}|${data.state?.sampling_step}`;
+                if (wantFrame) previewFrameStep = previewSeenStep;
+                if (livePreviewActive && window.DataUsage) DataUsage.markLive('gen');
+                if (wantFrame && data.current_image) {
                     updateLivePreviewImage(data.current_image);
                 }
+                // Via the preview endpoint: asked once the step has moved on, and again each check until the new frame is in.
+                if (livePreviewActive && viaEndpoint && previewSeenStep !== previewFrameStep) {
+                    const got = await fetchInternalPreview(previewEndpoint, sig);
+                    if (jobFinished || sig.aborted) return;
+                    if (got === 'frame' || got === 'none') previewFrameStep = previewSeenStep;
+                }
                 const bridge = await fetchBridgeStatus();
-                if (jobFinished) return;
+                if (jobFinished || sig.aborted) return;
                 const state = data.state || {};
+                jobAbort.serverBusy = !!state.job;
+                if (state.job) serverSawJob = jobAbort.serverSawJob = true;
+                // Server idle after this job ran: the image is done and still downloading.
+                if (thisJobConfirmedStarted && state.job === '') {
+                    if (!idleSince) idleSince = Date.now();
+                    if (Date.now() - idleSince >= DOWNLOADING_LABEL_DELAY_MS) {
+                        btn.innerText = 'DOWNLOADING...';
+                        return;
+                    }
+                } else {
+                    idleSince = 0;
+                }
                 const hasJobInfo = typeof state.job_no === 'number'
                     && typeof state.sampling_step === 'number'
                     && typeof state.sampling_steps === 'number'
@@ -1728,7 +2234,8 @@ async function runJob(job, isBatch = false) {
                                 // Passes are capped by Max Masks first, then collapsed to one by merge. The toast keeps the raw detected count.
                                 const processedCount = adetailerProcessedCount(bridge.adetailer.count, unitConfig);
                                 adCumulativeCount += mergeActive ? Math.min(1, processedCount) : processedCount;
-                                if (bridge.adetailer.count > 0 && Toast) {
+                                // Skipped while hidden: queued toasts would all play on returning to the app.
+                                if (bridge.adetailer.count > 0 && Toast && !document.hidden) {
                                     const label = guessAdetailerLabel(unitConfig?.ad_model);
                                     if (label) {
                                         const noun = bridge.adetailer.count === 1 ? label.singular : label.plural;
@@ -1760,7 +2267,7 @@ async function runJob(job, isBatch = false) {
                     displayTotal = deterministicPerImage;
                 } else {
                     if (btn.innerText.includes("Step")) {
-                        updateBatchNotification("Finalizing...", false, "Receiving Images...");
+                        if (!isBatch) updateBatchNotification("Finalizing...", false, "Receiving Images...");
                     }
                     return;
                 }
@@ -1813,14 +2320,12 @@ async function runJob(job, isBatch = false) {
                 const batchLabel = nIterCount > 1 ? `Batch ${currentBatchNumber}/${nIterCount}\n` : '';
 
                 // Compares the full message, and appends a "still working" hint when the same message repeats for several polls.
-                if (msg === lastShownMsg) {
-                    stalledPollCount++;
-                } else {
-                    stalledPollCount = 0;
+                if (msg !== lastShownMsg) {
+                    lastMsgChangedAt = Date.now();
                     lastShownMsg = msg;
                 }
                 // Without the bridge there is no tile count. A stall at the base/Hi-Res boundary with a model upscaler is shown plainly rather than folded into a guessed step count.
-                const stalledAtHrBoundary = stalledPollCount >= STALL_POLLS_BEFORE_INDICATOR && currentStepInBatch >= MIN_STEP_BEFORE_STALL_INDICATOR;
+                const stalledAtHrBoundary = Date.now() - lastMsgChangedAt >= STALL_MS_BEFORE_INDICATOR && currentStepInBatch >= MIN_STEP_BEFORE_STALL_INDICATOR;
                 const likelyTilePhase = !bridge && phaseIndex === 0 && job.payload.enable_hr && job.payload.hr_upscaler && !job.payload.hr_upscaler.startsWith('Latent');
                 let displayMsg = msg;
                 if (stalledAtHrBoundary && likelyTilePhase) {
@@ -1840,36 +2345,70 @@ async function runJob(job, isBatch = false) {
                     maxBatchTotalShown = Math.max(maxBatchTotalShown, batchTotalDisplay);
                     batchTotalDisplay = maxBatchTotalShown;
                     document.getElementById('queueProgressText').innerText = `Step ${actualTotal} / ${batchTotalDisplay}`;
-                    updateBatchNotification("Batch Running", false, `Step ${actualTotal} / ${batchTotalDisplay}`);
+                    updateBatchNotification(`Queue ${queueJobsDone + 1}/${queueJobsDone + queueState.ongoing.length}`, false, `${actualTotal} / ${batchTotalDisplay}`);
                 } else {
-                    updateBatchNotification("Generating...", false, msg);
+                    updateBatchNotification(nIterCount > 1 ? `Batch ${currentBatchNumber}/${nIterCount}` : "Generating...", false, msg);
                 }
             } catch (e) {
+                jobAbort.serverBusy = false;
+                // Shown after a few failed polls; the next good poll replaces it.
+                if (!jobFinished && e.name !== 'AbortError') { dlog('progress check failed: ' + e.message); runDiag('progress check failed'); }
+                if (!jobFinished && e.name !== 'AbortError' && ++pollFailures >= 3) btn.innerText = 'RECONNECTING...';
             } finally {
                 pollInFlight = false;
-                if (!jobFinished) {
+                if (!jobFinished && !sig.aborted) {
                     // Shares the user-configurable polling rate with the upscale poll (Settings > Generation Polling Rate).
-                    const delay = document.hidden ? 4000 : getGenerationPollingRate();
-                    progressPollTimeout = setTimeout(pollProgressOnce, delay);
+                    const delay = document.hidden ? getBackgroundPollingRate() : getGenerationPollingRate();
+                    progressPollTimeout = BgTimer.set(pollProgressOnce, delay);
                 }
             }
         }
-        progressPollTimeout = setTimeout(pollProgressOnce, getGenerationPollingRate());
+        progressPollTimeout = BgTimer.set(pollProgressOnce, getGenerationPollingRate());
 
         const endpoint = job.mode === 'inp' ? '/sdapi/v1/img2img' : '/sdapi/v1/txt2img';
 
-        const res = await fetchWithRetry(`${HOST}${endpoint}`, {
-            method: 'POST',
-            headers: getHeaders(),
-            body: JSON.stringify(job.payload)
-        });
+        // Resent only if the server never started it, so it can't generate twice.
+        let res;
+        for (let sendAttempt = 0; ; sendAttempt++) {
+            jobAbort.requestSent = true;
+            dlog(`request sent${sendAttempt ? ` (resend ${sendAttempt})` : ''}`);
+            try {
+                // Native replies give no sign of downloading, so ABORT's grace period allows for them.
+                jobAbort.replyPending = !!(window.Capacitor?.isNativePlatform?.() && window.Capacitor.Plugins?.CapacitorHttp);
+                res = await fetch(`${HOST}${endpoint}`, {
+                    method: 'POST',
+                    headers: getHeaders(),
+                    // The ID lets the preview endpoint find this job (fetchInternalPreview()); the stored payload is left as it is.
+                    body: JSON.stringify({ ...job.payload, force_task_id: previewEndpoint.taskId, ...livePreviewJobSettings(job.payload) }),
+                    signal: sig,
+                    preferNative: true
+                }).finally(() => { jobAbort.replyPending = false; });
+                jobAbort.responseStarted = true;
+                dlog(`reply ${res.status}`);
+            } catch (e) {
+                dlog('request failed: ' + e.message);
+                if (sig.aborted) throw makeAbortError();
+                if (sendAttempt < 3 && !serverSawJob && !thisJobConfirmedStarted && await serverLooksIdle(sig)) {
+                    await abortableSleep(1500 * (sendAttempt + 1), sig);
+                    continue;
+                }
+                throw connectionLostError(serverSawJob || thisJobConfirmedStarted
+                    ? "The connection dropped while the server was working on this image, so it couldn't be collected. Check your connection and try again."
+                    : "Couldn't send the job to the server: " + e.message);
+            }
+            break;
+        }
 
-        clearTimeout(progressPollTimeout);
+        BgTimer.clear(progressPollTimeout);
         document.removeEventListener('visibilitychange', progressVisibilityHandler);
         jobFinished = true;
         // On success the last live-preview frame stays on screen until the first real image is shown (addResult()). A failed response clears it at once; finally{} clears it on any other exit.
         if (!res.ok) {
             if (typeof clearLivePreviewImage === 'function') clearLivePreviewImage();
+            // Gateway/tunnel timeouts (e.g. Cloudflare 524): the reply is lost.
+            if (res.status === 502 || res.status === 504 || (res.status >= 520 && res.status <= 527)) {
+                throw new Error(`The connection to the server timed out (error ${res.status}), so the image couldn't be collected.`);
+            }
             throw new Error("Server Error " + res.status);
         }
 
@@ -1879,13 +2418,21 @@ async function runJob(job, isBatch = false) {
         // Remembers which main tab last generated, for boot.js to restore.
         if (['xl', 'flux', 'qwen', 'anima', 'krea'].includes(job.mode)) localStorage.setItem('bojroLastGenTab', job.mode);
 
-        const data = await res.json();
+        if (window.DataUsage) DataUsage.addSteps('gen', lastDisplayTotal);
+        let data;
+        try {
+            data = await res.json();
+        } catch (e) {
+            if (sig.aborted) throw makeAbortError();
+            throw connectionLostError("The image was generated, but the connection dropped while downloading it.");
+        }
         if (isBatch) {
             currentBatchProgress += lastDisplayTotal;
             // Carries this job's final ADetailer growth forward for the next job.
             queueADetailerGrowthCarried += Math.max(0, lastDisplayTotal - (nIterCount * deterministicPerImage));
         }
 
+        dlog(`${data.images ? data.images.length : 0} image(s) received`);
         if (data.images) {
             const expectedImages = (job.payload.batch_size || 1) * (job.payload.n_iter || 1);
 
@@ -1897,7 +2444,9 @@ async function runJob(job, isBatch = false) {
                 const img = document.createElement('img');
                 img.src = finalB64;
                 img.className = 'gen-result';
-                img.loading = "lazy";
+                setImageSizeFromPng(img, finalB64);
+                // Loaded straight away, not lazily: it's kept hidden until decoded (below), and a hidden lazy image never loads.
+                img.loading = "eager";
                 img.dataset.dbId = '';
                 if (!isGrid && jobBadges.length) img.dataset.badges = jobBadges.join(',');
                 if (isGrid) img.dataset.grid = '1';
@@ -1909,7 +2458,7 @@ async function runJob(job, isBatch = false) {
                     const allImgs = Array.from(gal.querySelectorAll('.gen-result'));
                     const items = allImgs.map(el => ({
                         id: el.dataset.dbId ? parseInt(el.dataset.dbId) : null,
-                        data: el.src,
+                        data: resultFullSrc(el),
                         domElement: el
                     }));
                     window.openFullscreen(items, allImgs.indexOf(img));
@@ -1919,8 +2468,24 @@ async function runJob(job, isBatch = false) {
 
                 if (gal.firstChild) gal.insertBefore(img, gal.firstChild);
                 else gal.appendChild(img);
-                // Clears the last live frame, except for the grid, which can land after the next queued job has started.
-                if (!isGrid && typeof clearLivePreviewImage === 'function') clearLivePreviewImage();
+                trimResultStrip(gal);
+                // Kept out of sight until it's decoded, then shown in the same frame the last live frame goes (not for the grid,
+                // which can land after the next queued job has started); shown half-drawn, it flashed. Shown anyway after 1.5s.
+                img.style.display = 'none';
+                let shown = false;
+                if (!isGrid) resultRevealsPending++;
+                const reveal = () => {
+                    if (shown) return;
+                    shown = true;
+                    requestAnimationFrame(() => {
+                        img.style.display = '';
+                        if (isGrid) return;
+                        resultRevealsPending--;
+                        if (typeof clearLivePreviewImage === 'function') clearLivePreviewImage();
+                    });
+                };
+                (img.decode ? img.decode() : Promise.resolve()).catch(() => {}).then(reveal);
+                BgTimer.set(reveal, 1500);
                 const autoDl = document.getElementById('autoDlCheck');
                 if (autoDl && autoDl.checked) saveToMobileGallery(finalB64);
             };
@@ -1928,6 +2493,7 @@ async function runJob(job, isBatch = false) {
             for (const b64 of data.images) {
                 addResult("data:image/png;base64," + b64, false);
             }
+            if (window.DataUsage && data.images.length) DataUsage.addImages('gen', data.images.length, "data:image/png;base64," + data.images[0]);
 
             // Show & Download Batch Grids: Forge was asked for no grid, so one is built here from the received images (see batchGridsEnabled(), utils.js), only when exactly the expected number came back. Not awaited, so the job and queue don't wait; added when ready.
             if (job.gridMaxEdge > 0 && expectedImages > 1 && data.images.length === expectedImages) {
@@ -1945,10 +2511,14 @@ async function runJob(job, isBatch = false) {
     } catch (e) {
         throw e;
     } finally {
-        if (progressPollTimeout) clearTimeout(progressPollTimeout);
+        dlog('job end');
+        activeJobs.delete(jobAbort);
+        // Also stops any poll still in flight from relabelling the button.
+        jobAbort.abort();
+        if (progressPollTimeout) BgTimer.clear(progressPollTimeout);
         if (progressVisibilityHandler) document.removeEventListener('visibilitychange', progressVisibilityHandler);
-        // No stale in-progress frame outlives the job.
-        if (typeof clearLivePreviewImage === 'function') clearLivePreviewImage();
+        // No stale in-progress frame outlives the job; a result still decoding clears it when it's shown (addResult()).
+        if (!resultRevealsPending && typeof clearLivePreviewImage === 'function') clearLivePreviewImage();
         spinner.style.display = 'none';
         btn.disabled = false;
         // --- NEO HOOK: BUTTON TEXT ---
@@ -2037,9 +2607,9 @@ window.loadGallery = function() {
             container.appendChild(img);
             container.appendChild(ring);
             container.appendChild(tick);
-            // Gallery badges: HR, INP, AD, CN, UP.
+            // Gallery badges: HR, INP/IMG, AD, CN, UP.
             const badgeNames = [...(item.badges || []), ...(item.upscale ? ['UP'] : [])];
-            const badgeOrder = ['HR', 'INP', 'AD', 'CN', 'UP'];
+            const badgeOrder = ['HR', 'INP', 'IMG', 'AD', 'CN', 'UP'];
             if (badgeNames.length) {
                 const badgeRow = document.createElement('div');
                 badgeRow.className = 'gal-badges';
@@ -2170,6 +2740,8 @@ function startEditorMetadataCapture(src) {
 
 // Opens the shared crop editor over the Inpaint tab with this image (img2img / Inpaint / Upscale share it).
 function showEditorWithImage(src) {
+    // Kept in Crop & Edit's RECENT too, as an image picked from the phone is.
+    if (typeof EditHistory !== 'undefined') fetch(src).then(r => r.blob()).then(b => EditHistory.save(b)).catch(() => {});
     // Opens the editor modal immediately, before the image loads, and clears editorCanvas of stale content.
     const editorCanvasEl = document.getElementById('editorCanvas');
     editorCanvasEl?.getContext('2d')?.clearRect(0, 0, editorCanvasEl.width, editorCanvasEl.height);
@@ -2282,6 +2854,7 @@ window.editCurrentFs = function() {
     const viewedBadges = viewed ? (viewed.badges || (viewed.domElement && viewed.domElement.dataset.badges ? viewed.domElement.dataset.badges.split(',') : null)) : null;
     editorPendingBadges = viewedBadges && viewedBadges.length ? [...viewedBadges] : null;
 
+    if (typeof rememberEditorReturn === 'function') rememberEditorReturn({ images: currentGalleryImages, index: currentGalleryIndex, fromGrid: fullscreenOpenedFromGalleryGrid });
     // 1. Close the Lightbox
     window.closeFsModal();
 
@@ -2339,10 +2912,13 @@ window.setUpscaleResizeMode = function(mode) {
 
 // Submits the Upscale tab to Forge's Extras API.
 window.runUpscaleJob = async function() {
+    if (jobAlreadyRunning() || await forgeBusyWithOtherJob()) return;
     if (!sourceImageB64) {
         await window.appAlert("Please select an image first.");
         return;
     }
+    // The upscaled image is saved to the gallery too.
+    if (await window.confirmAutoDelete(1, 'Upscaling') === false) return;
 
     const btn = document.getElementById('upscaleBtn');
     const spinner = document.getElementById('inpLoadingSpinner');
@@ -2352,6 +2928,20 @@ window.runUpscaleJob = async function() {
     if (spinner) spinner.style.display = 'block';
     // Enables the Upscale abort button, which uses /sdapi/v1/interrupt.
     setAbortButtonState('abortInpGenBtn', true);
+    // An interrupted upscale has no partial result worth waiting for, so ABORT drops it at once.
+    const upAbort = new AbortController();
+    const upSig = upAbort.signal;
+    upAbort.dropAtOnce = true;
+    activeJobs.add(upAbort);
+    const usage = window.DataUsage ? DataUsage.begin('up', 'UPSCALE') : null;
+    let usageStatus = 'ok';
+    // Started while the app is in front (Android 12+ blocks it from the background); left alone while a generation owns it,
+    // including one started during the upscale.
+    const upNotify = !isQueueRunning && !isSingleJobRunning;
+    const upOwnsNotification = () => upNotify && !isQueueRunning && !isSingleJobRunning;
+    if (upNotify) { updateBatchNotification("Upscaling...", true, ""); lastJobTarget = { tab: 'inp', sub: 'upscale' }; }
+    if (window.JobAbort) JobAbort.started();
+    let connectionLost = false;
 
     // A second pass is only guessed when this image has not been upscaled before; marked immediately.
     const imageHash = window.LoraManager.simpleHash(sourceImageB64);
@@ -2365,19 +2955,27 @@ window.runUpscaleJob = async function() {
     let upscaleJobDone = false;
     const upscaleTileTracker = createTileTracker(expectSecondPass);
     let lastKnownTotal = null; // real total once seen, used to show a genuinely-complete state on success
+    let bridgeSawActive = false;
+    let upscaleDoneAt = 0;
     // Poll delay has a small floor to avoid hammering a low-latency connection.
     async function pollUpscaleBridge() {
-        if (upscaleJobDone) return;
+        if (upscaleJobDone || upSig.aborted) return;
         const bridge = await fetchBridgeStatus();
-        if (upscaleJobDone) return;
+        if (upscaleJobDone || upSig.aborted) return;
         if (bridge && !bridge.errors?.length && bridge.upscale?.active && typeof bridge.upscale.current === 'number' && typeof bridge.upscale.total === 'number') {
+            bridgeSawActive = true;
             const { numerator, denominator } = upscaleTileTracker(bridge.upscale.current, bridge.upscale.total);
             lastKnownTotal = denominator;
             if (btn) btn.innerText = `Step ${numerator} / ${denominator}`;
+            if (upOwnsNotification()) updateBatchNotification("Upscaling", false, `${numerator} / ${denominator}`);
+        } else if (bridge && bridgeSawActive && !bridge.upscale?.active && btn) {
+            // Upscale finished on the server; the image is still coming down.
+            if (!upscaleDoneAt) upscaleDoneAt = Date.now();
+            if (Date.now() - upscaleDoneAt >= DOWNLOADING_LABEL_DELAY_MS) btn.innerText = 'DOWNLOADING...';
         }
-        if (!upscaleJobDone) upscalePollTimeout = setTimeout(pollUpscaleBridge, document.hidden ? 4000 : getGenerationPollingRate());
+        if (!upscaleJobDone && !upSig.aborted) upscalePollTimeout = BgTimer.set(pollUpscaleBridge, document.hidden ? getBackgroundPollingRate() : getGenerationPollingRate());
     }
-    if (localStorage.getItem('bojroProgressBridgeEnabled') === 'true') upscalePollTimeout = setTimeout(pollUpscaleBridge, getGenerationPollingRate());
+    if (localStorage.getItem('bojroProgressBridgeEnabled') === 'true') upscalePollTimeout = BgTimer.set(pollUpscaleBridge, getGenerationPollingRate());
 
     try {
         const isFactorMode = document.getElementById('upscale_resize_mode').value === '0';
@@ -2413,21 +3011,43 @@ window.runUpscaleJob = async function() {
         localStorage.setItem('bojro_upscale_upscaler_1', upscaler1);
         localStorage.setItem('bojro_upscale_upscaler_2', upscaler2);
 
-        const res = await fetchWithRetry(`${HOST}/sdapi/v1/extra-single-image`, {
-            method: 'POST',
-            headers: getHeaders(),
-            body: JSON.stringify(payload)
-        });
-        if (!res.ok) throw new Error("Server Error " + res.status);
-        const data = await res.json();
+        // Never resent automatically: a resend uploads the image again and can upscale it twice.
+        upAbort.requestSent = true;
+        dlog('upscale request sent');
+        let res, data;
+        try {
+            res = await fetch(`${HOST}/sdapi/v1/extra-single-image`, {
+                method: 'POST',
+                headers: getHeaders(),
+                body: JSON.stringify(payload),
+                signal: upSig,
+                preferNative: true
+            });
+        } catch (e) {
+            if (upSig.aborted) throw makeAbortError();
+            throw connectionLostError("The connection dropped, so the upscale couldn't be completed. Check your connection and try again.");
+        }
+        if (!res.ok) {
+            if (res.status === 502 || res.status === 504 || (res.status >= 520 && res.status <= 527)) {
+                throw new Error(`The connection to the server timed out (error ${res.status}), so the image couldn't be collected.`);
+            }
+            throw new Error("Server Error " + res.status);
+        }
+        try {
+            data = await res.json();
+        } catch (e) {
+            if (upSig.aborted) throw makeAbortError();
+            throw new Error("The image was upscaled, but the connection dropped while downloading it.");
+        }
         if (!data.image) throw new Error("No image returned");
 
         // A successful request means every tile finished, whatever the last poll caught.
         upscaleJobDone = true;
-        clearTimeout(upscalePollTimeout);
+        BgTimer.clear(upscalePollTimeout);
         if (lastKnownTotal !== null && btn) btn.innerText = `Step ${lastKnownTotal} / ${lastKnownTotal}`;
 
         let finalB64 = "data:image/png;base64," + data.image;
+        if (window.DataUsage) DataUsage.addImages('up', 1, finalB64);
         // Copy Metadata from Source.
         if (document.getElementById('upscale_copy_metadata')?.checked && inpSourceTextChunks) {
             finalB64 = await embedPngTextChunks(finalB64, inpSourceTextChunks);
@@ -2437,8 +3057,13 @@ window.runUpscaleJob = async function() {
         const saved = saveImageToDBInBackground(finalB64, upscaleInfo, jobBadges);
 
         const img = document.createElement('img');
-        img.src = finalB64;
         img.className = 'gen-result';
+        setImageSizeFromPng(img, finalB64);
+        // Wider than the strip shows it (in device pixels): shown from a screen-sized copy, the full image kept for the rest.
+        const stripPx = Math.round((resultGal.clientWidth || document.documentElement.clientWidth) * (window.devicePixelRatio || 1));
+        const copy = img.width > stripPx * 1.25 ? await screenSizedCopy(finalB64, stripPx) : null;
+        if (copy) img.fullSrc = finalB64;
+        img.src = copy || finalB64;
         img.loading = "lazy";
         img.dataset.upscaleScale = upscaleInfo.scale;
         if (jobBadges && jobBadges.length) img.dataset.badges = jobBadges.join(',');
@@ -2451,7 +3076,7 @@ window.runUpscaleJob = async function() {
             const allImgs = Array.from(resultGal.querySelectorAll('.gen-result'));
             const items = allImgs.map(el => ({
                 id: el.dataset.dbId ? parseInt(el.dataset.dbId) : null,
-                data: el.src,
+                data: resultFullSrc(el),
                 domElement: el,
                 upscale: el.dataset.upscaleScale ? { scale: el.dataset.upscaleScale, seed: el.dataset.upscaleSeed || null } : null
             }));
@@ -2460,17 +3085,29 @@ window.runUpscaleJob = async function() {
         attachLongPress(img, sendResultToUpscaler);
         if (resultGal.firstChild) resultGal.insertBefore(img, resultGal.firstChild);
         else resultGal.appendChild(img);
+        trimResultStrip(resultGal);
 
         const autoDl = document.getElementById('autoDlCheck');
         if (autoDl && autoDl.checked) saveToMobileGallery(finalB64, 'bojro', upscaleScaleTag, upscaleSourceSeed);
         // Sends a completion notification for Upscale jobs (only fires while backgrounded).
-        await sendCompletionNotification("Upscale Complete: Image Ready");
+        dlog('upscale done');
+        if (upOwnsNotification()) await stopProgressService();
+        await sendCompletionNotification("Upscaled image ready");
     } catch (e) {
+        usageStatus = e.name === 'AbortError' ? 'aborted' : 'failed';
+        connectionLost = !!e.connectionLost;
+        if (e.name === 'AbortError') return;
         console.error("Upscale Error:", e);
+        dlog('upscale failed: ' + e.message);
         await window.appAlert("Upscale failed: " + e.message, { title: 'Upscale Failed', danger: true });
     } finally {
+        if (window.JobAbort) JobAbort.ended(connectionLost);
+        if (usage) DataUsage.end(usage, usageStatus);
+        activeJobs.delete(upAbort);
+        upAbort.abort();
         upscaleJobDone = true;
-        clearTimeout(upscalePollTimeout);
+        BgTimer.clear(upscalePollTimeout);
+        if (upOwnsNotification()) stopProgressService();
         if (btn) { btn.disabled = false; btn.innerText = oldText; }
         if (spinner) spinner.style.display = 'none';
         setAbortButtonState('abortInpGenBtn', false);
@@ -2480,6 +3117,65 @@ window.runUpscaleJob = async function() {
 // -----------------------------------------------------------
 // FULLSCREEN LIGHTBOX & ANALYSIS
 // -----------------------------------------------------------
+
+// The results strips (Generate tabs; Inpaint / img2img / Upscale) keep the newest results, as many as
+// Config > Interface > Recent Results Shown (1-100, 20 by default); older ones stay in the gallery.
+function resultStripLimit() {
+    const n = parseInt(localStorage.getItem('bojroResultStripLimit'), 10);
+    return n >= 1 && n <= 100 ? n : 20;
+}
+function trimResultStrip(gal) {
+    const limit = resultStripLimit();
+    gal.querySelectorAll('.gen-result').forEach((el, i) => { if (i >= limit) el.remove(); });
+}
+// Saved on leaving the box (not while typing, so "50" doesn't trim to 5 on the way), kept within 1-100. Both strips are trimmed to it.
+window.saveResultStripLimit = function(el) {
+    const typed = parseInt(el.value, 10);
+    const n = isNaN(typed) ? 20 : Math.min(100, Math.max(1, typed));
+    el.value = n;
+    localStorage.setItem('bojroResultStripLimit', String(n));
+    ['gallery', 'inpGallery'].forEach(id => { const g = document.getElementById(id); if (g) trimResultStrip(g); });
+};
+// A result's full image (an upscale may be shown from a screen-sized copy).
+const resultFullSrc = img => img.fullSrc || img.src;
+// A JPEG copy of an image at the given width, or null.
+function screenSizedCopy(dataUrl, width) {
+    return new Promise(resolve => {
+        const src = new Image();
+        src.onload = () => {
+            try {
+                const c = document.createElement('canvas');
+                c.width = width;
+                c.height = Math.max(1, Math.round(src.naturalHeight * width / src.naturalWidth));
+                const ctx = c.getContext('2d');
+                ctx.imageSmoothingQuality = 'high';
+                ctx.drawImage(src, 0, 0, c.width, c.height);
+                c.toBlob(blob => {
+                    if (!blob) return resolve(null);
+                    const reader = new FileReader();
+                    reader.onload = () => resolve(reader.result);
+                    reader.onerror = () => resolve(null);
+                    reader.readAsDataURL(blob);
+                }, 'image/jpeg', 0.92);
+            } catch (e) { resolve(null); }
+        };
+        src.onerror = () => resolve(null);
+        src.src = dataUrl;
+    });
+}
+
+// Width and height from a PNG data URL's header (IHDR); nothing for other formats.
+function setImageSizeFromPng(img, dataUrl) {
+    const m = /^data:image\/png;base64,/.exec(dataUrl || '');
+    if (!m) return;
+    try {
+        const b = atob(dataUrl.substr(m[0].length, 32));
+        const n = i => ((b.charCodeAt(i) << 24) | (b.charCodeAt(i + 1) << 16) | (b.charCodeAt(i + 2) << 8) | b.charCodeAt(i + 3)) >>> 0;
+        if (b.slice(12, 16) !== 'IHDR' || !n(16) || !n(20)) return;
+        img.width = n(16);
+        img.height = n(20);
+    } catch (e) { }
+}
 
 // Converts the tapped thumbnail's page index to its absolute position in the full dataset, so navigation crosses pages.
 window.openFullscreenFromGallery = function(index) {
@@ -2499,6 +3195,20 @@ window.openFullscreen = function(items, index) {
     updateLightboxImage();
     document.getElementById('fullScreenModal').classList.remove('hidden');
 }
+
+// While the viewer is open the app behind it is skipped (style.css), so a busy tab does not slow zoom and pan.
+;(function () {
+    const modal = document.getElementById('fullScreenModal');
+    if (modal) new MutationObserver(() => {
+        const open = !modal.classList.contains('hidden');
+        // Closed: the app is drawn again behind the viewer before it goes (coverUntilAppDrawn()).
+        if (!open && document.body.classList.contains('fs-viewer-open')) {
+            document.body.classList.remove('fs-viewer-open');
+            coverUntilAppDrawn(modal);
+        }
+        document.body.classList.toggle('fs-viewer-open', open);
+    }).observe(modal, { attributes: true, attributeFilter: ['class'] });
+})();
 
 window.updateLightboxImage = function() {
     if (currentGalleryImages.length > 0 && currentGalleryImages[currentGalleryIndex]) {
@@ -2549,9 +3259,9 @@ window.setupLightboxSwipe = function() {
     let isPinching = false;
     let pinchStartDist = 0;
     let pinchStartScale = 1;
-    // Captured at pinch start so pan is recalculated relative to where the gesture began and stops cleanly at the scale cap.
-    let pinchStartPanX = 0;
-    let pinchStartPanY = 0;
+    // Image point kept under the pinch midpoint.
+    let pinchAnchorX = 0;
+    let pinchAnchorY = 0;
     let isPanning = false;
     let panStartX = 0;
     let panStartY = 0;
@@ -2565,6 +3275,9 @@ window.setupLightboxSwipe = function() {
     let lastTapTime = 0;
     let lastTapX = 0;
     let lastTapY = 0;
+    // A single tap away from the edges hides/shows the toolbar and status bar (after the double-tap window).
+    let tapCandidate = null;
+    let pendingToggle = null;
 
     // Cache once - avoids 3x getElementById() per touchmove
     const container = document.getElementById('lightboxContainer');
@@ -2621,6 +3334,27 @@ window.setupLightboxSwipe = function() {
         img.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
     }
 
+    // Tapping the image hides or shows the toolbar; Android's status bar stays hidden while the viewer is open (below).
+    window.setLightboxImmersive = function(on) {
+        const modal = document.getElementById('fullScreenModal');
+        if (!modal || modal.classList.contains('fs-immersive') === on) return;
+        modal.classList.toggle('fs-immersive', on);
+        // The image area changes size, so a zoomed image is re-clamped.
+        requestAnimationFrame(() => { if (scale > 1) { clampPan(); applyZoomTransform(false); } });
+    };
+    // The status bar is hidden while the viewer is open, so a tall image never sits under it; leaving the viewer by any
+    // route brings it and the toolbar back.
+    let viewerOpen = false;
+    new MutationObserver(() => {
+        const modal = document.getElementById('fullScreenModal');
+        const open = !modal.classList.contains('hidden');
+        if (!open) window.setLightboxImmersive(false);
+        if (open === viewerOpen) return;
+        viewerOpen = open;
+        const p = window.Capacitor?.Plugins?.ResolverDevice?.setStatusBarHidden?.({ hidden: open });
+        if (p && p.catch) p.catch(() => {});
+    }).observe(document.getElementById('fullScreenModal'), { attributes: true, attributeFilter: ['class'] });
+
     window.resetLightboxZoom = function(animate) {
         scale = 1;
         panX = 0;
@@ -2632,6 +3366,12 @@ window.setupLightboxSwipe = function() {
         const dx = t1.clientX - t2.clientX;
         const dy = t1.clientY - t2.clientY;
         return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    // Pinch midpoint relative to the container centre.
+    let pinchCentreX = 0, pinchCentreY = 0;
+    function touchMid(t1, t2) {
+        return { x: (t1.clientX + t2.clientX) / 2 - pinchCentreX, y: (t1.clientY + t2.clientY) / 2 - pinchCentreY };
     }
 
     function onStart(x) {
@@ -2706,16 +3446,23 @@ window.setupLightboxSwipe = function() {
     }
 
     container.addEventListener('touchstart', (e) => {
-        e.preventDefault();
+        if (e.cancelable) e.preventDefault();
+        // Any new touch (second tap, pinch) cancels a pending show/hide.
+        clearTimeout(pendingToggle);
         if (e.touches.length === 2) {
+            tapCandidate = null;
             isDragging = false; // cancel any in-progress swipe drag
             // Also cancels any in-progress pan so a stale edge tap can't fire after a pinch.
             isPanning = false;
             isPinching = true;
             pinchStartDist = touchDist(e.touches[0], e.touches[1]);
             pinchStartScale = scale;
-            pinchStartPanX = panX;
-            pinchStartPanY = panY;
+            const cr = container.getBoundingClientRect();
+            pinchCentreX = cr.left + cr.width / 2;
+            pinchCentreY = cr.top + cr.height / 2;
+            const mid = touchMid(e.touches[0], e.touches[1]);
+            pinchAnchorX = (mid.x - panX) / scale;
+            pinchAnchorY = (mid.y - panY) / scale;
             return;
         }
         if (e.touches.length !== 1) return;
@@ -2731,6 +3478,7 @@ window.setupLightboxSwipe = function() {
         lastTapTime = now;
         lastTapX = t.clientX;
         lastTapY = t.clientY;
+        tapCandidate = isDoubleTap ? null : { x: t.clientX, y: t.clientY, time: now, edge: nearEdgeForDoubleTap };
 
         if (isDoubleTap) {
             lastTapTime = 0; // consumed - don't let a 3rd tap chain into another toggle
@@ -2769,16 +3517,17 @@ window.setupLightboxSwipe = function() {
     }, { passive: false });
 
     container.addEventListener('touchmove', (e) => {
-        e.preventDefault();
+        if (e.cancelable) e.preventDefault();
+        if (tapCandidate && e.touches.length === 1 && Math.max(Math.abs(e.touches[0].clientX - tapCandidate.x), Math.abs(e.touches[0].clientY - tapCandidate.y)) >= TAP_MOVE_THRESHOLD) tapCandidate = null;
         if (isPinching && e.touches.length === 2) {
             const newDist = touchDist(e.touches[0], e.touches[1]);
             // Clamps the scale before recalculating pan.
             const rawScale = pinchStartScale * (newDist / pinchStartDist);
             scale = Math.max(1, Math.min(getMaxScale(), rawScale));
-            const effectiveScaleFactor = scale / pinchStartScale;
-            // Zooms around the image centre; recalculated from the pinch's starting pan each move.
-            panX = pinchStartPanX * effectiveScaleFactor;
-            panY = pinchStartPanY * effectiveScaleFactor;
+            // Zooms around the pinch point and pans with the fingers.
+            const mid = touchMid(e.touches[0], e.touches[1]);
+            panX = mid.x - scale * pinchAnchorX;
+            panY = mid.y - scale * pinchAnchorY;
             clampPan();
             applyZoomTransform(false);
             return;
@@ -2802,7 +3551,18 @@ window.setupLightboxSwipe = function() {
     }, { passive: false });
 
     container.addEventListener('touchend', (e) => {
-        e.preventDefault();
+        if (e.cancelable) e.preventDefault();
+        if (tapCandidate && e.touches.length === 0) {
+            if (!tapCandidate.edge && Date.now() - tapCandidate.time < 500) {
+                clearTimeout(pendingToggle);
+                pendingToggle = setTimeout(() => {
+                    const modal = document.getElementById('fullScreenModal');
+                    // Not if the viewer closed in the meantime.
+                    if (!modal.classList.contains('hidden')) window.setLightboxImmersive(!modal.classList.contains('fs-immersive'));
+                }, DOUBLE_TAP_MAX_DELAY);
+            }
+            tapCandidate = null;
+        }
         if (isPinching) {
             isPinching = false;
             if (scale <= 1.02) window.resetLightboxZoom(true); // snap back if barely zoomed
@@ -2838,6 +3598,7 @@ window.setupLightboxSwipe = function() {
 
     // Handles touchcancel by abandoning the gesture.
     container.addEventListener('touchcancel', () => {
+        tapCandidate = null;
         isDragging = false;
         isPanning = false;
         isPinching = false;
@@ -3000,9 +3761,11 @@ function navigateToControlNetUnit(mode, unit, fromFullscreen) {
     }
     ensureGenericSectionOpen(`grp-${mode}-cn`, `arr-${mode}-cn`, `bojro_vis_${mode}_cn`);
     if (typeof window.selectControlNetUnit === 'function') window.selectControlNetUnit(mode, unit);
-    const target = document.getElementById(`${mode}_cn_${unit}_fields`) || document.getElementById(`${mode}ControlnetGroup`);
+    const target = document.getElementById(`${mode}ControlnetGroup`);
+    if (!target) return;
     // Instant scroll, regardless of any page-wide scroll-behavior.
-    if (target) target.scrollIntoView({ behavior: 'instant', block: 'start' });
+    target.scrollIntoView({ behavior: 'instant', block: 'start' });
+    requestAnimationFrame(() => target.scrollIntoView({ behavior: 'instant', block: 'start' }));
 }
 
 window.handleFileSelect = e => {

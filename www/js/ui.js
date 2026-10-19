@@ -35,13 +35,19 @@ window.normalizeSeedField = function(el) {
 // The 5 modes with both a CFG field and a negative prompt (Flux has no negative). Inpaint and img2img share the 'inp' fields.
 const NEG_PROMPT_CFG_MODES = ['xl', 'anima', 'qwen', 'krea', 'inp'];
 
-// At CFG 1 the negative prompt has no effect; grey out its text (the field stays editable).
+// At CFG 1 the negative prompt has no effect: dimmed and not editable until the CFG changes.
 window.updateNegPromptDimming = function(mode) {
     const cfgEl = document.getElementById(`${mode}_cfg`);
     const negEl = document.getElementById(`${mode}_neg`);
     if (!cfgEl || !negEl) return;
     const isInert = parseFloat(cfgEl.value) === 1;
     negEl.classList.toggle('neg-prompt-inert', isInert);
+    if (isInert) {
+        negEl.setAttribute('tabindex', '-1');
+        if (document.activeElement === negEl) negEl.blur();
+    } else {
+        negEl.removeAttribute('tabindex');
+    }
 }
 
 window.toggleTheme = function() {
@@ -210,23 +216,28 @@ function updateInpFluxModuleVisibility(mode) {
 }
 
 window.saveSelection = function(key) {
-    if (key === 'xl') localStorage.setItem('bojroModel_xl', document.getElementById('xl_modelSelect').value);
+    if (key === 'xl') {
+        localStorage.setItem('bojroModel_xl', document.getElementById('xl_modelSelect').value);
+        if (typeof applyCheckpointSelection === 'function') applyCheckpointSelection('xl', document.getElementById('xl_modelSelect').value);
+        if (typeof refreshLowBitsControls === 'function') refreshLowBitsControls();
+    }
     else if (key === 'flux') {
         localStorage.setItem('bojroModel_flux', document.getElementById('flux_modelSelect').value);
-        if (typeof applyModulePairing === 'function') applyModulePairing('flux', document.getElementById('flux_modelSelect').value);
+        if (typeof applyCheckpointSelection === 'function') applyCheckpointSelection('flux', document.getElementById('flux_modelSelect').value);
+        if (typeof refreshLowBitsControls === 'function') refreshLowBitsControls();
     }
     else if (key === 'inp') {
         localStorage.setItem('bojroModel_inp', document.getElementById('inp_modelSelect').value);
         if (typeof updateInpaintNegativePromptVisibility === 'function') updateInpaintNegativePromptVisibility();
         if (typeof updateInpFluxModuleVisibility === 'function') updateInpFluxModuleVisibility('inp');
-        if (typeof applyModulePairing === 'function') applyModulePairing('inp', document.getElementById('inp_modelSelect').value);
+        if (typeof applyCheckpointSelection === 'function') applyCheckpointSelection('inp', document.getElementById('inp_modelSelect').value);
         if (typeof refreshLowBitsControls === 'function') refreshLowBitsControls();
     }
     else if (key === 'img2img') {
         localStorage.setItem('bojroModel_img2img', document.getElementById('img2img_modelSelect').value);
         if (typeof updateInpaintNegativePromptVisibility === 'function') updateInpaintNegativePromptVisibility();
         if (typeof updateInpFluxModuleVisibility === 'function') updateInpFluxModuleVisibility('img2img');
-        if (typeof applyModulePairing === 'function') applyModulePairing('img2img', document.getElementById('img2img_modelSelect').value);
+        if (typeof applyCheckpointSelection === 'function') applyCheckpointSelection('img2img', document.getElementById('img2img_modelSelect').value);
         if (typeof refreshLowBitsControls === 'function') refreshLowBitsControls();
     }
     else if (key === 'img2img_vae') localStorage.setItem('bojro_img2img_vae', document.getElementById('img2img_vae').value);
@@ -245,17 +256,20 @@ window.saveSelection = function(key) {
     else if (key === 'inp_sampler') localStorage.setItem('bojro_inp_sampler', document.getElementById('inp_sampler').value);
     else if (key === 'qwen') {
         localStorage.setItem('bojroModel_qwen', document.getElementById('qwen_modelSelect').value);
-        if (typeof applyModulePairing === 'function') applyModulePairing('qwen', document.getElementById('qwen_modelSelect').value);
+        if (typeof applyCheckpointSelection === 'function') applyCheckpointSelection('qwen', document.getElementById('qwen_modelSelect').value);
+        if (typeof refreshLowBitsControls === 'function') refreshLowBitsControls();
     }
     else if (key === 'anima') {
         localStorage.setItem('bojroModel_anima', document.getElementById('anima_modelSelect').value);
-        if (typeof applyModulePairing === 'function') applyModulePairing('anima', document.getElementById('anima_modelSelect').value);
+        if (typeof applyCheckpointSelection === 'function') applyCheckpointSelection('anima', document.getElementById('anima_modelSelect').value);
+        if (typeof refreshLowBitsControls === 'function') refreshLowBitsControls();
     }
     else if (key === 'anima_vae') localStorage.setItem('bojro_anima_vae', document.getElementById('anima_vae').value);
     else if (key === 'anima_te') localStorage.setItem('bojro_anima_te', document.getElementById('anima_te').value);
     else if (key === 'krea') {
         localStorage.setItem('bojroModel_krea', document.getElementById('krea_modelSelect').value);
-        if (typeof applyModulePairing === 'function') applyModulePairing('krea', document.getElementById('krea_modelSelect').value);
+        if (typeof applyCheckpointSelection === 'function') applyCheckpointSelection('krea', document.getElementById('krea_modelSelect').value);
+        if (typeof refreshLowBitsControls === 'function') refreshLowBitsControls();
     }
     else if (key === 'krea_vae') localStorage.setItem('bojro_krea_vae', document.getElementById('krea_vae').value);
     else if (key === 'krea_te') localStorage.setItem('bojro_krea_te', document.getElementById('krea_te').value);
@@ -271,27 +285,158 @@ function extractLoraTags(text) {
     return new Set(Array.from(matches, m => m[1].toLowerCase()));
 }
 
-// Removes duplicate comma-separated tags from a prompt/negative box, keeping the first occurrence and the order (exact match after trimming, as StyleManager's dedupe). Empty entries are dropped but not counted. Returns the number of duplicates removed, or 0 and leaves the field untouched. (LoRA-change unload logic is in runJob(); see lastGeneratedLoraSet, globals.js.)
+// Removes duplicate tags, matched loosely (normaliseTag(), so "smile" and "(smile:1.2)" are one tag). The first is kept, in its
+// place, but takes a later copy's weight if it has none. Commas and line breaks both separate tags; a removed tag's
+// separator merges into the one before it, so line breaks are kept. Prompt keywords (BREAK, AND...) and numbers can repeat,
+// and part of a bracket group spanning commas ("(smile, happy:1.2)") is never touched. Returns the count.
+const REPEATABLE_TAG = /^(AND|BREAK|ADDROW|ADDCOL|-?\d+(\.\d+)?)$/;
+function mergeTagSeparators(a, b) {
+    const lines = Math.max((a.match(/\n/g) || []).length, (b.match(/\n/g) || []).length);
+    const comma = (a + b).includes(',');
+    return lines ? (comma ? ',' : '') + '\n'.repeat(lines) : (comma ? ', ' : ' ');
+}
 function removeDuplicateTagsFrom(el) {
     if (!el || !el.value) return 0;
-    const tags = el.value.split(',').map(t => t.trim()).filter(Boolean);
-    const seen = new Set();
-    const deduped = [];
+    const pieces = el.value.split(/(\s*[,\n][\s,]*)/);
+    const seen = new Map(); // normalised tag -> its kept item
+    const kept = [];
     let removedCount = 0;
-    for (const tag of tags) {
-        if (seen.has(tag)) {
+    const weighted = t => /^[([]/.test(t) && /[)\]]$/.test(t);
+    for (let i = 0; i < pieces.length; i += 2) {
+        const item = { tag: pieces[i], sep: pieces[i + 1] || '' };
+        const tag = item.tag.trim();
+        const whole = tag && !REPEATABLE_TAG.test(tag) && repairTagBrackets(tag) === tag;
+        const key = whole ? normaliseTag(tag) : null;
+        const first = key && seen.get(key);
+        if (first && kept.length) {
+            if (weighted(tag) && !weighted(first.tag.trim())) first.tag = first.tag.replace(first.tag.trim(), tag);
+            const prev = kept[kept.length - 1];
+            prev.sep = mergeTagSeparators(prev.sep, item.sep);
             removedCount++;
-        } else {
-            seen.add(tag);
-            deduped.push(tag);
+            continue;
         }
+        if (key) seen.set(key, item);
+        kept.push(item);
     }
-    if (removedCount > 0) {
-        // join(', ') drops a trailing comma left by a LoRA/style (withTrailingComma(), utils.js), so keep it if the box had one.
-        const hadTrailingComma = /,\s*$/.test(el.value);
-        el.value = deduped.join(', ') + (hadTrailingComma && deduped.length ? ', ' : '');
-    }
+    // Trailing whitespace goes, as before; a closing comma stays as ", " (and isn't added by a removal).
+    const closing = /,\s*$/.test(el.value);
+    if (removedCount > 0) el.value = kept.map(t => t.tag + t.sep).join('').replace(/[\s,]+$/, '') + (closing ? ', ' : '');
     return removedCount;
+}
+
+const promptFormatOn = () => localStorage.getItem('bojroPromptFormat') === 'true';
+const promptFormatOnBlur = () => promptFormatOn() && localStorage.getItem('bojroPromptFormatOnBlur') === 'true';
+
+// Tags a LoRA or Character Select adds, formatted as the box would be (Prompt Auto-Formatting on). Only what goes into the
+// box changes; the LoRA's config and the character list stay as they are.
+window.formatInsertedTags = function(text, mode) {
+    if (!text || !promptFormatOn()) return text;
+    return formatPromptText(text, usesAutoComma(normalizeDedupeMode(mode)));
+};
+
+// Pony's own tags keep their underscores (score_9, source_anime, rating_safe), as do one-letter faces (o_o).
+const KEEP_UNDERSCORE = /^(score|source|rating)_|^\p{L}_\p{L}$/iu;
+// Embedding names, whose underscores stay too (saved by fetchEmbeddingNames(), network.js).
+let promptEmbeddingNames = new Set();
+try { promptEmbeddingNames = new Set(JSON.parse(localStorage.getItem('bojroEmbeddingNames') || '[]')); } catch (e) {}
+
+// "(blue eyes : 1.2)" -> "(blue eyes:1.2)": spaces around ":" go only inside ( ) or [ ], so "Note: text" is left alone.
+function tightenBracketColons(line) {
+    let depth = 0, out = '';
+    for (let i = 0; i < line.length; i++) {
+        const c = line[i];
+        if ((c === '(' || c === '[') && line[i - 1] !== '\\') depth++;
+        else if ((c === ')' || c === ']') && line[i - 1] !== '\\') depth = Math.max(0, depth - 1);
+        if (c === ':' && depth > 0) {
+            out = out.replace(/[ \t]+$/, '') + ':';
+            while (line[i + 1] === ' ' || line[i + 1] === '\t') i++;
+            continue;
+        }
+        out += c;
+    }
+    return out;
+}
+
+// Spacing fixes, line by line so line breaks stay; <...> (LoRAs) is left alone. Spaces after commas, none before them,
+// inside brackets or doubled; empty tags and empty brackets go, and a comma inside a bracket moves out of it.
+// tagStyle (SDXL/Anima tags): a period beside a comma goes, one between letters is a missed space, underscores between
+// letters become spaces, spaces around "|", and around ":" inside brackets (weights), go, and "name (series)" brackets
+// are escaped so Forge reads them as text. Otherwise (natural language) a missing space after a full stop is added.
+function formatPromptText(text, tagStyle) {
+    const loras = [];
+    // Empty lines go first (collapseBlankLines(), utils.js, keeps a comma-only line's comma), and any a rule below empties after.
+    const s = collapseBlankLines(String(text == null ? '' : text)).replace(/<[^<>\n]*>/g, m => `\u0000${loras.push(m) - 1}\u0000`);
+    const out = s.split('\n').map(line => {
+        // A "..." tag is held aside so the full-stop rules leave it alone.
+        if (tagStyle) line = repairTagBrackets(line).replace(ELLIPSIS_TAG, '$1$2\u0001').replace(STOP_RUN, '$1.');
+        // Brackets first, so what an empty one leaves behind is tidied by the rules below.
+        for (let prev = null; prev !== line;) {
+            prev = line;
+            line = line
+                .replace(/([([])[ \t]+/g, '$1')
+                .replace(/[ \t]+([)\]])/g, '$1')
+                .replace(/,+[ \t]*([)\]])/g, '$1,')
+                .replace(/(^|[^\\])([([])[ \t]*,+/g, '$1,$2')
+                .replace(/(^|[^\\])(\([ \t]*\)|\[[ \t]*\])/g, '$1');
+        }
+        if (tagStyle) {
+            // A stray full stop beside a comma or before a weight or closing bracket goes, and one followed by a space becomes
+            // a comma; repeated until none is left (",. .tag"). Initials and titles keep theirs (strayFullStop(), utils.js).
+            const stray = (m, pre, i, str) => strayFullStop(str.slice(0, i) + pre);
+            for (let prev = null; prev !== line;) {
+                prev = line;
+                line = line
+                    .replace(/([^\s,([])[ \t]+\.+[ \t]+(?=[^\s\d,.])/g, '$1, ')
+                    .replace(LOOSE_STOPS, '$1')
+                    .replace(STOP_RUN, '$1.')
+                    .replace(/(^|[^.])\.(?=[ \t]*\\?[,:)\]])/g, (...a) => stray(...a) ? a[1] : a[0])
+                    .replace(/,([ \t]*)\.(?![.\d])/g, ',$1')
+                    .replace(/(^|[^.])\.[ \t]+(?=[^\s\d,.:)\]])/g, (...a) => stray(...a) ? `${a[1]}, ` : a[0])
+                    .replace(/([([])[ \t]+/g, '$1')
+                    .replace(/[ \t]+([)\]])/g, '$1');
+            }
+            line = line
+                // Between words, not initials ("smile.blue eyes" but not "d.va").
+                .replace(/(\p{L}{2})\.(?=\p{L}{2})/gu, '$1 ')
+                .replace(/[ \t]*_[ \t]*/g, '_')
+                .replace(/[\p{L}\p{N}_]*_[\p{L}\p{N}_]*/gu, w => KEEP_UNDERSCORE.test(w) || promptEmbeddingNames.has(w.toLowerCase()) ? w : w.replace(/(\p{L})_(?=\p{L})/gu, '$1 '))
+                .replace(/[ \t]*\|[ \t]*/g, '|');
+        } else {
+            // ",." keeps the comma and ".," the full stop (not before a digit or another full stop, as in ",.5" or ",...").
+            for (let prev = null; prev !== line;) {
+                prev = line;
+                line = line.replace(/,([ \t]*)\.(?![.\d])/g, ',$1').replace(/\.[ \t]*,/g, '.');
+            }
+            // No space before a full stop ("cat ." -> "cat."), and one after it (two letters before it, so "e.g." stays).
+            line = line.replace(/(?<=\S)[ \t]+\.(?![.\d])/g, '.').replace(/(\p{L}{2})\.(?=\p{L})/gu, '$1. ');
+        }
+        line = line
+            .replace(/[ \t]+,/g, ',')
+            .replace(/,(?:[ \t]*,)+/g, ',')
+            .replace(/^[ \t]*,[ \t]*/, '')
+            // Not between digits ("1,000").
+            .replace(/,(?=[^\s,])/g, (m, i, str) => /\d/.test(str[i - 1] || '') && /\d/.test(str[i + 1]) ? m : ', ')
+            .replace(/[ \t]{2,}/g, ' ')
+            .replace(/[ \t]+$/, '');
+        if (tagStyle) {
+            // "2b (nier automata)" or "2b_(nier automata)" -> "2b \(nier automata\)"; a bracket with a weight ("(smile:1.2)") stays emphasis.
+            // Repeated, so a second bracket after an escaped one is escaped too.
+            for (let prev = null; prev !== line;) {
+                prev = line;
+                line = line.replace(/([\p{L}\p{N}.]|\\\))([ _]?)\(([^()\\\n]+)\)/gu, (m, a, sp, inner, i, str) =>
+                    /:\s*-?\d*\.?\d+\s*$/.test(inner) || (a === '.' && strayFullStop(str.slice(0, i))) ? m : `${a}${sp && ' '}\\(${inner}\\)`);
+            }
+            line = tightenBracketColons(line).replace(/\u0001/g, '...');
+        }
+        return line;
+    }).map(line => line.replace(/^[ \t]+|[ \t]+$/g, '')).filter(line => !/^[\s,]*$/.test(line)).join('\n');
+    // Tags: a full stop at the very end would sit before the closing comma, so it goes as one beside a comma does.
+    let end = out;
+    for (let prev = null; tagStyle && prev !== end;) {
+        prev = end;
+        end = end.replace(/(^|[^.])\.(\s*)$/, (m, pre, sp, i, str) => strayFullStop(str.slice(0, i) + pre) ? pre + sp : m).replace(/[ \t]+$/, '');
+    }
+    return end.replace(/\u0000(\d+)\u0000/g, (m, i) => loras[+i]);
 }
 
 // Tag-style prompt modes only (xl, anima, inp/img2img via 'inp'); flux/qwen/krea are natural-language. img2img shares inp_prompt/inp_neg.
@@ -305,7 +450,7 @@ const AUTO_COMMA_MODES = ['xl', 'anima'];
 function usesAutoComma(realMode) {
     if (AUTO_COMMA_MODES.includes(realMode)) return true;
     if (realMode !== 'inp') return false;
-    const checkpoint = document.getElementById('inp_modelSelect')?.value;
+    const checkpoint = currentInpModelTitle();
     return !!(checkpoint && window.LoraManager && AUTO_COMMA_MODES.includes(window.LoraManager.detectCheckpointArchitecture(checkpoint)));
 }
 
@@ -318,35 +463,82 @@ function ensureTrailingCommaOn(el) {
     return true;
 }
 
-// Wired to each in-scope box's onblur. Generate without leaving the box is handled in generate() via dedupePromptTagsForMode().
+// One box: formatPromptText(), then in tag-style modes duplicate tags and the closing comma. Returns the duplicates removed and whether it changed.
+function tidyPromptBox(el, realMode) {
+    if (!el || !el.value) return { removed: 0, changed: false };
+    const before = el.value;
+    const tagStyle = usesAutoComma(realMode);
+    const dedupe = DEDUPE_TAG_MODES.includes(realMode);
+    // Format, then remove duplicates; a removal can leave something new to tidy (or a new duplicate), so it repeats while it does.
+    let removed = 0;
+    for (let i = 0; i < 4; i++) {
+        const formatted = formatPromptText(el.value, tagStyle);
+        if (formatted !== el.value) el.value = formatted;
+        const r = dedupe ? removeDuplicateTagsFrom(el) : 0;
+        removed += r;
+        if (!r) break;
+    }
+    if (tagStyle) {
+        ensureTrailingCommaOn(el);
+        // A closing comma left with no space after it ("smile.," tidied to "smile,") gets the usual ", ".
+        if (el.value.endsWith(',')) el.value += ' ';
+    }
+    return { removed, changed: el.value !== before };
+}
+
+// On leaving a prompt/negative box (inline onblur, or the listener below for Flux/Qwen/Krea), with Format On Leaving Text Box on.
+// Generate without leaving the box is handled in generate() via dedupePromptTagsForMode().
 window.dedupePromptTagsOnBlur = function(mode, field) {
-    if (!DEDUPE_TAG_MODES.includes(mode)) return;
+    if (!promptFormatOnBlur()) return;
     const realMode = normalizeDedupeMode(mode);
-    const el = document.getElementById(`${realMode}_${field}`);
-    const removed = removeDuplicateTagsFrom(el);
-    const commaAdded = usesAutoComma(realMode) && ensureTrailingCommaOn(el);
-    if (removed > 0 || commaAdded) {
+    const { removed, changed } = tidyPromptBox(document.getElementById(`${realMode}_${field}`), realMode);
+    if (changed) {
         if (field === 'prompt') { savePrompt(realMode); } else { saveNegativePrompt(realMode); }
         if (realMode === 'inp' && typeof saveCurrentInpaintModeStateLive === 'function') saveCurrentInpaintModeStateLive();
     }
     if (removed > 0 && Toast) Toast.show({ text: `Removed ${removed} duplicate prompt${removed === 1 ? '' : 's'}`, duration: 'short' });
 }
 
-// Called from generate() before building the job: checks the prompt and negative together and shows a single toast.
+// Same tidy-up for ADetailer prompt/negative boxes.
+const AD_TAG_FIELD_RE = /^(xl|flux|qwen|anima|krea|inp|img2img)_adetailer_(\d+)_(prompt|neg)$/;
+function tidyAdetailerBoxes(prefix, enabledOnly, onlyEl) {
+    const realMode = normalizeDedupeMode(prefix);
+    let removed = 0, changed = false;
+    for (let n = 1; n <= 8; n++) {
+        if (enabledOnly && !document.getElementById(`${prefix}_adetailer_${n}_enable`)?.checked) continue;
+        ['prompt', 'neg'].forEach(field => {
+            const el = document.getElementById(`${prefix}_adetailer_${n}_${field}`);
+            if (!el || (onlyEl && el !== onlyEl)) return;
+            const r = tidyPromptBox(el, realMode);
+            removed += r.removed;
+            if (r.changed) changed = true;
+        });
+    }
+    if (changed && typeof saveAdetailer === 'function') saveAdetailer(prefix);
+    return removed;
+}
+
+document.addEventListener('focusout', (e) => {
+    if (!promptFormatOnBlur()) return;
+    const main = e.target && e.target.id && /^(flux|qwen|krea)_(prompt|neg)$/.exec(e.target.id);
+    if (main) { window.dedupePromptTagsOnBlur(main[1], main[2]); return; }
+    const m = e.target && e.target.id && AD_TAG_FIELD_RE.exec(e.target.id);
+    if (!m) return;
+    const removed = tidyAdetailerBoxes(m[1], false, e.target);
+    if (removed > 0 && Toast) Toast.show({ text: `Removed ${removed} duplicate prompt${removed === 1 ? '' : 's'}`, duration: 'short' });
+});
+
+// Run before building a job (with Prompt Auto-Formatting on): prompt, negative and enabled ADetailer passes, one toast.
 window.dedupePromptTagsForMode = function(mode) {
-    if (!DEDUPE_TAG_MODES.includes(mode)) return;
+    if (!promptFormatOn()) return;
     const realMode = normalizeDedupeMode(mode);
-    const promptEl = document.getElementById(`${realMode}_prompt`);
-    const negEl = document.getElementById(`${realMode}_neg`);
-    const removedPrompt = removeDuplicateTagsFrom(promptEl);
-    const removedNeg = removeDuplicateTagsFrom(negEl);
-    const autoComma = usesAutoComma(realMode);
-    const commaPrompt = autoComma && ensureTrailingCommaOn(promptEl);
-    const commaNeg = autoComma && ensureTrailingCommaOn(negEl);
-    const total = removedPrompt + removedNeg;
-    if (removedPrompt > 0 || commaPrompt) savePrompt(realMode);
-    if (removedNeg > 0 || commaNeg) saveNegativePrompt(realMode);
-    if ((total > 0 || commaPrompt || commaNeg) && realMode === 'inp' && typeof saveCurrentInpaintModeStateLive === 'function') saveCurrentInpaintModeStateLive();
+    const p = tidyPromptBox(document.getElementById(`${realMode}_prompt`), realMode);
+    const n = tidyPromptBox(document.getElementById(`${realMode}_neg`), realMode);
+    const adPrefix = realMode === 'inp' && (mode === 'img2img' || currentInpaintTopMode === 'img2img') ? 'img2img' : mode;
+    const total = p.removed + n.removed + tidyAdetailerBoxes(adPrefix, true);
+    if (p.changed) savePrompt(realMode);
+    if (n.changed) saveNegativePrompt(realMode);
+    if ((total > 0 || p.changed || n.changed) && realMode === 'inp' && typeof saveCurrentInpaintModeStateLive === 'function') saveCurrentInpaintModeStateLive();
     if (total > 0 && Toast) Toast.show({ text: `Removed ${total} duplicate prompt${total === 1 ? '' : 's'}`, duration: 'short' });
 }
 
@@ -1039,6 +1231,7 @@ function loadLlmSettings() {
             if (sel) {
                 sel.innerHTML = `<option value="${escapeHtmlAttr(llmSettings.model)}">${escapeHtmlAttr(llmSettings.model)}</option>`;
                 sel.value = llmSettings.model;
+                if (typeof updateModelPickerTriggerText === 'function') updateModelPickerTriggerText('llmModelSelect');
             }
         }
     }
@@ -1287,6 +1480,15 @@ window.initGlobalUiState = function() {
     initGenericSectionClosed('cfg-sys', 'arr-cfg-sys', 'bojro_vis_cfg_sys');
 }
 
+// Auto-Collapse Config Sections: switching it on closes every open Config section but Interface (where the switch is).
+window.setCfgOneSection = function(on) {
+    localStorage.setItem('bojroCfgOneSection', on ? 'true' : 'false');
+    if (!on) return;
+    document.querySelectorAll('#view-cfg .cfg-accordion-content:not(.hidden)').forEach(section => {
+        if (section.id !== 'cfg-interface') toggleGeneric(section.id, 'arr-' + section.id, 'bojro_vis_' + section.id.replace(/-/g, '_'));
+    });
+};
+
 // --- GENERIC SECTION TOGGLER (PERSISTENT) ---
 // initGenericSection()/initGenericSectionClosed() live in an early inline <script> after <body> opens, because sections call them before this file loads.
 
@@ -1296,7 +1498,25 @@ window.toggleGeneric = function(contentId, arrowId, storageKey) {
     const isHidden = content.classList.contains('hidden');
 
     if (isHidden) {
+        // Auto-Collapse Config Sections (Config > Interface): close the other open Config section as this one opens.
+        if (content.classList.contains('cfg-accordion-content') && localStorage.getItem('bojroCfgOneSection') === 'true') {
+            document.querySelectorAll('#view-cfg .cfg-accordion-content:not(.hidden)').forEach(other => {
+                if (other === content) return;
+                toggleGeneric(other.id, 'arr-' + other.id, 'bojro_vis_' + other.id.replace(/-/g, '_'));
+            });
+        }
         content.classList.remove('hidden');
+        // Keep the opened section in view: its header no higher than the top (a section closing above moves it up),
+        // and as much of its content as fits above the dock.
+        if (localStorage.getItem('bojroCfgOneSection') === 'true' && content.classList.contains('cfg-accordion-content')) {
+            const headerTop = content.previousElementSibling?.getBoundingClientRect().top ?? 0;
+            const dockTop = document.querySelector('.glass-dock')?.getBoundingClientRect().top ?? window.innerHeight;
+            const hiddenBelow = content.getBoundingClientRect().bottom - (dockTop - 8);
+            let by = 0;
+            if (headerTop < 8) by = headerTop - 8;
+            else if (hiddenBelow > 0) by = Math.min(hiddenBelow, headerTop - 8);
+            if (by) window.scrollBy({ top: by, behavior: 'instant' });
+        }
         arrow.style.transform = 'rotate(0deg)'; 
         localStorage.setItem(storageKey, 'open');
     } else {
@@ -1308,6 +1528,138 @@ window.toggleGeneric = function(contentId, arrowId, storageKey) {
 
 
 // Add this at the very bottom of ui.js
+// Caps a list in a window at the whole rows that fit on screen: no part row at the bottom and none peeking in.
+// perRow is the number of items per row (3 for the SAAC grid). Re-run on resize, as the keyboard changes the room.
+window.fitListToWholeRows = function (list, items, perRow = 1) {
+    const wrap = list && list.parentElement;
+    const content = list && list.closest('.modal-content');
+    if (!wrap || !content || !content.getClientRects().length) return;
+    if (items.length <= perRow) { wrap.style.maxHeight = ''; return; }
+    const first = items[0].getBoundingClientRect();
+    const stride = items[perRow].getBoundingClientRect().top - first.top;
+    if (!(stride > 0) || !(first.height > 0)) return;
+    const gap = Math.max(0, stride - first.height);
+    const padTop = first.top - list.getBoundingClientRect().top + list.scrollTop;
+    const cs = getComputedStyle(content);
+    let maxContent = parseFloat(cs.maxHeight);
+    if (cs.maxHeight.endsWith('%')) {
+        const ps = getComputedStyle(content.parentElement);
+        maxContent = maxContent / 100 * (content.parentElement.clientHeight - parseFloat(ps.paddingTop) - parseFloat(ps.paddingBottom));
+    }
+    const box = content.getBoundingClientRect();
+    maxContent = Math.min(maxContent > 0 ? maxContent : Infinity, window.innerHeight - box.top - 10);
+    const room = maxContent - (box.height - wrap.getBoundingClientRect().height);
+    // Space under the last item; the slack below the last whole row is chosen so the list is clean at both ends of its scroll.
+    const last = items[items.length - 1].getBoundingClientRect();
+    const endPad = list.scrollHeight - (last.bottom - list.getBoundingClientRect().top + list.scrollTop);
+    const low = Math.max(0, endPad - padTop), high = Math.min(gap, gap + endPad - padTop);
+    const slack = low <= high ? (low + high) / 2 : gap / 2;
+    const rows = Math.max(1, Math.floor((room - padTop - first.height - slack) / stride) + 1);
+    wrap.style.maxHeight = Math.round(padTop + (rows - 1) * stride + first.height + slack) + 'px';
+};
+
+let fitListsTimer = 0;
+window.addEventListener('resize', () => {
+    clearTimeout(fitListsTimer);
+    fitListsTimer = setTimeout(() => {
+        if (window.LoraManager) window.LoraManager.fitListHeight();
+        if (window.StyleManager) window.StyleManager.fitListHeight();
+        if (window.SaacManager && typeof window.SaacManager.refitGrid === 'function') window.SaacManager.refitGrid();
+        if (typeof fitCheckpointListHeight === 'function') fitCheckpointListHeight();
+        if (typeof fitDataUsageListHeight === 'function') fitDataUsageListHeight();
+    }, 150);
+});
+
 if (window.StyleManager && typeof window.StyleManager.init === 'function') {
     window.StyleManager.init();
 }
+// Draggable scroll thumb beside .has-scroll-indicator lists.
+(function () {
+    function setUp(list) {
+        const bar = list.parentElement.querySelector('.scroll-indicator');
+        const thumb = bar && bar.firstElementChild;
+        if (!thumb) return;
+        let timer = null;
+        let dragOffset = null;
+        let shown = null;
+        const roomForBar = list.style.paddingRight;
+        const scale = () => (typeof list.indicatorScale === 'function' ? list.indicatorScale() : 1);
+        function metrics() {
+            const full = list.scrollHeight * scale();
+            const h = bar.clientHeight;
+            const size = Math.min(h, Math.max(28, h * list.clientHeight / full));
+            return { full, h, size, max: full - list.clientHeight };
+        }
+        function update() {
+            const m = metrics();
+            const on = m.max > 1;
+            bar.classList.toggle('visible', on);
+            if (on !== shown) {
+                shown = on;
+                list.style.paddingRight = on ? roomForBar : getComputedStyle(list).paddingLeft;
+            }
+            if (!on) return;
+            thumb.style.height = m.size + 'px';
+            thumb.style.top = Math.max(0, Math.min(m.h - m.size, (m.h - m.size) * list.scrollTop / m.max)) + 'px';
+        }
+        function dragTo(clientY) {
+            const m = metrics();
+            const top = clientY - bar.getBoundingClientRect().top - dragOffset;
+            const frac = Math.max(0, Math.min(1, top / (m.h - m.size)));
+            // A list that renders in batches grows only as far as the drag needs.
+            if (typeof list.indicatorGrow === 'function') {
+                const target = frac * m.max;
+                list.indicatorGrow(target);
+                list.scrollTop = frac >= 1 ? list.scrollHeight : target;
+                return;
+            }
+            list.scrollTop = frac * (list.scrollHeight - list.clientHeight);
+        }
+        list.addEventListener('scroll', () => {
+            update();
+            bar.classList.add('scrolling');
+            clearTimeout(timer);
+            timer = setTimeout(() => { if (dragOffset === null) bar.classList.remove('scrolling'); }, 700);
+        }, { passive: true });
+        bar.addEventListener('pointerdown', (e) => {
+            if (!bar.classList.contains('visible')) return;
+            if (typeof list.indicatorPrepareDrag === 'function') list.indicatorPrepareDrag();
+            update();
+            const r = thumb.getBoundingClientRect();
+            dragOffset = (e.clientY >= r.top && e.clientY <= r.bottom) ? e.clientY - r.top : r.height / 2;
+            bar.setPointerCapture(e.pointerId);
+            bar.classList.add('scrolling', 'dragging');
+            dragTo(e.clientY);
+            e.preventDefault();
+        });
+        bar.addEventListener('pointermove', (e) => {
+            if (dragOffset !== null) dragTo(e.clientY);
+        });
+        const end = () => {
+            if (dragOffset === null) return;
+            dragOffset = null;
+            bar.classList.remove('dragging');
+            timer = setTimeout(() => bar.classList.remove('scrolling'), 700);
+        };
+        bar.addEventListener('pointerup', end);
+        bar.addEventListener('pointercancel', end);
+        new MutationObserver(update).observe(list, { childList: true });
+        new ResizeObserver(update).observe(list);
+        update();
+    }
+    document.querySelectorAll('.has-scroll-indicator').forEach(setUp);
+})();
+
+// The title's glitch repaints every frame, which makes scrolling stutter; it pauses while scrolling or off screen.
+;(function () {
+    const title = document.getElementById('appTitle');
+    if (!title) return;
+    let onScreen = true, scrollTimer = 0;
+    const sync = () => title.classList.toggle('glitch-paused', !onScreen || scrollTimer !== 0);
+    new IntersectionObserver(([e]) => { onScreen = e.isIntersecting; sync(); }).observe(title);
+    window.addEventListener('scroll', () => {
+        clearTimeout(scrollTimer);
+        scrollTimer = setTimeout(() => { scrollTimer = 0; sync(); }, 300);
+        sync();
+    }, { passive: true, capture: true });
+})();

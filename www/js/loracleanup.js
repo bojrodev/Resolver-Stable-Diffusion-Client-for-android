@@ -1,7 +1,7 @@
-// Config > "Clean Up LoRA Data": finds LoRAs the app holds custom data for (custom name, edited config,
-// ADetailer-link opt-out, favourite) that are no longer on the server, lists them, and clears that
-// data after confirmation. It only compares against a list fetched live from the server, stops on a
-// failed or empty answer, and re-fetches when the user confirms.
+// Config > "Clean Up Model Data": finds LoRAs with custom data (custom name, edited config, ADetailer-link
+// opt-out, favourite) and checkpoints with saved settings (ckptcleanup.js) that are no longer on the server,
+// lists them, and clears that data after confirmation. Compares only against lists fetched live from the
+// server, stops on a failed or empty answer, and re-fetches when the user confirms.
 (function () {
     const FAV_PREFIX = 'bojroLoraFavs';
 
@@ -135,24 +135,40 @@
     }
     window.closeLoraCleanup = closeModal;
 
+    const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+    // Fetches both live lists; throws if either can't be trusted.
+    async function findAllStale() {
+        const ckpt = window.__ckptCleanup;
+        const [loras, checkpoints] = await Promise.all([fetchInstalledNames(), ckpt ? ckpt.fetchInstalledKeys() : null]);
+        return { loras: findStale(loras), checkpoints: ckpt ? ckpt.findStale(checkpoints) : [] };
+    }
+
     function showModal(stale) {
         document.getElementById('loraCleanupModal')?.remove();
         const modal = document.createElement('div');
         modal.id = 'loraCleanupModal';
         modal.className = 'modal';
-        const rows = stale.map(s => `
+        const row = (name, kinds) => `
             <div style="padding:8px 10px; border:1px solid var(--border-color); border-radius:10px; background:rgba(255,255,255,0.02);">
-                <div style="font-size:13px; font-weight:800; color:var(--text-main); word-break:break-word;">${esc(s.name)}</div>
-                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">${esc(s.kinds.join(' · '))}</div>
-            </div>`).join('');
+                <div style="font-size:13px; font-weight:800; color:var(--text-main); word-break:break-word;">${esc(name)}</div>
+                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">${esc(kinds.join(' · '))}</div>
+            </div>`;
+        const section = (label, items, nameOf) => items.length
+            ? `<div class="model-item-group-label" style="margin:4px 2px 0;">${label}</div>` + items.map(s => row(nameOf(s), s.kinds)).join('')
+            : '';
+        const rows = section('LoRAs', stale.loras, s => s.name)
+            + section('Checkpoints', stale.checkpoints, s => (typeof splitCheckpointDisplayName === 'function' && splitCheckpointDisplayName(s.name).primary) || s.name);
+        const counts = [stale.loras.length ? plural(stale.loras.length, 'LoRA') : '', stale.checkpoints.length ? plural(stale.checkpoints.length, 'checkpoint') : ''].filter(Boolean).join(' and ');
+        const total = stale.loras.length + stale.checkpoints.length;
         modal.innerHTML = `
             <div class="modal-content" style="max-height:85vh; display:flex; flex-direction:column;">
                 <div class="modal-header">
-                    <h3>Clean up LoRA data</h3>
+                    <h3>Clean up model data</h3>
                     <button type="button" class="close-btn" onclick="closeLoraCleanup()">×</button>
                 </div>
                 <div style="font-size:12px; color:var(--text-muted); margin:4px 0 10px;">
-                    ${stale.length} LoRA${stale.length === 1 ? ' is' : 's are'} no longer on the server but still ${stale.length === 1 ? 'has' : 'have'} custom data in the app. Deleting clears that data for good.
+                    ${counts} ${total === 1 ? 'is' : 'are'} no longer on the server but still ${total === 1 ? 'has' : 'have'} custom data in the app. Deleting clears that data for good.
                 </div>
                 <div id="loraCleanupList" class="col" style="gap:8px; overflow-y:auto; min-height:0; flex:1;">${rows}</div>
                 <div class="row" style="gap:10px; margin-top:12px;">
@@ -172,15 +188,14 @@
         busy = true;
         try {
             if (typeof Toast !== 'undefined') Toast.show({ text: 'Checking the server...', duration: 'short' });
-            let installed;
+            let stale;
             try {
-                installed = await fetchInstalledNames();
+                stale = await findAllStale();
             } catch (e) {
-                await window.appAlert(`${e.message} Nothing was changed.`, { title: 'Cannot compare LoRAs' });
+                await window.appAlert(`${e.message} Nothing was changed.`, { title: 'Cannot compare models' });
                 return;
             }
-            const stale = findStale(installed);
-            if (stale.length === 0) {
+            if (stale.loras.length + stale.checkpoints.length === 0) {
                 if (typeof Toast !== 'undefined') Toast.show({ text: 'Nothing to clean up', duration: 'short' });
                 return;
             }
@@ -199,20 +214,25 @@
         if (btn) { btn.disabled = true; btn.textContent = 'CHECKING...'; }
         try {
             // Re-checked against a fresh list at delete time; nothing is deleted if the server can't be reached.
-            let installed;
+            let fresh;
             try {
-                installed = await fetchInstalledNames();
+                fresh = await findAllStale();
             } catch (e) {
                 closeModal();
                 await window.appAlert(`${e.message} Nothing was deleted.`, { title: 'Cannot clear', danger: true });
                 return;
             }
-            const shown = new Set(modal._stale.map(s => s.key));
-            const stillGone = findStale(installed).filter(s => shown.has(s.key));
-            clearData(stillGone.map(s => s.key));
+            // Only what was shown and is still missing.
+            const shownL = new Set(modal._stale.loras.map(s => s.key));
+            const shownC = new Set(modal._stale.checkpoints.map(s => s.key));
+            const goneL = fresh.loras.filter(s => shownL.has(s.key));
+            const goneC = fresh.checkpoints.filter(s => shownC.has(s.key));
+            clearData(goneL.map(s => s.key));
+            if (window.__ckptCleanup) window.__ckptCleanup.clearData(goneC);
             closeModal();
             if (typeof Toast !== 'undefined') {
-                Toast.show({ text: `Cleared custom data for ${stillGone.length} LoRA${stillGone.length === 1 ? '' : 's'}`, duration: 'long' });
+                const parts = [goneL.length ? plural(goneL.length, 'LoRA') : '', goneC.length ? plural(goneC.length, 'checkpoint') : ''].filter(Boolean).join(' and ');
+                Toast.show({ text: `Cleared custom data for ${parts || 'nothing'}`, duration: 'long' });
             }
         } finally {
             busy = false;

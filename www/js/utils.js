@@ -205,9 +205,15 @@ async function createNotificationChannel() {
     } catch (e) {}
 }
 
+function clearCompletionNotification() {
+    LocalNotifications?.removeDeliveredNotifications?.({ notifications: [{ id: 2002, title: '', body: '' }] })?.catch(() => {});
+}
+
 function setupBackgroundListeners() {
     if (!App) return;
+    clearCompletionNotification();
     App.addListener('resume', async () => {
+        clearCompletionNotification();
         if (LocalNotifications) {
             try {
                 const pending = await LocalNotifications.getPending();
@@ -225,8 +231,14 @@ function setupBackgroundListeners() {
 
 let lastNotifTime = 0; // Tracks the last time we updated Android
 let lastProgress = -1; // Tracks the last progress % we sent
+let progressNotifStopped = false; // set by stopProgressService() (engine.js)
 
 async function updateBatchNotification(title, force = false, body = "") {
+    if (progressNotifStopped && !force) {
+        if (window.dbg) window.dbg(`late notification update dropped: ${title}`);
+        return;
+    }
+    progressNotifStopped = false;
     let progressVal = 0;
     
     // 1. Calculate Progress %
@@ -245,9 +257,9 @@ async function updateBatchNotification(title, force = false, body = "") {
     const now = Date.now();
     // Only update if:
     // a. 'force' is true (e.g., Generation is Done)
-    // b. OR it has been more than 1000ms (1 second) since the last update
+    // b. OR it has been more than 250ms since the last update (Android drops updates beyond ~5 a second)
     // c. OR progress is 0% (Start) or 100% (Finish)
-    if (!force && (now - lastNotifTime < 1000) && progressVal !== 0 && progressVal !== 100) {
+    if (!force && (now - lastNotifTime < 250) && progressVal !== 0 && progressVal !== 100) {
         return; // SKIP this update (Prevent freezing)
     }
 
@@ -260,14 +272,24 @@ async function updateBatchNotification(title, force = false, body = "") {
     const svc = (typeof ResolverService !== 'undefined' ? ResolverService : null) || 
                 (window.Capacitor && window.Capacitor.Plugins ? window.Capacitor.Plugins.ResolverService : null);
 
+    // Step counts go in the title, which Android shows even when collapsed; "Step" dropped so 4-digit counts fit.
+    if (body && body.includes(" / ")) {
+        title = `${title.replace(/\.+$/, '')}: ${body.replace(/^Step /, '').replace(/\s*\/\s*/, '/')}`;
+        body = "";
+    }
+
     if (svc) {
         try {
+            const t0 = Date.now();
             await svc.updateProgress({
                 title: title,
                 body: body,
                 progress: progressVal
             });
+            // Debug log: a slow reply from the native side.
+            if (window.dbg && Date.now() - t0 > 1000) window.dbg(`native notification update took ${Date.now() - t0}ms`);
         } catch (e) {
+            if (window.dbg) window.dbg('native notification update failed: ' + e);
             console.error("Native Service Error:", e);
         }
     }
@@ -279,7 +301,7 @@ async function sendCompletionNotification(msg) {
         try {
             await LocalNotifications.schedule({
                 notifications: [{
-                    title: "Mission Complete",
+                    title: "Generation Complete",
                     body: msg,
                     id: 2002,
                     channelId: 'gen_complete_channel',
@@ -350,20 +372,14 @@ async function saveToMobileGallery(base64Data, prefix = 'bojro', tag = '', seedO
         const fileName = await buildOutputFileName(base64Data, prefix, tag, seedOverride);
         if (isNative) {
             const cleanBase64 = base64Data.split(',')[1];
-            try {
-                await Filesystem.mkdir({
-                    path: 'Resolver',
-                    directory: 'DOCUMENTS',
-                    recursive: false
-                });
-            } catch (e) {}
             // Queued so same-name saves get distinct names.
             const run = resolverSaveQueue.then(async () => {
                 const finalName = await uniqueResolverFileName(fileName);
                 await Filesystem.writeFile({
                     path: `Resolver/${finalName}`,
                     data: cleanBase64,
-                    directory: 'DOCUMENTS'
+                    directory: 'DOCUMENTS',
+                    recursive: true
                 });
             });
             resolverSaveQueue = run.catch(() => {});
@@ -381,10 +397,126 @@ async function saveToMobileGallery(base64Data, prefix = 'bojro', tag = '', seedO
             link.click();
             document.body.removeChild(link);
         }
+        markImageSavedToPhone(base64Data);
     } catch (e) {
         console.error("Save failed", e);
     }
 }
+
+// --- AUTO-DELETE WARNING (Config > Generation, on by default) ---
+// Images saved to the phone, by a cheap key of their data (the last 500), for the warning's SAVED label.
+const SAVED_IMAGE_KEYS = 'bojroSavedImageKeys';
+function imageDataKey(data) {
+    const s = String(data || '');
+    const h = s.length >> 1;
+    return `${s.length}|${s.slice(h, h + 48)}|${s.slice(-150, -100)}`;
+}
+function savedImageKeys() {
+    try { return JSON.parse(localStorage.getItem(SAVED_IMAGE_KEYS) || '[]'); } catch (e) { return []; }
+}
+function markImageSavedToPhone(data) {
+    const key = imageDataKey(data);
+    try { localStorage.setItem(SAVED_IMAGE_KEYS, JSON.stringify([...savedImageKeys().filter(k => k !== key), key].slice(-500))); } catch (e) {}
+}
+
+// Gallery images a job of newCount images would delete (oldest first), and how many of the new ones go too.
+function galleryDeletionPreview(newCount) {
+    return new Promise(resolve => {
+        const limit = getGalleryCacheLimit();
+        const done = old => resolve({ old, newLost: Math.max(0, newCount - limit), limit });
+        if (!db || newCount <= 0) return done([]);
+        try {
+            const store = db.transaction(['images'], 'readonly').objectStore('images');
+            const countReq = store.count();
+            countReq.onsuccess = () => {
+                const total = countReq.result;
+                const goes = Math.max(0, Math.min(total, total + newCount - limit));
+                if (!goes) return done([]);
+                // Oldest first, as pruneGalleryOverflow() deletes them.
+                const old = [];
+                const cur = store.openCursor();
+                cur.onsuccess = e => {
+                    const c = e.target.result;
+                    if (!c || old.length >= goes) return done(old);
+                    old.push(c.value);
+                    c.continue();
+                };
+                cur.onerror = () => done(old);
+            };
+            countReq.onerror = () => done([]);
+        } catch (e) { done([]); }
+    });
+}
+
+// Before a job that will push unsaved images out of the gallery: shows all that go (tap one to view it) and asks to continue.
+// Resolves true/false, or null with the warning off (the caller then keeps its own Gallery Cache Limit check).
+let autoDeleteAnswer = null;
+window.answerAutoDelete = function(ok) {
+    if (autoDeleteAnswer) autoDeleteAnswer(ok);
+};
+// action: what the text says is about to happen ("Upscaling"); "Generating N images" by default.
+window.confirmAutoDelete = async function(newCount, action = null) {
+    if (localStorage.getItem('bojroAutoDeleteWarning') === 'false') return null;
+    if (autoDeleteAnswer) autoDeleteAnswer(false);
+    let preview = await galleryDeletionPreview(newCount);
+    const savedNow = new Set(savedImageKeys());
+    const autoSave = document.getElementById('autoDlCheck')?.checked;
+    if (!preview.old.some(item => !savedNow.has(imageDataKey(item.data))) && !(preview.newLost && !autoSave)) return true;
+    const modal = document.getElementById('autoDeleteModal');
+    const viewer = document.getElementById('fullScreenModal');
+    const render = () => {
+        const { old, newLost, limit } = preview;
+        const n = old.length, plural = c => c === 1 ? '' : 's';
+        const doing = action || `Generating ${newCount} image${plural(newCount)}`;
+        let text = n
+            ? `${doing} will delete the ${n === 1 ? 'oldest image' : `${n} oldest images`} in the gallery (Gallery Cache Limit: ${limit}).`
+            : newLost ? `${doing} is over the Gallery Cache Limit of ${limit}.` : 'Nothing in the gallery will be deleted now.';
+        if (newLost) text += ` The first ${newLost} of the new images will be deleted before it finishes too.`;
+        document.getElementById('autoDeleteText').textContent = text;
+        const saved = new Set(savedImageKeys());
+        const grid = document.getElementById('autoDeleteGrid');
+        grid.textContent = '';
+        old.forEach((item, i) => {
+            const tile = document.createElement('div');
+            tile.className = 'ana-history-tile';
+            const img = document.createElement('img');
+            img.alt = '';
+            img.src = item.thumbnail || item.data;
+            tile.appendChild(img);
+            if (saved.has(imageDataKey(item.data))) {
+                const label = document.createElement('div');
+                label.className = 'autodel-saved';
+                label.textContent = 'SAVED';
+                tile.appendChild(label);
+            }
+            tile.addEventListener('click', () => {
+                viewer.classList.add('fs-from-autodelete');
+                openFullscreen(old.map(r => ({ id: r.id, data: r.data, upscale: r.upscale })), i);
+            });
+            grid.appendChild(tile);
+        });
+        grid.classList.toggle('hidden', !n);
+    };
+    render();
+    modal.classList.remove('hidden');
+    // Back from the viewer: an image deleted there changes the list.
+    const watch = new MutationObserver(async () => {
+        if (!viewer.classList.contains('hidden') || !viewer.classList.contains('fs-from-autodelete')) return;
+        viewer.classList.remove('fs-from-autodelete');
+        preview = await galleryDeletionPreview(newCount);
+        render();
+    });
+    watch.observe(viewer, { attributes: true, attributeFilter: ['class'] });
+    let answer;
+    const ok = await new Promise(resolve => { autoDeleteAnswer = answer = resolve; });
+    watch.disconnect();
+    // A newer warning may already be showing.
+    if (autoDeleteAnswer === answer) {
+        autoDeleteAnswer = null;
+        modal.classList.add('hidden');
+    }
+    return ok;
+};
 
 // *** FIXED VRAM PROFILE LOGIC FOR FLUX (12GB 3060) ***
 function getVramMapping() {
@@ -548,6 +680,10 @@ function loadGalleryCacheLimitUI() {
 const DEFAULT_GENERATION_POLLING_RATE = 200;
 // Floor matches the fastest rate used elsewhere (50ms): responsive without hammering the server.
 const MIN_GENERATION_POLLING_RATE = 50;
+// Polling while the app is in the background (Config > Generation Polling Rate (Background)).
+const DEFAULT_BACKGROUND_POLLING_RATE = 4000;
+// Android slows timers while the app is hidden, so faster checks gain nothing.
+const MIN_BACKGROUND_POLLING_RATE = 500;
 
 // Show & Download Batch Grids (Settings > Generation). Off by default: a batch returns just its images. Forge is never asked for a grid (return_grid false, do_not_save_grid true; see buildJobFromUI() and Neo.buildJob()) because it would roughly double the download. With this on, the grid is built on the device (buildLocalBatchGrid(), engine.js) and goes through the same path as other results (shown, saved to History, auto-saved).
 function batchGridsEnabled() {
@@ -579,21 +715,43 @@ window.saveGenerationPollingRate = function(value, showToast = false) {
     if (showToast && Toast) Toast.show({ text: `Generation polling rate set to ${n}ms`, duration: 'short' });
 };
 
-// Called on leaving CFG: corrects an invalid or too-low value back to the default (200) and saves it.
-window.enforceGenerationPollingRateDefault = function() {
-    const el = document.getElementById('cfgGenerationPollingRate');
+// On leaving the box or CFG: empty or invalid goes back to the default, too low up to the minimum (with a toast).
+function enforcePollingRate(id, def, min, save) {
+    const el = document.getElementById(id);
     if (!el) return;
     const n = parseInt(el.value);
-    if (isNaN(n) || n < MIN_GENERATION_POLLING_RATE) {
-        el.value = '200';
-        window.saveGenerationPollingRate('200');
-    }
+    if (!isNaN(n) && n >= min) return;
+    const v = isNaN(n) ? def : min;
+    el.value = String(v);
+    save(String(v));
+    if (!isNaN(n) && Toast) Toast.show({ text: `Polling rate can't be below ${min}ms`, duration: 'short' });
+}
+window.enforceGenerationPollingRateDefault = function() {
+    enforcePollingRate('cfgGenerationPollingRate', DEFAULT_GENERATION_POLLING_RATE, MIN_GENERATION_POLLING_RATE, window.saveGenerationPollingRate);
 };
 
 function loadGenerationPollingRateUI() {
     const el = document.getElementById('cfgGenerationPollingRate');
     if (el) el.value = getGenerationPollingRate();
+    const bg = document.getElementById('cfgBackgroundPollingRate');
+    if (bg) bg.value = getBackgroundPollingRate();
 }
+
+function getBackgroundPollingRate() {
+    const saved = parseInt(localStorage.getItem('bojroBackgroundPollingRate'));
+    return (!isNaN(saved) && saved >= MIN_BACKGROUND_POLLING_RATE) ? saved : DEFAULT_BACKGROUND_POLLING_RATE;
+}
+
+// Same live-edit pattern as saveGenerationPollingRate(); corrected by enforcePollingRate().
+window.saveBackgroundPollingRate = function(value) {
+    const n = parseInt(value);
+    if (isNaN(n) || n < MIN_BACKGROUND_POLLING_RATE) return;
+    localStorage.setItem('bojroBackgroundPollingRate', String(n));
+};
+
+window.enforceBackgroundPollingRateDefault = function() {
+    enforcePollingRate('cfgBackgroundPollingRate', DEFAULT_BACKGROUND_POLLING_RATE, MIN_BACKGROUND_POLLING_RATE, window.saveBackgroundPollingRate);
+};
 
 // Colour Match (Forge's img2img_color_correction, sent per request via override_settings): two independent checkboxes, one for Inpaint and one for img2img, since it suits img2img but can cause colour bleeding at mask edges in inpainting.
 window.saveInpaintColorCorrection = function(mode) {
@@ -744,7 +902,8 @@ window.toggleLivePreview = function(source) {
 // Registered once at boot: re-runs refreshLivePreviewToggleInteractivity() on a live WiFi/mobile-data change. No-op without the native plugin.
 function initLivePreviewNetworkListener() {
     if (window.Capacitor?.Plugins?.ResolverService?.addListener) {
-        Capacitor.Plugins.ResolverService.addListener('networkTypeChanged', () => {
+        Capacitor.Plugins.ResolverService.addListener('networkTypeChanged', (e) => {
+            if (window.dbg) window.dbg('network changed: ' + (e?.type || '?'));
             if (typeof refreshLivePreviewToggleInteractivity === 'function') refreshLivePreviewToggleInteractivity();
         });
     }
@@ -818,12 +977,18 @@ async function readPngMetadata(blob) {
             const type = String.fromCharCode(view.getUint8(offset + 4), view.getUint8(offset + 5), view.getUint8(offset + 6), view.getUint8(offset + 7));
             if (type === 'tEXt') {
                 const data = new Uint8Array(buffer, offset + 8, length);
-                metadata += new TextDecoder().decode(data) + "\n";
+                metadata += new TextDecoder('latin1').decode(data) + "\n";
             }
             if (type === 'iTXt') {
                 const data = new Uint8Array(buffer, offset + 8, length);
-                const text = new TextDecoder().decode(data);
-                metadata += text + "\n";
+                // keyword \0 compressed method language \0 translated \0 text (compressed text is skipped)
+                const keyEnd = data.indexOf(0);
+                const langEnd = keyEnd < 0 ? -1 : data.indexOf(0, keyEnd + 3);
+                const transEnd = langEnd < 0 ? -1 : data.indexOf(0, langEnd + 1);
+                if (transEnd >= 0 && data[keyEnd + 1] === 0) {
+                    const keyword = new TextDecoder('latin1').decode(data.subarray(0, keyEnd));
+                    metadata += keyword + '\0' + new TextDecoder().decode(data.subarray(transEnd + 1)) + "\n";
+                }
             }
             offset += 12 + length;
         }
@@ -915,7 +1080,139 @@ function parseTagList(text) {
     return String(text == null ? '' : text).split(/[,\n]/).map(t => t.trim()).filter(Boolean);
 }
 
-// Appends tags to a prompt/negative box with a correct separator and the trailing ", " (withTrailingComma). Unlike StyleManager.appendSegment it does not skip text that is merely a substring; callers de-duplicate at tag level. Returns nothing (LoraManager.applyAdditionalNegative tracks the inserted tags).
+// Text as searches compare it: lower case, accents removed (é -> e), a few letters spelt out (ß -> ss).
+const SEARCH_LETTERS = { 'ß': 'ss', 'æ': 'ae', 'œ': 'oe', 'ø': 'o', 'ł': 'l', 'đ': 'd', 'ð': 'd', 'þ': 'th' };
+function searchKey(text) {
+    return String(text || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[ßæœøłđðþ]/g, c => SEARCH_LETTERS[c]);
+}
+// A search box's query: as searchKey(), with a trailing space ignored so "monster " still finds "monsters".
+function searchQuery(text) {
+    return searchKey(text).trimEnd();
+}
+
+// A full stop that ends an initial or a short title ("c.c.", "jr.") isn't a stray one, so it stays before a comma (ui.js).
+const KEEP_FULL_STOP_AFTER = /^(\p{L}|jr|sr|dr|mr|mrs|ms|st|no|ver|vs|vol|etc)$/iu;
+const strayFullStop = before => !KEEP_FULL_STOP_AFTER.test((before.match(/\p{L}+$/u) || [''])[0]);
+// Two or more full stops straight after a word, treated as one; "..." as a tag of its own isn't matched.
+const STOP_RUN = /([^\s,.([:|])\.{2,}/g;
+// "..." as a tag of its own (Danbooru's ellipsis), which the full-stop rules keep.
+const ELLIPSIS_TAG = /(^|,)([ \t]*)\.\.\.(?=[ \t]*(?:,|$))/g;
+// Full stops not attached to a word (at the start, or after a space, comma or opening bracket); not ".5".
+const LOOSE_STOPS = /(^|[\s,([])\.+(?!\d)/g;
+
+// Unmatched round brackets in a line of tags: a stray ")" goes, a missing ")" is added at the end of the tag (or of the line,
+// for a group with a weight like "(smile, happy:1.2"), and a pair escaped on one side only ("\(pokemon)") is escaped on both.
+function repairTagBrackets(line) {
+    const chars = [...line];
+    const open = []; // { i, esc }
+    const drop = new Set();
+    for (let i = 0; i < chars.length; i++) {
+        const esc = chars[i - 1] === '\\';
+        if (chars[i] === '(') open.push({ i, esc });
+        else if (chars[i] === ')') {
+            const o = open.pop();
+            if (!o) { if (!esc) drop.add(i); continue; }
+            if (o.esc && !esc) chars[i] = '\\)';
+            else if (!o.esc && esc) chars[o.i] = '\\(';
+        }
+    }
+    const ends = new Map(); // insert position -> closers
+    for (const o of open) {
+        const rest = line.slice(o.i + 1);
+        const comma = rest.search(/,/);
+        const toLineEnd = comma < 0 || /:\s*-?\d*\.?\d+\s*$/.test(rest);
+        let at = toLineEnd ? chars.length : o.i + 1 + comma;
+        const closer = o.esc ? '\\)' : ')';
+        ends.set(at, (ends.get(at) || '') + closer);
+    }
+    let out = '';
+    for (let i = 0; i <= chars.length; i++) {
+        if (ends.has(i)) out = out.replace(/[ \t]+$/, '') + ends.get(i);
+        if (i < chars.length && !drop.has(i)) out += chars[i];
+    }
+    return out;
+}
+
+// A tag compared loosely: case, extra spaces and weight brackets ("(tag:1.2)", "[tag]") are ignored, and so is what
+// Prompt Auto-Formatting changes (ui.js): unmatched or half-escaped brackets, escapes, underscores, a full stop between
+// words, a stray full stop at the end, spaces around ":" and "|". <lora:...> tags stay exact apart from case.
+function normaliseTag(tag) {
+    let t = String(tag == null ? '' : tag).trim();
+    if (t.startsWith('<')) return t.replace(/\s+/g, ' ').toLowerCase();
+    if (t === '...') return t;
+    t = repairTagBrackets(t).replace(LOOSE_STOPS, '$1').replace(STOP_RUN, '$1.').replace(/(^|[^.])\.(?=\s*\\?[):\]])/g, (m, pre, i, str) => strayFullStop(str.slice(0, i) + pre) ? pre : m);
+    for (let m; (m = t.match(/^\(((?:\\[()]|[^()])*?)(?::\s*-?\d*\.?\d+)?\)$/) || t.match(/^\[([^\[\]]*)\]$/));) t = m[1].trim();
+    while (/[^.]\.$/.test(t) && strayFullStop(t.slice(0, -1))) t = t.slice(0, -1).trim();
+    return t.replace(/\\([()])/g, '$1').replace(/_/g, ' ').replace(/(\p{L})\.\s*(?=\p{L})/gu, '$1 ').replace(/\s*([:|])\s*/g, '$1')
+        .replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+// The text after a segment's <lora:...> tags ("<lora:x:1> nami" -> "nami"), or '' when there are none.
+function textAfterLoraTags(segment) {
+    return /<[^>]+>/.test(segment) ? segment.replace(/<[^>]+>/g, ' ').trim() : '';
+}
+
+// A box's tags, compared loosely (normaliseTag()). Words sharing a segment with a <lora:...> tag count separately too.
+function boxTagSet(el) {
+    const set = new Set();
+    parseTagList(el ? el.value : '').forEach(t => {
+        set.add(normaliseTag(t));
+        const rest = textAfterLoraTags(t);
+        if (rest) set.add(normaliseTag(rest));
+    });
+    return set;
+}
+
+// Tags as Prompt Auto-Formatting may have left them in the box: each one, plus the tags formatting splits it into.
+function withFormattedPieces(tags) {
+    const out = [];
+    tags.forEach(t => {
+        out.push(t);
+        if (typeof formatPromptText === 'function') parseTagList(formatPromptText(t, true)).forEach(p => out.push(p));
+    });
+    return [...new Set(out)];
+}
+
+// Line breaks with only spaces or commas between them become one, so a removal never leaves an empty line or a doubled
+// comma ("a,\n,\n\nb" -> "a,\nb"); each tag line stays on its own line. Spaces at line ends go.
+function collapseBlankLines(text) {
+    let out = String(text).replace(/\n[\s,]*\n/g, m => m.includes(',') ? ',\n' : '\n');
+    for (let prev = null; prev !== out;) {
+        prev = out;
+        out = out.replace(/,[ \t]*(\n?)[ \t]*,/g, (m, nl) => ',' + nl);
+    }
+    return out.replace(/[ \t]+\n/g, '\n').replace(/\n[ \t]+/g, '\n');
+}
+
+// Removes every comma/line segment whose tag (normaliseTag()) is in normSet. Ends tidied, without the closing ", ".
+// dropBreaks (removing a LoRA, style or character): a line break belongs to the tag after it, so it goes with that tag and
+// the rest of its line joins the line above. Otherwise (a trigger word skipped as already in the box) the line keeps it.
+function removeTagsFromText(text, normSet, dropBreaks) {
+    if (!normSet.size) return text;
+    const parts = text.split(/([,\n])/);
+    const kept = [];
+    for (let i = 0; i < parts.length; i += 2) {
+        const raw = parts[i], sep = parts[i + 1];
+        if (raw.trim() && normSet.has(normaliseTag(raw))) {
+            if (dropBreaks && kept[kept.length - 1] === '\n') kept[kept.length - 1] = ',';
+            continue;
+        }
+        // "<lora:x:1> nami" with "nami" to remove keeps just the LoRA tag.
+        const rest = textAfterLoraTags(raw);
+        if (rest && normSet.has(normaliseTag(rest))) {
+            kept.push(raw.match(/^\s*/)[0] + raw.match(/<[^>]+>/g).join(' '));
+            if (sep !== undefined) kept.push(sep);
+            continue;
+        }
+        kept.push(raw);
+        if (sep !== undefined) kept.push(sep);
+    }
+    return collapseBlankLines(kept.join(''))
+        .replace(/^[\s,]+/, '')
+        .replace(/[\s,]+$/, '');
+}
+
+// Appends tags to a prompt/negative box with a correct separator and the trailing ", " (withTrailingComma). Callers de-duplicate at tag level and track what they added.
 function appendTagsToBox(el, text) {
     const trimmed = el.value.replace(/\s+$/, '');
     const sep = !trimmed ? '' : (trimmed.endsWith(',') ? ' ' : ', ');

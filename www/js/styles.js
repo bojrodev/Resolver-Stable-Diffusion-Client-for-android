@@ -2,8 +2,7 @@ window.StyleManager = {
     styles: [],
     // Selected styles, one Set per mode (xl/flux/qwen/anima/krea/inp/img2img), so a style applied in one mode isn't highlighted in another.
     selectedStylesByMode: {},
-    // The exact substring inserted per style, so deselecting removes precisely that.
-    // { mode: { styleName: { promptSegment, negSegment, prompt, neg } } }: promptSegment/negSegment (tags actually inserted, after dedupe) drive removal and checkAndClearFullyRemovedStyles(); prompt/neg are recorded to keep the stored shape.
+    // { mode: { styleName: { promptSegment, negSegment } } }: the tags each style added (or took over from another, claimTag()), which are the ones removed with it.
     appliedInsertions: {},
     fs: window.Capacitor ? window.Capacitor.Plugins.Filesystem : null,
     DIR: 'Resolver/styles',
@@ -24,17 +23,23 @@ window.StyleManager = {
 
         // 2. Initialize Filesystem and try to load the physical CSV
         if (this.fs) {
-            try { 
-                await this.fs.mkdir({ path: this.DIR, directory: 'DOCUMENTS', recursive: true }); 
+            // The saved list stays the source of truth (an earlier install's styles.csv can't be overwritten),
+            // so the file only restores styles when the app has none. No mkdir: on an existing folder it threw and skipped this.
+            if (!cache) {
                 await this.loadLocalCSV();
-            } catch(e) { console.log("FS init skipped"); }
+                if (this.styles.length) localStorage.setItem('resolver_styles_fallback', JSON.stringify(this.styles));
+            }
         }
     },
 
     open: function() {
+        const search = document.getElementById('styleSearch');
+        if (search) search.value = '';
         document.getElementById('styleModal').classList.remove('hidden');
         if (typeof lockBodyScroll === 'function') lockBodyScroll();
         this.render();
+        const list = document.getElementById('styleList');
+        if (list) list.scrollTop = 0;
     },
 
     // --- SYNC & FILESYSTEM ---
@@ -145,27 +150,32 @@ window.StyleManager = {
 
     render: function() {
         const container = document.getElementById('styleList');
-        const query = document.getElementById('styleSearch').value.toLowerCase();
+        const rawQuery = document.getElementById('styleSearch').value;
+        const query = searchQuery(rawQuery);
         const clearBtn = document.getElementById('styleSearchClear');
-        if (clearBtn) clearBtn.classList.toggle('hidden', !query);
+        if (clearBtn) clearBtn.classList.toggle('hidden', !rawQuery);
         container.innerHTML = '';
 
         const mode = typeof currentMode !== 'undefined' ? currentMode : 'xl';
         const selectedForMode = this.getSelectedStylesForMode(mode);
         this.styles
-            .filter(s => s.name.toLowerCase().includes(query))
-            .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
+            .filter(s => searchKey(s.name).includes(query))
+            // Active styles first, as in the LoRA list.
+            .sort((a, b) => (selectedForMode.has(b.name) - selectedForMode.has(a.name)) || a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
             .forEach(style => {
             const isActive = selectedForMode.has(style.name);
+            // Tapped but missing some of its tags: dashed outline and a count, no glow.
+            const count = isActive ? this.styleCount(mode, style) : null;
+            const isPartial = isActive && this.isPartial(count);
 
             const div = document.createElement('div');
-            div.className = `glass-box style-card ${isActive ? 'selected-glow' : ''}`;
-            div.style.cssText = `margin-bottom:10px; padding:12px; transition: 0.3s; border: 1px solid ${isActive ? '#ffd700' : 'var(--border-color)'}; box-shadow: ${isActive ? '0 0 15px rgba(255, 215, 0, 0.3)' : 'none'};`;
+            div.className = `glass-box style-card ${isActive && !isPartial ? 'selected-glow' : ''}`;
+            div.style.cssText = `margin-bottom:10px; padding:12px; transition: 0.3s; border: 1px ${isPartial ? 'dashed' : 'solid'} ${isActive ? '#ffd700' : 'var(--border-color)'}; box-shadow: ${isActive && !isPartial ? '0 0 15px rgba(255, 215, 0, 0.3)' : 'none'};`;
             
             div.innerHTML = `
                 <div class="row" style="justify-content:space-between; align-items:center;">
                     <div class="style-select-target" style="flex:1; min-width:0; cursor:pointer;">
-                        <div style="font-weight:900; color:${isActive ? '#ffd700' : 'var(--accent-primary)'}; font-size:12px;">${escapeHtmlAttr(style.name.toUpperCase())}</div>
+                        <div style="font-weight:900; color:${isActive ? '#ffd700' : 'var(--accent-primary)'}; font-size:12px;">${escapeHtmlAttr(style.name.toUpperCase())}${isPartial ? `<span class="style-partial-count" style="font-weight:700; color:var(--text-muted); margin-left:6px;">${count.present}/${count.total}</span>` : ''}</div>
                         <div style="font-size:10px; color:var(--text-muted); display:-webkit-box; -webkit-line-clamp:1; -webkit-box-orient:vertical; overflow:hidden;">
                             ${escapeHtmlAttr(style.prompt || '...')}
                         </div>
@@ -193,66 +203,137 @@ window.StyleManager = {
             container.appendChild(div);
         });
         if (window.lucide) lucide.createIcons();
+        this.fitListHeight();
+    },
+
+    // As many whole cards as fit on screen (ui.js).
+    fitListHeight: function() {
+        const list = document.getElementById('styleList');
+        if (list) fitListToWholeRows(list, list.children);
     },
 
     // --- TOGGLE & INJECT ---
+    // Tapping a style: adds it; a partly present one gets its missing tags back; a complete one is removed.
     toggleSelection: function(name) {
         const mode = typeof currentMode !== 'undefined' ? currentMode : 'xl';
         const selectedForMode = this.getSelectedStylesForMode(mode);
-        const wasSelected = selectedForMode.has(name);
-        if (wasSelected) {
-            selectedForMode.delete(name);
-        } else {
+        const style = this.styles.find(s => s.name === name);
+        if (!selectedForMode.has(name)) {
             selectedForMode.add(name);
+            this.applyStyleToPrompts(name, true);
+        } else if (style && this.isPartial(this.styleCount(mode, style))) {
+            this.applyStyleToPrompts(name, true);
+        } else {
+            selectedForMode.delete(name);
+            this.applyStyleToPrompts(name, false);
         }
-        this.applyStyleToPrompts(name, !wasSelected);
         this.render();
     },
 
-    // Adds or removes one style's prompt/negative text in the active mode. Add and remove mirror each other, except that a non-empty box ends in ", " afterwards (withTrailingComma(), utils.js).
+    // Formatted as the box would be (Prompt Auto-Formatting), so they match what formatting left there.
+    styleTags: function(style, side, mode) {
+        const text = side === 'neg' ? style.negative_prompt : style.prompt;
+        return parseTagList(window.formatInsertedTags && mode ? window.formatInsertedTags(text, mode) : text);
+    },
+
+    // The mode's default prompt/negative tags (normaliseTag()); never removed, and not counted towards a style.
+    defaultTagSet: function(mode, side) {
+        const text = side === 'neg'
+            ? (localStorage.getItem(`bojro_custom_default_neg_${defaultKeyMode(mode)}`) ?? (typeof DEFAULT_NEGATIVE_PROMPTS !== 'undefined' ? DEFAULT_NEGATIVE_PROMPTS[mode] : undefined) ?? '')
+            : (localStorage.getItem(`bojro_custom_default_${defaultKeyMode(mode)}`) ?? (typeof DEFAULT_PROMPTS !== 'undefined' ? DEFAULT_PROMPTS[mode] : undefined) ?? '');
+        return new Set(parseTagList(text).map(normaliseTag));
+    },
+
+    // How many of a style's tags are in this mode's boxes (a box the mode lacks, e.g. Flux's negative, is skipped).
+    // Default-prompt tags don't count, unless the style has nothing else. anyLeft: whether any of its prompt
+    // tags are left (its negative ones if it has none), which decides whether it is still selected.
+    styleCount: function(mode, style) {
+        const all = [], own = [];
+        ['prompt', 'neg'].forEach(side => {
+            const el = document.getElementById(`${mode}_${side}`);
+            if (!el) return;
+            const box = boxTagSet(el);
+            const defaults = this.defaultTagSet(mode, side);
+            new Set(this.styleTags(style, side, mode).map(normaliseTag)).forEach(n => {
+                const tag = { present: box.has(n), side };
+                all.push(tag);
+                if (!defaults.has(n)) own.push(tag);
+            });
+        });
+        const counted = own.length ? own : all;
+        const promptTags = counted.filter(t => t.side === 'prompt');
+        const leftIn = promptTags.length ? promptTags : counted;
+        return { present: counted.filter(t => t.present).length, total: counted.length, anyLeft: leftIn.some(t => t.present) };
+    },
+    isPartial: function(count) {
+        return count.total > 0 && count.present < count.total;
+    },
+
+    // Another tapped style (not exceptName) that wants this tag takes it over, so it isn't removed. Returns true if one did.
+    claimTag: function(mode, side, norm, exceptName) {
+        const selected = this.getSelectedStylesForMode(mode);
+        for (const other of selected) {
+            if (other === exceptName) continue;
+            const style = this.styles.find(s => s.name === other);
+            const tag = style && this.styleTags(style, side, mode).find(t => normaliseTag(t) === norm);
+            if (!tag) continue;
+            if (!this.appliedInsertions[mode]) this.appliedInsertions[mode] = {};
+            const record = this.appliedInsertions[mode][other] || (this.appliedInsertions[mode][other] = { promptSegment: '', negSegment: '' });
+            const key = side === 'neg' ? 'negSegment' : 'promptSegment';
+            const owned = parseTagList(record[key]);
+            if (!owned.some(t => normaliseTag(t) === norm)) record[key] = [...owned, tag].join(', ');
+            this.saveSelectionState();
+            return true;
+        }
+        return false;
+    },
+
+    // Adds a style's missing tags to the active mode (an existing tag, in any weight or case, isn't doubled), or removes the tags it added.
+    // Removal keeps tags the default prompt, another tapped style or an active LoRA also wants. Each box ends in ", " afterwards (withTrailingComma(), utils.js).
     applyStyleToPrompts: function(name, add) {
         const mode = typeof currentMode !== 'undefined' ? currentMode : 'xl';
-        const pEl = document.getElementById(`${mode}_prompt`);
-        const nEl = document.getElementById(`${mode}_neg`);
         if (!this.appliedInsertions[mode]) this.appliedInsertions[mode] = {};
+        const sides = [['prompt', 'promptSegment'], ['neg', 'negSegment']];
 
         if (add) {
-            // Only add needs the style's current text; removal works from the stored record, so it works even for a just-deleted style.
             const s = this.styles.find(x => x.name === name);
             if (!s) return;
-            // A tag already in the box is skipped on add and not tracked as this style's.
-            const currentPromptTags = pEl ? pEl.value.split(",").map(t => t.trim()).filter(Boolean) : [];
-            const currentNegTags = nEl ? nEl.value.split(",").map(t => t.trim()).filter(Boolean) : [];
-            const dedupe = (text, existingTags) => {
-                if (!text) return text;
-                return text.split(",").map(t => t.trim()).filter(t => t.length > 0 && !existingTags.includes(t)).join(", ");
-            };
-            const promptToInsert = dedupe(s.prompt, currentPromptTags);
-            const negToInsert = dedupe(s.negative_prompt, currentNegTags);
-            const pInserted = (promptToInsert && pEl) ? this.appendSegment(pEl, promptToInsert) : "";
-            const nInserted = (negToInsert && nEl) ? this.appendSegment(nEl, negToInsert) : "";
-            // promptSegment/negSegment track only what was actually inserted (after dedupe).
-            this.appliedInsertions[mode][name] = {
-                prompt: pInserted, promptSegment: promptToInsert,
-                neg: nInserted, negSegment: negToInsert
-            };
+            const record = this.appliedInsertions[mode][name] || { promptSegment: '', negSegment: '' };
+            sides.forEach(([side, key]) => {
+                const el = document.getElementById(`${mode}_${side}`);
+                if (!el) return;
+                const box = boxTagSet(el);
+                const seen = new Set();
+                const missing = this.styleTags(s, side, mode).filter(t => {
+                    const n = normaliseTag(t);
+                    if (box.has(n) || seen.has(n)) return false;
+                    seen.add(n);
+                    return true;
+                });
+                if (missing.length) appendTagsToBox(el, missing.join(', '));
+                // The tags it added before and still has, plus the new ones.
+                const owned = parseTagList(record[key]).filter(t => box.has(normaliseTag(t)));
+                record[key] = [...owned, ...missing].join(', ');
+            });
+            this.appliedInsertions[mode][name] = record;
         } else {
             const record = this.appliedInsertions[mode][name];
             if (record) {
-                // Tags that are part of this mode's resolved default are not removed; only each side's extra tags.
-                if (record.promptSegment && pEl) {
-                    const promptDefault = localStorage.getItem(`bojro_custom_default_${defaultKeyMode(mode)}`) ?? (typeof DEFAULT_PROMPTS !== 'undefined' ? DEFAULT_PROMPTS[mode] : undefined) ?? '';
-                    const promptDefaultTags = promptDefault.split(",").map(t => t.trim()).filter(Boolean);
-                    const promptExtrasOnly = record.promptSegment.split(",").map(t => t.trim()).filter(t => t.length > 0 && !promptDefaultTags.includes(t)).join(", ");
-                    if (promptExtrasOnly) pEl.value = withTrailingComma(this.removeStyleTags(pEl.value, promptExtrasOnly));
-                }
-                if (record.negSegment && nEl) {
-                    const negDefault = localStorage.getItem(`bojro_custom_default_neg_${defaultKeyMode(mode)}`) ?? (typeof DEFAULT_NEGATIVE_PROMPTS !== 'undefined' ? DEFAULT_NEGATIVE_PROMPTS[mode] : undefined) ?? '';
-                    const negDefaultTags = negDefault.split(",").map(t => t.trim()).filter(Boolean);
-                    const negExtrasOnly = record.negSegment.split(",").map(t => t.trim()).filter(t => t.length > 0 && !negDefaultTags.includes(t)).join(", ");
-                    if (negExtrasOnly) nEl.value = withTrailingComma(this.removeStyleTags(nEl.value, negExtrasOnly));
-                }
                 delete this.appliedInsertions[mode][name];
+                sides.forEach(([side, key]) => {
+                    const el = document.getElementById(`${mode}_${side}`);
+                    if (!el || !record[key]) return;
+                    const defaults = this.defaultTagSet(mode, side);
+                    const lora = window.LoraManager;
+                    const toRemove = new Set();
+                    withFormattedPieces(parseTagList(record[key])).forEach(t => {
+                        const n = normaliseTag(t);
+                        if (defaults.has(n) || this.claimTag(mode, side, n, name)) return;
+                        if (lora && (side === 'neg' ? lora.claimNegative(mode, n) : lora.claimTrigger(mode, n, null, el.value))) return;
+                        toRemove.add(n);
+                    });
+                    if (toRemove.size) el.value = withTrailingComma(removeTagsFromText(el.value, toRemove, true));
+                });
             }
         }
 
@@ -261,33 +342,21 @@ window.StyleManager = {
         this.saveSelectionState();
     },
 
-    // Deselects a style whose tags were all deleted by hand. Called from savePrompt()/saveNegativePrompt().
+    // Deselects a style none of whose prompt tags are left (by hand, a reset or clearing the box); its negative tags only count
+    // for a style with no prompt tags. Called from savePrompt()/saveNegativePrompt().
     checkAndClearFullyRemovedStyles: function(mode) {
-        const insertions = this.appliedInsertions[mode];
-        if (!insertions) return;
-        const pEl = document.getElementById(`${mode}_prompt`);
-        const nEl = document.getElementById(`${mode}_neg`);
-        // Own tag lists hold only inserted tags, so a tag-level survival check suffices.
-        const currentPromptTags = pEl ? pEl.value.split(",").map(t => t.trim()).filter(Boolean) : [];
-        const currentNegTags = nEl ? nEl.value.split(",").map(t => t.trim()).filter(Boolean) : [];
-        let changed = false;
         const selectedForMode = this.getSelectedStylesForMode(mode);
-
-        Object.keys(insertions).forEach(name => {
-            if (!selectedForMode.has(name)) return;
-            const record = insertions[name];
-            const ownPromptTags = record.promptSegment ? record.promptSegment.split(",").map(t => t.trim()).filter(Boolean) : [];
-            const ownNegTags = record.negSegment ? record.negSegment.split(",").map(t => t.trim()).filter(Boolean) : [];
-            const anyPromptTagSurvives = ownPromptTags.some(t => currentPromptTags.includes(t));
-            const anyNegTagSurvives = ownNegTags.some(t => currentNegTags.includes(t));
-            const hadAnyTagsAtAll = ownPromptTags.length > 0 || ownNegTags.length > 0;
-            if (hadAnyTagsAtAll && !anyPromptTagSurvives && !anyNegTagSurvives) {
+        let changed = false;
+        [...selectedForMode].forEach(name => {
+            const style = this.styles.find(s => s.name === name);
+            if (!style) return;
+            const count = this.styleCount(mode, style);
+            if (count.total && !count.anyLeft) {
                 selectedForMode.delete(name);
-                delete insertions[name];
+                if (this.appliedInsertions[mode]) delete this.appliedInsertions[mode][name];
                 changed = true;
             }
         });
-
         if (changed) {
             this.saveSelectionState();
             if (document.getElementById('styleList')) this.render();
@@ -321,7 +390,7 @@ window.StyleManager = {
         } catch (e) { console.error("Style selection restore failed:", e); }
     },
 
-    // Removes a style's tags from a field (the only removal path). Each comma segment is compared with the style's tags, consuming one match per tag; an edited segment is kept whole.
+    // Removes tags from a field, one segment per tag, exact match (an edited segment is kept whole). Used for LoRAs' additional negatives.
     removeStyleTags: function(text, segment) {
         const remainingTags = segment.split(",").map(t => t.trim()).filter(t => t.length > 0);
         const rawSegments = text.split(",");
@@ -338,21 +407,6 @@ window.StyleManager = {
         return kept.join(",").replace(/,\s*,/g, ",").replace(/^,\s*/, "").trim();
     },
 
-
-    // Appends a segment and returns the inserted substring (separator + segment). A comma is added only if the text doesn't already end with one.
-    appendSegment: function(el, segment) {
-        if (el.value.includes(segment)) return ""; // already present
-        const trimmed = el.value.replace(/\s+$/, "");
-        let sep;
-        if (!trimmed) sep = "";
-        else if (trimmed.endsWith(",")) sep = " ";
-        else sep = ", ";
-        const insertion = sep + segment;
-        el.value = trimmed + insertion;
-        // Ends the box with ", " (withTrailingComma(), utils.js), after `insertion` is fixed so the returned string stays separator + segment.
-        el.value = withTrailingComma(el.value);
-        return insertion;
-    },
 
     // --- EDITOR ---
     openCreatePopup: function() {
@@ -396,6 +450,17 @@ window.StyleManager = {
         if (this.editingOldName) {
             const idx = this.styles.findIndex(s => s.name === this.editingOldName);
             this.styles[idx] = { name: newName, prompt, negative_prompt: neg };
+            // A renamed style stays selected, with the tags it added, in every mode.
+            const oldName = this.editingOldName;
+            if (newName !== oldName) {
+                Object.keys(this.selectedStylesByMode).forEach(mode => {
+                    const set = this.selectedStylesByMode[mode];
+                    if (set.delete(oldName)) set.add(newName);
+                    const records = this.appliedInsertions[mode];
+                    if (records && records[oldName]) { records[newName] = records[oldName]; delete records[oldName]; }
+                });
+                this.saveSelectionState();
+            }
         } else {
             this.styles.push({ name: newName, prompt, negative_prompt: neg });
         }

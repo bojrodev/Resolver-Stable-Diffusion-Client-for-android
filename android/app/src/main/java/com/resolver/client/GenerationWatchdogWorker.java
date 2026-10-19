@@ -2,11 +2,10 @@ package com.resolver.client;
 
 import android.app.ActivityManager;
 import android.content.Context;
-import android.content.Intent;
 import android.content.SharedPreferences;
-import android.os.Build;
 import androidx.annotation.NonNull;
 import androidx.work.Worker;
+import androidx.work.WorkManager;
 import androidx.work.WorkerParameters;
 
 public class GenerationWatchdogWorker extends Worker {
@@ -27,20 +26,11 @@ public class GenerationWatchdogWorker extends Worker {
         if (shouldBeRunning) {
             // 2. Check if we ARE running
             if (!isServiceRunning(context, ResolverForegroundService.class)) {
-                // 3. RESTART SERVICE if missing
-                String title = prefs.getString("last_title", "Resuming...");
-                String body = prefs.getString("last_body", "Restoring connection...");
-                
-                Intent intent = new Intent(context, ResolverForegroundService.class);
-                intent.setAction(ResolverForegroundService.ACTION_START_FOREGROUND_SERVICE);
-                intent.putExtra(ResolverForegroundService.EXTRA_TITLE, title);
-                intent.putExtra(ResolverForegroundService.EXTRA_BODY, body);
-                
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    context.startForegroundService(intent);
-                } else {
-                    context.startService(intent);
-                }
+                // 3. The service only stops while a job is expected when the app's process died with it, and the
+                // page that drove the job is gone too, so a restarted notification would never update or clear.
+                // Clear the expectation and stop checking instead.
+                prefs.edit().putBoolean("should_be_generating", false).apply();
+                WorkManager.getInstance(context).cancelUniqueWork("GenerationWatchdog");
             }
         }
         return Result.success();

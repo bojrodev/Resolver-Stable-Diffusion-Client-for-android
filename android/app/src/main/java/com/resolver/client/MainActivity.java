@@ -1,6 +1,8 @@
 package com.resolver.client;
 
+import android.os.Build;
 import android.os.Bundle;
+import android.webkit.WebView;
 import android.webkit.WebSettings;
 import com.getcapacitor.BridgeActivity;
 
@@ -9,6 +11,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(ResolverServicePlugin.class);
+        registerPlugin(ResolverDevicePlugin.class);
         super.onCreate(savedInstanceState);
         
         // OLD LOCKS REMOVED:
@@ -28,6 +31,15 @@ public class MainActivity extends BridgeActivity {
             // Hide the WebView's native scroll indicator (CSS cannot reach it).
             this.bridge.getWebView().setVerticalScrollBarEnabled(false);
             this.bridge.getWebView().setHorizontalScrollBarEnabled(false);
+
+            // Hide From Accessibility Services, before anything can read the page (ResolverDevicePlugin).
+            ResolverDevicePlugin.applyHideFromAccessibility(this.bridge.getWebView(),
+                getSharedPreferences(ResolverDevicePlugin.PREFS, android.content.Context.MODE_PRIVATE).getBoolean(ResolverDevicePlugin.KEY_HIDE_A11Y, false));
+
+            // Keep the WebView's renderer at full priority while hidden, so background jobs keep running.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                this.bridge.getWebView().setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false);
+            }
         }
     }
 

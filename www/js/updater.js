@@ -16,7 +16,7 @@ window.resetNativeUpdater = async function() {
         return;
     }
     
-    // We assume the user already confirmed in cfg.js
+    // Not called at the moment (Reset App Configuration keeps app updates); a caller must confirm with the user first.
     try {
         await window.Capacitor.Plugins.CapacitorUpdater.reset();
         // Reloading will switch back to the built-in bundle
@@ -47,7 +47,7 @@ async function checkForAppUpdate(silent = false) {
         const UPDATE_URL = 'https://raw.githubusercontent.com/bojrodev/Resolver-Stable-Diffusion-Client-for-android/dev/v2ersion.json';
         
         // IMPORTANT: Update this number manually when you release a new version
-        const currentVersion = '2.8';
+        const currentVersion = '2.9';
         // ---------------------
 
         const response = await fetch(UPDATE_URL + '?t=' + new Date().getTime());

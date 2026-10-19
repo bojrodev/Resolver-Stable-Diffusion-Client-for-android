@@ -69,6 +69,24 @@ function loadConnectionConfig() {
     const updateNoticesSwitch = document.getElementById('cfgUpdateNoticesSwitch');
     if (updateNoticesSwitch) updateNoticesSwitch.checked = localStorage.getItem('bojroUpdateNoticesOff') !== 'true';
 
+    // Low Bits rows under the checkpoint (off by default; set in the Checkpoint Manager).
+    const showLowBits = localStorage.getItem('bojroShowLowBitsRows') === 'true';
+    const showLowBitsSwitch = document.getElementById('cfgShowLowBitsSwitch');
+    if (showLowBitsSwitch) showLowBitsSwitch.checked = showLowBits;
+    applyLowBitsRowsVisible(showLowBits);
+
+    // Abort Job If App Closes or Disconnects (off by default, jobabort.js).
+    const abortOnCloseSwitch = document.getElementById('cfgAbortJobOnCloseSwitch');
+    if (abortOnCloseSwitch) abortOnCloseSwitch.checked = localStorage.getItem('bojroAbortJobOnClose') === 'true';
+
+    // Auto-Collapse Config Sections (off by default).
+    const oneSectionSwitch = document.getElementById('cfgOneSectionSwitch');
+    if (oneSectionSwitch) oneSectionSwitch.checked = localStorage.getItem('bojroCfgOneSection') === 'true';
+
+    // Floating Brush Size (off by default).
+    const floatingBrushSwitch = document.getElementById('cfgFloatingBrushSwitch');
+    if (floatingBrushSwitch) floatingBrushSwitch.checked = localStorage.getItem('bojroFloatingBrushSize') === 'true';
+
     // Gallery Badges switch.
     const galleryBadgesOff = localStorage.getItem('bojroGalleryBadgesOff') === 'true';
     const galleryBadgesSwitch = document.getElementById('cfgGalleryBadgesSwitch');
@@ -88,6 +106,25 @@ function loadConnectionConfig() {
     const limitBatchGridSwitch = document.getElementById('cfgLimitBatchGridSwitch');
     if (limitBatchGridSwitch) limitBatchGridSwitch.checked = localStorage.getItem('bojroLimitBatchGrid') === 'true';
     document.getElementById('batchGridLimitRow')?.classList.toggle('hidden', !showBatchGrids);
+
+    // Prompt Auto-Formatting (ui.js): off by default; its on-blur option shows only while it's on.
+    const promptFormat = localStorage.getItem('bojroPromptFormat') === 'true';
+    const promptFormatSwitch = document.getElementById('cfgPromptFormatSwitch');
+    if (promptFormatSwitch) promptFormatSwitch.checked = promptFormat;
+    const promptFormatBlurSwitch = document.getElementById('cfgPromptFormatBlurSwitch');
+    if (promptFormatBlurSwitch) promptFormatBlurSwitch.checked = localStorage.getItem('bojroPromptFormatOnBlur') === 'true';
+    document.getElementById('promptFormatBlurRow')?.classList.toggle('hidden', !promptFormat);
+
+    // Recent Results Shown (engine.js).
+    const resultStripLimitEl = document.getElementById('cfgResultStripLimit');
+    if (resultStripLimitEl && typeof resultStripLimit === 'function') resultStripLimitEl.value = resultStripLimit();
+
+    // Auto-Delete Warning: on unless switched off (utils.js).
+    const autoDeleteWarningSwitch = document.getElementById('cfgAutoDeleteWarningSwitch');
+    if (autoDeleteWarningSwitch) autoDeleteWarningSwitch.checked = localStorage.getItem('bojroAutoDeleteWarning') !== 'false';
+
+    const keepSourceSeedSwitch = document.getElementById('cfgKeepSourceSeedSwitch');
+    if (keepSourceSeedSwitch) keepSourceSeedSwitch.checked = localStorage.getItem('bojroKeepSourceSeed') === 'true';
 
     const progressBridgeSwitch = document.getElementById('cfgProgressBridgeSwitch');
     if (progressBridgeSwitch) progressBridgeSwitch.checked = localStorage.getItem('bojroProgressBridgeEnabled') === 'true';
@@ -138,6 +175,14 @@ function loadConnectionConfig() {
     if (showControlnetSdxlAnimaSwitch) showControlnetSdxlAnimaSwitch.checked = showControlnetSdxlAnima;
     document.querySelectorAll('.controlnet-section-sdxl-anima').forEach(el => el.classList.toggle('feature-hidden', !showControlnetSdxlAnima));
 
+    // Show Upload History (Analyze / Edit): on unless switched off (analyzerhistory.js).
+    const analyzerHistorySwitch = document.getElementById('cfgAnalyzerHistorySwitch');
+    if (analyzerHistorySwitch) analyzerHistorySwitch.checked = localStorage.getItem('bojroAnalyzerHistory') !== 'false';
+    const editHistorySwitch = document.getElementById('cfgEditHistorySwitch');
+    if (editHistorySwitch) editHistorySwitch.checked = localStorage.getItem('bojroEditHistory') !== 'false';
+    if (window.AnalyzerHistory) AnalyzerHistory.applyVisibility();
+    if (window.EditHistory) EditHistory.applyVisibility();
+
     // Analyzer sticky action bar: OFF unless switched on here (see analyzer.js)
     const analyzerStickyBarSwitch = document.getElementById('cfgAnalyzerStickyBarSwitch');
     if (analyzerStickyBarSwitch) analyzerStickyBarSwitch.checked = localStorage.getItem('bojroAnalyzerStickyBar') === 'true';
@@ -148,11 +193,8 @@ function loadConnectionConfig() {
     document.querySelectorAll('.controlnet-section-other').forEach(el => el.classList.toggle('feature-hidden', !showControlnetOther));
     if (typeof updateFsControlNetButtons === 'function') updateFsControlNetButtons();
 
-    // Restore Preferred Module Pairings: render the list and set the toggle's checked state at launch.
-    const modulePairsEnabledSwitch = document.getElementById('cfgModulePairsEnabled');
-    if (modulePairsEnabledSwitch) modulePairsEnabledSwitch.checked = typeof isModulePairsEnabled === 'function' && isModulePairsEnabled();
-    if (typeof renderModulePairsList === 'function') renderModulePairsList();
-    if (typeof updateModulePairsManageRowVisibility === 'function') updateModulePairsManageRowVisibility();
+    // Checkpoint Manager count beside MANAGE.
+    if (typeof updateCheckpointManagerCount === 'function') updateCheckpointManagerCount();
 
     // Bojro Dev Power: inverted, so unchecked (default) means visible.
     const hideDevPower = localStorage.getItem('bojroHideDevPower') === 'true';
@@ -169,7 +211,7 @@ function loadConnectionConfig() {
     const livePreviewSwitch = document.getElementById('cfgShowLivePreviewSwitch');
     if (livePreviewSwitch) livePreviewSwitch.checked = showLivePreview;
     // livePreviewToggleRow visibility/position is handled by reorganizeGenRowLayout() (utils.js).
-    document.getElementById('livePreviewMobileDataRow')?.classList.toggle('hidden', !showLivePreview);
+    document.querySelectorAll('.lp-option-row').forEach(r => r.classList.toggle('hidden', !showLivePreview));
 
     // Always interactive when visible; a standing preference, not tied to the main toggle.
     const mobileDataAllowed = localStorage.getItem('bojroLivePreviewMobileDataAllowed') === 'true';
@@ -373,67 +415,107 @@ window.saveConfiguration = function(showToast = false) {
 
 // www/js/cfg.js
 
-// What "Reset App Configuration" keeps. Everything else in localStorage (settings, toggles, last-used state) is cleared; History images and Comfy templates are in IndexedDB and are not touched.
-const RESET_PROTECTED_KEYS = [
-    'bojroModulePairs',             // Preferred Module Pairings
-    'resolver_styles_fallback',     // saved custom styles
-    'bojroImg2imgPresets',          // saved Inpaint/img2img presets
-    'bojroCustomAdetailerLabels',   // ADetailer Toast Text
-    'bojroDefaultGenParams',        // pinned "Load Default" generation params
-    'bojroLoraConfigs',             // per-LoRA saved config (trigger words etc.)
-    'bojroLoraUserRenames',         // LoRA display-name renames
-    'bojroLoraLinkDisabled',        // per-LoRA "don't auto-link to ADetailer"
-    'bojroFolderFavs',              // starred LoRA folders
+// What "Reset App Configuration" resets: the options in Config, which sections are open, and prompts shown once, as on
+// first install. Everything else is kept: server connections, prompts and generation settings, the queue, the gallery,
+// styles, LoRAs, the Checkpoint Manager, presets, default prompts, ComfyUI templates, Character Select and app updates.
+// Gallery Cache Limit is kept too: the gallery is trimmed to it at launch, so a lower one would delete images at once.
+const RESET_KEYS = [
+    // Interface
+    'bojroTheme', 'bojroResultStripLimit', 'bojroAnalyzerHistory', 'bojroEditHistory', 'bojroCfgOneSection',
+    'bojroFloatingBrushSize', 'bojroHideModelHints', 'bojroHideGenSpinner', 'bojroGalleryBadgesOff', 'bojroHideDevPower',
+    'bojro_model_visibility', 'bojroTallPrompt', 'bojroTallNeg',
+    // Generation
+    'bojroAutoDeleteWarning', 'bojroAutoSave', 'bojroGenerationPollingRate', 'bojroBackgroundPollingRate',
+    'bojroKeepSourceSeed', 'bojroProgressBridgeEnabled', 'bojroShowBatchGrids', 'bojroLimitBatchGrid',
+    'bojroShowLivePreviewToggle', 'bojroLivePreviewMobileDataAllowed', 'bojroLpMethod', 'bojroLpEveryN', 'bojroLpBorder',
+    // Models
+    'bojroShowAdetailer', 'bojroShowAdetailerOther', 'bojroShowAdetailerSdxlAnima', 'bojroAdetailerControlNet',
+    'bojroShowControlnet', 'bojroShowControlnetOther', 'bojroShowControlnetSdxlAnima', 'bojroShowExtraAdetailerPasses',
+    'bojroShowLowBitsRows', 'bojroShowFluxCache', 'bojroNeverOomVisible', 'bojro_upscaler2_visibility',
+    // Experimental
+    'bojroUpscaleExpEnabled', 'bojroPromptFormat', 'bojroPromptFormatOnBlur', 'bojroSaacEnabled',
+    'bojroAbortJobOnClose', 'bojroDataUsageTracker', 'bojroDataUsagePill', 'bojroDebugLogEnabled',
+    'bojroHideFromAccessibility', 'bojroLiveUpdate',
+    // View, and prompts shown once (battery optimisation, update notices, a skipped update)
+    'bojroLoraViewMode', 'bojroAnalyzerStickyBar', 'bojroBatteryOpt', 'bojroUpdateNoticesOff', 'bojro_skip_version',
 ];
-// Starred LoRAs are stored per architecture (bojroLoraFavs, bojroLoraFavs_xl, ...), so match by prefix.
-const RESET_PROTECTED_PREFIXES = ['bojroLoraFavs'];
+// Which Config and tab sections are open.
+const RESET_PREFIXES = ['bojro_vis_', 'bojro_collapse_'];
 
-function isResetProtectedKey(key) {
-    return RESET_PROTECTED_KEYS.includes(key) || RESET_PROTECTED_PREFIXES.some(p => key.startsWith(p));
+function isResetKey(key) {
+    return RESET_KEYS.includes(key) || RESET_PREFIXES.some(p => key.startsWith(p));
 }
 
 window.resetAppConfig = async function() {
-    // 1. Ask the user for confirmation
-    if (await window.appConfirm('Reset all settings to their defaults? Your History images, saved styles, LoRA configs, module pairings, presets, and ADetailer Toast Text are kept. This also removes updates and deletes the character database.', { title: 'Reset App Configuration', okText: 'RESET', danger: true })) {
-
-        // 2. Clear every setting except the protected content above (collect the keys first; removing while iterating skips entries).
-        const keysToRemove = [];
-        for (let i = 0; i < localStorage.length; i++) {
-            const key = localStorage.key(i);
-            if (!isResetProtectedKey(key)) keysToRemove.push(key);
-        }
-        keysToRemove.forEach(key => localStorage.removeItem(key));
-
-        // --- SAAC (Character Select) ---
-        // Its on-disk database is wiped too, as the confirmation states.
-        if (window.SaacManager) {
-            // Deletes the cached database from IndexedDB, not just the in-memory copy.
-            window.SaacManager.clearCache();
-        }
-        // --------------------------------
-
-        // 3. Reset variables
-        connectionConfig = {
-            baseIp: "",
-            portWebUI: 7860,
-            portLlm: 1234,
-            portComfy: 8188,
-            portWake: 5000,
-            isRemote: false,
-            isConfigured: false
-        };
-        HOST = "";
-        
-        // 4. CRITICAL FIX: Reset the Native Updater
-        if (window.resetNativeUpdater) {
-             window.resetNativeUpdater(); 
-        } else {
-             window.location.reload();
-        }
+    if (!await window.appConfirm('Every option in Config goes back to its default. Your server connections, prompts, gallery, styles, LoRAs, presets and other saved content are kept.', { title: 'Reset App Configuration', okText: 'RESET', danger: true })) return;
+    // Keys are collected first, as removing while iterating skips entries.
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (isResetKey(key)) keys.push(key);
     }
-}
+    keys.forEach(key => localStorage.removeItem(key));
+    // The page reads everything afresh; settings Android keeps its own copy of are sent again at launch.
+    window.location.reload();
+};
 
-// Backs up every localStorage key, independent of what resetAppConfig() protects.
+// Double Prompt Box Height / Double Negative Box Height (Config > Interface): each tab's prompt and negative boxes are
+// 3 rows tall, or 6 with the option on.
+const PROMPT_BOX_MODES = ['xl', 'flux', 'qwen', 'anima', 'krea', 'inp'];
+function applyPromptBoxHeights() {
+    const tall = key => localStorage.getItem(key) === 'true';
+    PROMPT_BOX_MODES.forEach(m => {
+        const p = document.getElementById(`${m}_prompt`), n = document.getElementById(`${m}_neg`);
+        if (p) p.rows = tall('bojroTallPrompt') ? 6 : 3;
+        if (n) n.rows = tall('bojroTallNeg') ? 6 : 3;
+    });
+    const ps = document.getElementById('cfgTallPromptSwitch'), ns = document.getElementById('cfgTallNegSwitch');
+    if (ps) ps.checked = tall('bojroTallPrompt');
+    if (ns) ns.checked = tall('bojroTallNeg');
+}
+window.togglePromptBoxHeight = function(field, on) {
+    localStorage.setItem(field === 'neg' ? 'bojroTallNeg' : 'bojroTallPrompt', on ? 'true' : 'false');
+    applyPromptBoxHeights();
+};
+applyPromptBoxHeights();
+
+// Live Preview Border (Config > Generation, on by default): the ring round the preview image (style.css).
+function applyLivePreviewBorder() {
+    const on = localStorage.getItem('bojroLpBorder') !== 'false';
+    document.body.classList.toggle('lp-border-off', !on);
+    const sw = document.getElementById('cfgLpBorderSwitch');
+    if (sw) sw.checked = on;
+}
+window.toggleLivePreviewBorder = function(on) {
+    localStorage.setItem('bojroLpBorder', on ? 'true' : 'false');
+    applyLivePreviewBorder();
+};
+applyLivePreviewBorder();
+
+// Live Preview Method / Live Preview Every N Steps (Config > Generation). Sent with each job while Live Preview is on, as
+// per-job overrides that Forge Neo puts back afterwards, so its own settings are left alone. Empty = Forge's setting.
+window.saveLivePreviewOverride = function(sel) {
+    localStorage.setItem(sel.dataset.key, sel.value);
+};
+function livePreviewOverrides() {
+    const out = {};
+    const method = localStorage.getItem('bojroLpMethod');
+    const everyN = parseInt(localStorage.getItem('bojroLpEveryN'), 10);
+    if (['RGB', 'Approx NN', 'TAESD'].includes(method)) out.show_progress_type = method;
+    if (everyN >= 1 && everyN <= 5) out.show_progress_every_n_steps = everyN;
+    return out;
+}
+;(function () {
+    ['cfgLpMethod', 'cfgLpEveryN'].forEach(id => {
+        const sel = document.getElementById(id);
+        if (!sel) return;
+        const saved = localStorage.getItem(sel.dataset.key) || '';
+        sel.value = [...sel.options].some(o => o.value === saved) ? saved : '';
+        if (typeof updateModelPickerTriggerText === 'function') updateModelPickerTriggerText(id);
+    });
+})();
+
+// Backs up every localStorage key, independent of what resetAppConfig() resets.
 window.backupAppSettings = async function() {
     try {
         const settings = {};
@@ -487,18 +569,19 @@ window.restoreAppSettings = async function(event) {
     event.target.value = ''; // reset so picking the same file again still fires onchange
     if (!file) return;
 
-    try {
-        const text = await file.text();
-        const payload = JSON.parse(text);
-        const settings = (payload && typeof payload.settings === 'object' && payload.settings !== null)
-            ? payload.settings
-            : payload; // tolerate a raw {key: value} export too, not just the wrapped format
+    // Another app's file (or not JSON at all): back on Config with a toast, no confirmation.
+    const incompatible = () => {
+        if (typeof window.switchTab === 'function') window.switchTab('cfg');
+        if (typeof Toast !== 'undefined' && Toast) Toast.show({ text: 'Incompatible backup', duration: 'short' });
+    };
+    let payload;
+    try { payload = JSON.parse(await file.text()); } catch (e) { incompatible(); return; }
+    // backupAppSettings() writes app: 'Resolver' and the settings as strings.
+    const settings = payload && payload.app === 'Resolver' && payload.settings && typeof payload.settings === 'object' && !Array.isArray(payload.settings) ? payload.settings : null;
+    const keys = settings ? Object.keys(settings) : [];
+    if (!keys.length || keys.some(k => typeof settings[k] !== 'string')) { incompatible(); return; }
 
-        const keys = Object.keys(settings || {});
-        if (keys.length === 0) {
-            await window.appAlert('This file doesn\'t look like a valid Resolver settings backup.', { title: 'Invalid Backup', danger: true });
-            return;
-        }
+    try {
 
         const when = payload && payload.exportedAt ? new Date(payload.exportedAt).toLocaleString() : 'this file';
         const backupVersion = payload && payload.appVersion;
@@ -563,6 +646,7 @@ window.connectToLlmService = async function() {
             if (lastModel && Array.from(select.options).some(o => o.value === lastModel)) {
                 select.value = lastModel;
             }
+            if (typeof updateModelPickerTriggerText === 'function') updateModelPickerTriggerText('llmModelSelect');
             
             // Update LLM settings for backward compatibility
             llmSettings.baseUrl = url;
@@ -766,6 +850,11 @@ window.toggleBatchGrids = function() {
     // The size-limit row appears only with grids on (its setting is kept; see batchGridLimitEnabled(), utils.js).
     document.getElementById('batchGridLimitRow')?.classList.toggle('hidden', !isChecked);
 }
+window.togglePromptFormat = function() {
+    const isChecked = document.getElementById('cfgPromptFormatSwitch').checked;
+    localStorage.setItem('bojroPromptFormat', isChecked ? 'true' : 'false');
+    document.getElementById('promptFormatBlurRow')?.classList.toggle('hidden', !isChecked);
+}
 // Limit Batch Grid to 1024px (see batchGridMaxEdge(), utils.js): caps the long edge at 1024px instead of 2048px.
 window.toggleBatchGridLimit = function() {
     const isChecked = document.getElementById('cfgLimitBatchGridSwitch').checked;
@@ -774,6 +863,19 @@ window.toggleBatchGridLimit = function() {
 window.toggleUpdateNotices = function() {
     const isOn = document.getElementById('cfgUpdateNoticesSwitch').checked;
     localStorage.setItem('bojroUpdateNoticesOff', isOn ? 'false' : 'true');
+}
+function applyLowBitsRowsVisible(show) {
+    ['lowbitsgenRow', 'lowbitsinpRow'].forEach(id => document.getElementById(id)?.classList.toggle('hidden', !show));
+}
+window.toggleLowBitsRows = function() {
+    const isOn = document.getElementById('cfgShowLowBitsSwitch').checked;
+    localStorage.setItem('bojroShowLowBitsRows', isOn ? 'true' : 'false');
+    applyLowBitsRowsVisible(isOn);
+}
+window.toggleFloatingBrushBar = function() {
+    const isOn = document.getElementById('cfgFloatingBrushSwitch').checked;
+    localStorage.setItem('bojroFloatingBrushSize', isOn ? 'true' : 'false');
+    if (typeof updateFloatingBrushBar === 'function') updateFloatingBrushBar();
 }
 // Gallery Badges switch (stored as the OFF state).
 window.toggleGalleryBadges = function() {
@@ -952,8 +1054,38 @@ window.toggleExtraAdetailerPasses = function() {
         ['xl', 'flux', 'qwen', 'anima', 'krea', 'inp', 'img2img'].forEach(mode => selectAdetailerPass(mode, 1));
     }
     document.querySelectorAll('.ad-pass-row-extra').forEach(el => el.classList.toggle('hidden', !isChecked));
+    if (isChecked) warnAdetailerMaxTabs();
 }
 
+// Forge passes ADetailer-Neo at most Max Tabs + 1 passes; no popup if all 8 already run.
+async function warnAdetailerMaxTabs() {
+    let tabs = null;
+    try {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 5000);
+        const res = await fetch(`${HOST}/sdapi/v1/options`, { headers: getHeaders(), signal: ctrl.signal });
+        clearTimeout(t);
+        tabs = Number((await res.json())?.ad_max_models) || null;
+    } catch (e) { }
+    if (tabs && tabs + 1 >= 8) return;
+    const runs = tabs ? `Forge is set to run ${tabs + 1}` : 'By default, Forge runs 5';
+    window.appAlert(`${runs} ADetailer passes. To use all 8, set Settings > ADetailer > Max Tabs to 8 in Forge, then reload the UI.`, { title: 'Extra ADetailer Passes' });
+}
+
+
+// Config > Interface > Show Upload History: off hides that RECENT, stops it saving and, once confirmed, clears it.
+window.toggleUploadHistory = async function(key, on, el) {
+    const history = key === 'bojroAnalyzerHistory' ? window.AnalyzerHistory : window.EditHistory;
+    if (!on && history && (await history.list()).length) {
+        const ok = await window.appConfirm(`${key === 'bojroAnalyzerHistory' ? 'Analyze' : 'Inpaint'} history will be cleared.`,
+            { title: 'Show Upload History', okText: 'TURN OFF', cancelText: 'CANCEL', danger: true });
+        if (!ok) { if (el) el.checked = true; return; }
+        await history.clear();
+    }
+    localStorage.setItem(key, on ? 'true' : 'false');
+    if (window.AnalyzerHistory) AnalyzerHistory.applyVisibility();
+    if (window.EditHistory) EditHistory.applyVisibility();
+}
 
 // Config > Interface > Analyzer Sticky Bar. Applies immediately; an open panel closes when switched off.
 window.toggleAnalyzerStickyBar = function() {
@@ -1001,7 +1133,7 @@ window.toggleFluxCacheVisibility = function() {
     document.getElementById('fluxCacheSection')?.classList.toggle('hidden', !isChecked);
 }
 
-// Show Live Preview Toggle: gates the livePreviewCheck row (Generate tab) and the Allow Live Preview On Mobile Data row below it. Turning it off also switches live preview off (toggleLivePreview(), which stops fetching).
+// Show Live Preview Toggle: gates the livePreviewCheck row (Generate tab) and the Live Preview rows indented below it (.lp-option-row). Turning it off also switches live preview off (toggleLivePreview(), which stops fetching).
 // Allow Live Preview On Mobile Data is deliberately not gated on livePreviewCheck, which is set on another screen; it is a standing preference.
 window.toggleLivePreviewButtonVisibility = function() {
     const isChecked = document.getElementById('cfgShowLivePreviewSwitch').checked;
@@ -1009,7 +1141,7 @@ window.toggleLivePreviewButtonVisibility = function() {
     // reorganizeGenRowLayout() (utils.js) owns showing and positioning livePreviewToggleRow.
     if (typeof reorganizeGenRowLayout === 'function') reorganizeGenRowLayout();
     if (typeof updateInpPreviewToggleVisibility === 'function') updateInpPreviewToggleVisibility();
-    document.getElementById('livePreviewMobileDataRow')?.classList.toggle('hidden', !isChecked);
+    document.querySelectorAll('.lp-option-row').forEach(r => r.classList.toggle('hidden', !isChecked));
     if (!isChecked) {
         // Switching the feature off also clears the remembered live preview choice (see toggleLivePreview(), utils.js).
         localStorage.setItem('bojroLivePreviewOn', 'false');
@@ -1026,3 +1158,59 @@ window.saveLivePreviewMobileDataAllowed = function() {
     localStorage.setItem('bojroLivePreviewMobileDataAllowed', isChecked ? 'true' : 'false');
     if (typeof refreshLivePreviewToggleInteractivity === 'function') refreshLivePreviewToggleInteractivity();
 }
+
+// Hide From Accessibility Services (off by default). The native side keeps its own copy, applied at launch.
+;(function () {
+    const KEY = 'bojroHideFromAccessibility';
+    const send = hide => { try { window.Capacitor?.Plugins?.ResolverDevice?.setHideFromAccessibility?.({ hide }); } catch (e) { } };
+    window.toggleHideFromAccessibility = function () {
+        const hide = document.getElementById('cfgHideA11ySwitch').checked;
+        localStorage.setItem(KEY, hide ? 'true' : 'false');
+        send(hide);
+    };
+    const hide = localStorage.getItem(KEY) === 'true';
+    const sw = document.getElementById('cfgHideA11ySwitch');
+    if (sw) sw.checked = hide;
+    // Keeps the native copy in step, e.g. after Restore Settings.
+    send(hide);
+})();
+
+// Live Update progress notification (Android 16+, off by default); the service reads the native copy.
+;(function () {
+    const KEY = 'bojroLiveUpdate';
+    const FILTER_PATH = 'Settings › Notifications › Sort and filter notifications (older One UI: Advanced settings › Filter notifications)';
+    const device = () => window.Capacitor?.Plugins?.ResolverDevice;
+    let isSamsung = false;
+
+    async function sendToNative(on) {
+        try { await device()?.setLiveUpdate({ enabled: on }); } catch (e) { }
+    }
+    async function openSettings() {
+        try { await device().openNotificationSettings(); } catch (e) { }
+    }
+
+    window.toggleLiveUpdate = async function () {
+        const on = document.getElementById('cfgLiveUpdateSwitch').checked;
+        localStorage.setItem(KEY, on ? 'true' : 'false');
+        sendToNative(on);
+        if (!isSamsung) return;
+        const message = on
+            ? `On Samsung phones, the Live Update also leaves an empty "1 more notification" entry, and clearing either clears both.\n\nTo stop this, go to ${FILTER_PATH} and turn off Background activities.`
+            : `If you turned off Background activities for Live Updates, you can turn it back on in ${FILTER_PATH}.`;
+        if (await window.appConfirm(message, { title: 'Live Update Notification', okText: 'OPEN SETTINGS', cancelText: 'NOT NOW' })) openSettings();
+    };
+
+    (async function init() {
+        const on = localStorage.getItem(KEY) === 'true';
+        const sw = document.getElementById('cfgLiveUpdateSwitch');
+        if (sw) sw.checked = on;
+        if (!device()) return;
+        try {
+            const info = await device().getDeviceInfo();
+            isSamsung = /samsung/i.test(info.manufacturer || '');
+            if (info.sdk >= 36) document.getElementById('cfgLiveUpdateRow')?.classList.remove('hidden');
+        } catch (e) { return; }
+        // Keeps the native copy in step, e.g. after Reset App Configuration.
+        sendToNative(on);
+    })();
+})();

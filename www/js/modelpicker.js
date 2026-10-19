@@ -98,23 +98,22 @@ window.openModelPicker = function(trigger) {
     const currentValue = select.value;
     let anyOptions = false;
 
-    // "Use preferred X" row pinned above the options for VAE/TE/CLIP/T5, resolved from Preferred Module Pairings for the checkpoint on this field's mode. Not shown in the pairings modal itself.
+    // "Use preferred" row pinned above the options for VAE/TE/CLIP/T5, resolved from the Checkpoint Manager for the checkpoint on this field's mode. Not shown for triggers marked data-no-preferred (the Checkpoint Manager).
     const MODULE_PICKER_KIND_TO_FIELD = { vae: 'vae', 'text-encoder': 'te', clip: 'clip', t5: 't5' };
-    const MODULE_PICKER_KIND_LABEL = { vae: 'VAE', 'text-encoder': 'Text Encoder', clip: 'CLIP', t5: 'T5' };
-    // Only shown when Preferred Module Pairings is enabled; usingPreferred highlights this row instead of the resolved option.
+    // usingPreferred highlights this row instead of the resolved option.
     const usingPreferred = MODULE_PICKER_KIND_TO_FIELD[kind] && (() => {
         try { return localStorage.getItem(usePreferredModuleFlagKey(selectId)) === 'true'; }
         catch (e) { return false; }
     })();
-    if (MODULE_PICKER_KIND_TO_FIELD[kind] && !selectId.startsWith('modulePair') && window.isModulePairsEnabled && window.isModulePairsEnabled()) {
+    if (MODULE_PICKER_KIND_TO_FIELD[kind] && !trigger.hasAttribute('data-no-preferred')) {
         const usePreferredRow = document.createElement('div');
         usePreferredRow.className = 'model-item-row' + (usingPreferred ? ' active' : '');
         usePreferredRow.style.cssText = 'color:var(--accent-primary); font-weight:600;';
         const nameEl = document.createElement('div');
         nameEl.className = 'model-item-name';
-        nameEl.textContent = `Use preferred ${MODULE_PICKER_KIND_LABEL[kind]}`;
+        nameEl.textContent = 'Use preferred';
         usePreferredRow.appendChild(nameEl);
-        usePreferredRow.onclick = () => useProperredModuleForField(selectId, kind);
+        usePreferredRow.onclick = () => usePreferredModuleForField(selectId, kind);
         list.appendChild(usePreferredRow);
     }
     // Sentinel matching no real option, so only the Use Preferred row shows as active.
@@ -180,12 +179,21 @@ function stripModelFileExtension(name) {
     return (name || '').replace(/\.[a-zA-Z0-9]+$/, '');
 }
 
+// VAE/TE/CLIP/T5 names without their model file extension (display only).
+const MODULE_PICKER_KINDS = ['vae', 'text-encoder', 'clip', 't5'];
+function stripModuleExtension(name) {
+    return (name || '').replace(/\.(safetensors|ckpt|pt|pth|bin|gguf|sft)$/i, '');
+}
+
 function appendModelPickerRow(list, opt, currentValue, kind) {
     let primary, subtitle;
     if (kind === 'checkpoint') {
         ({ primary, subtitle } = splitCheckpointDisplayName(opt.value));
     } else if (kind === 'detection-model') {
         primary = stripModelFileExtension(opt.textContent || opt.value);
+        subtitle = '';
+    } else if (MODULE_PICKER_KINDS.includes(kind)) {
+        primary = stripModuleExtension(opt.textContent || opt.value);
         subtitle = '';
     } else {
         // Prefer textContent as the label (value and text differ for some selects, e.g. VRAM Profile).
@@ -217,7 +225,7 @@ function selectModelFromPicker(title) {
     const select = document.getElementById(modelPickerTargetSelectId);
     if (!select) return;
     select.value = title;
-    // Manually picking an option clears that field's "USE PREFERRED..." flag.
+    // Manually picking an option clears that field's "Use preferred" flag.
     try {
         if (typeof usePreferredModuleFlagKey === 'function') {
             localStorage.removeItem(usePreferredModuleFlagKey(modelPickerTargetSelectId));
@@ -255,13 +263,11 @@ function updateModelPickerTriggerText(selectId) {
         return;
     }
 
-    // Fields set via "Use Preferred X" show "Use preferred [FIELD]" until a manual pick clears the flag.
+    // Fields set via "Use preferred" show that until a manual pick clears the flag.
     if (kind !== 'checkpoint') {
         try {
             if (localStorage.getItem(usePreferredModuleFlagKey(selectId)) === 'true') {
-                // Sentence case ("Use preferred VAE"), Text Encoder shortened to TE.
-                const fieldLabelByKind = { vae: 'VAE', 'text-encoder': 'TE', clip: 'CLIP', t5: 'T5' };
-                primaryEl.textContent = `Use preferred ${fieldLabelByKind[kind] || kind.toUpperCase()}`;
+                primaryEl.textContent = 'Use preferred';
                 if (subtitleEl) subtitleEl.classList.add('hidden');
                 return;
             }
@@ -271,7 +277,8 @@ function updateModelPickerTriggerText(selectId) {
     }
 
     if (kind !== 'checkpoint') {
-        primaryEl.textContent = selectedOption.textContent || selectedOption.value || 'Select an option';
+        const label = selectedOption.textContent || selectedOption.value;
+        primaryEl.textContent = (MODULE_PICKER_KINDS.includes(kind) ? stripModuleExtension(label) : label) || 'Select an option';
         if (subtitleEl) subtitleEl.classList.add('hidden');
         return;
     }

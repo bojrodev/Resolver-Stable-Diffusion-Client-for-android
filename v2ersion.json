@@ -1,7 +1,7 @@
 {
-  "version": "2.8",
-  "isNativeRequired": false,
+  "version": "2.9",
+  "isNativeRequired": true,
   "nativeUrl": "https://github.com/bojrodev/Resolver-Stable-Diffusion-Client-for-android/releases",
   "url": "https://github.com/bojrodev/Resolver-Stable-Diffusion-Client-for-android/releases/download/v2.7-bunglesmixed/bugfixota28on27.zip",
-  "note": "Bug Fix: ComfyUI Inpainting Tab overlapping with Forge's Inpainting tab. The bug is now fixed and App is fully Functional"
+  "note": "Bungles QOL Update!"
 }
