@@ -1,8 +1,8 @@
 {
-  "id": "Beta-test-announcement",
-  "title": "kotlin-beta-announcement-2",
-  "message": "Those who are interested in a beta test for the kotlin app. Check Issue no #55. ",
+  "id": "Beta-test-announcement-3",
+  "title": "kotlin-beta-announcement-3",
+  "message": "The second apk for the beta test is released which includes most of Bungles patch. Those who are interested in a beta test for the kotlin app. Check Issue no #55. ",
   "type": "info",
-  "date": "2026-10-19",
+  "date": "2026-10-21",
   "active": true
 }
