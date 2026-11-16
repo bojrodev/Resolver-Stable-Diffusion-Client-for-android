@@ -39,10 +39,17 @@
 }
 
 :root {
-    --row-gap: 10px; /* the gap every .row uses - also feeds .under-generate below */
-    /* QUEUE (.btn-secondary) and GENERATE (.btn-main) padding / border. Shared with .under-generate's arithmetic below, which depends on them. */
+    --row-gap: 10px; /* the gap every .row uses */
+    /* QUEUE (.btn-secondary) and GENERATE (.btn-main) padding / border. */
     --cta-pad: 16px;
     --cta-border: 1px;
+    /* Shared font sizes. */
+    --fs-window-title: 17px;
+    --fs-section: 15px; /* sized to the section icons (20px) */
+    --fs-label: 11px;
+    --fs-btn-small: 13px; /* small buttons and empty states, with 16px icons */
+    --fs-hint: 11px;
+    --fs-small: 10px;
     /* --- DARK MODE (DEFAULT - SDXL) --- */
     --bg-app: #0f0518;            /* Deep dark background */
     --bg-panel: #1a1a20;          /* Slightly lighter panel */
@@ -146,9 +153,23 @@ body.prompts-loading #inp_prompt, body.prompts-loading #inp_neg {
     visibility: hidden;
 }
 
-/* Likewise hides the app content (not the body, so the dark background shows) until boot.js is ready, so un-rendered icons and default-collapsed sections don't flash. */
-body.app-loading .container {
+/* Likewise hides the app and dock (not the body, so the dark background shows) until boot.js has applied the saved settings (revealApp()), so nothing changes as they're applied. */
+body.app-loading .container,
+body.app-loading .dock-wrapper {
     visibility: hidden;
+}
+/* No transitions until the app has appeared, so nothing animates into place as it's set up. */
+body.app-loading *, body.app-loading *::before, body.app-loading *::after,
+body.app-revealing *, body.app-revealing *::before, body.app-revealing *::after {
+    transition: none !important;
+}
+
+/* A list sized to whole items (fitListToWholeItems(), ui.js) ends at its last item (the LoRA list's last row is
+   followed by its 1px load-more trigger). */
+.fit-whole-items > :last-child,
+.fit-whole-items > :has(+ #lora-scroll-trigger:last-child) {
+    margin-bottom: 0 !important;
+    transition: none !important; /* measured straight away */
 }
 
 /* --- LIGHT MODE OVERRIDES --- */
@@ -198,18 +219,135 @@ body.app-loading .container {
 button, [onclick], .dock-item, .model-picker-trigger {
     touch-action: manipulation;
 }
+/* MAGIC PROMPT: tinted like the other small tinted buttons, in semi-bold. */
+.btn-small.magic-btn {
+    width: auto;
+    padding: 3px 8px;
+    margin: -2px 0;
+    gap: 4px;
+    font-size: var(--fs-btn-small);
+    font-weight: 600;
+    letter-spacing: 0.2px;
+    color: var(--accent-primary);
+    border: 1px solid rgba(var(--accent-primary-rgb), 0.35);
+    background: rgba(var(--accent-primary-rgb), 0.12);
+}
+body.hide-magic-prompt .wc-magic { display: none !important; }
+/* Scene optimization (scene.js): a square toggle beside Magic Prompt, light blue when on; Magic Prompt's own switches. */
+.mp-btns { display: flex; align-items: center; gap: 8px; }
+.scene-btn { width: 26px; height: 26px; margin: -2px 0; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.18); background: rgba(255, 255, 255, 0.06); color: #8e8e93; cursor: pointer; }
+/* The wildcard button in prompt boxes (wildcards.js): top left, the first line starting after it. */
+.wc-box { position: relative; width: 100%; }
+.wc-box > .wc-box-btn { display: none; }
+.wc-box.wc-box-on > .wc-box-btn { display: flex; position: absolute; top: 7px; left: 6px; width: 22px; height: 22px; padding: 0; border: none; border-radius: 6px; align-items: center; justify-content: center; color: var(--accent-primary); background: color-mix(in srgb, var(--accent-primary) 14%, var(--bg-input)); z-index: 2; cursor: pointer; }
+.wc-box.wc-box-on > textarea { text-indent: 22px; }
+.wc-row .lora-btn-star { color: var(--text-muted); }
+/* Import preview filter chips (wcimport.js): the chosen one outlined. */
+.wi-chip { margin: 0; padding: 5px 10px; border-radius: 14px; border: 1px solid transparent; font: inherit; font-size: 12px; font-weight: 800; vertical-align: 0; cursor: pointer; }
+.wi-chip.all { color: var(--text-main); background: var(--bg-input); }
+.wi-chip.sel { border-color: currentColor; }
+.wc-row .lora-btn-star.on { color: #ffc107; }
+/* Favourites only (wildcards.js): a square button beside the search box. */
+.wc-search-row { display: flex; gap: 8px; align-items: stretch; margin: 0 0 12px; }
+/* Selecting wildcards to delete (wildcards.js): CANCEL and DELETE (N) at the bottom, in place of the hint. */
+.wc-sel-bar { display: none; gap: 8px; margin: 12px 0 0; }
+body.wc-selecting .wc-sel-bar { display: flex; }
+body.wc-selecting #wcHintBasic, body.wc-selecting #wcHintAdv { display: none !important; }
+.wc-sel-bar .btn-small { height: 44px; font-weight: 800; }
+.wc-sel-cancel { flex: 1; }
+#wcSelBar .wc-sel-delete { flex: 1.4; background: #f44336; color: #fff; border-color: #f44336; white-space: nowrap; }
+#wcSelBar .wc-sel-delete:disabled { opacity: 0.45; }
+.wc-row.wc-picked, .wc-row.wc-picked.active { border-color: #f44336; background: rgba(244, 67, 54, 0.12); }
+/* Selecting: a group's circle (some: a dash; all: a tick, and the row red like its wildcards). */
+.wc-group-ring { margin-left: auto; flex: 0 0 22px; width: 22px; height: 22px; padding: 0; border-radius: 50%; border: 2px solid var(--text-muted); background: transparent; display: flex; align-items: center; justify-content: center; cursor: pointer; position: relative; }
+.wc-group-ring::before { content: ''; position: absolute; inset: -11px; }
+.wc-group-ring.some { border-color: #f44336; }
+.wc-group-ring.some::after { content: ''; width: 10px; height: 3px; border-radius: 2px; background: #f44336; }
+.wc-group-ring.all { border-color: #f44336; background: #f44336; }
+.wc-group-ring.all::after { content: ''; width: 5px; height: 10px; border: solid #fff; border-width: 0 3px 3px 0; transform: translate(0, -1px) rotate(45deg); }
+.wc-group.wc-group-all, .wc-group.wc-group-all.active, .wc-group.wc-group-all.open { border-color: #f44336; background: rgba(244, 67, 54, 0.12); }
+.wc-row.wc-selecting .lora-star-toggle-stack { visibility: hidden; }
+.wc-row.wc-nopick { opacity: 0.45; }
+.wc-fav-filter { flex: 0 0 auto; width: 44px; padding: 0; display: flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); border: 1px solid var(--border-color); background: var(--bg-input); color: var(--text-muted); cursor: pointer; }
+.wc-fav-filter.on { color: #ffc107; border-color: #ffc107; background: color-mix(in srgb, #ffc107 14%, var(--bg-input)); }
+.wc-group-filter.on { color: var(--accent-primary); border-color: var(--accent-primary); background: color-mix(in srgb, var(--accent-primary) 14%, var(--bg-input)); }
+/* A group of wildcards (wildcards.js): a header row; its wildcards indented under it while open. */
+.wc-group { cursor: pointer; padding: 11px 12px; gap: 10px; font-weight: 700; font-size: 15px; color: var(--text-main); }
+.wc-group > svg { flex-shrink: 0; color: var(--text-muted); }
+.wc-group.open { border-color: color-mix(in srgb, var(--accent-primary) 45%, var(--border-color)); }
+/* History's floating page controls (engine.js): above the dock while the ones under the grid are off screen. */
+.gal-float-pager { position: fixed; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; padding: 6px 10px; border-radius: 24px; border: 1px solid #6b6b78; background: var(--bg-app); z-index: 150; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5); }
+.gal-float-pager.hidden { display: none; }
+.gal-float-num { font-size: 12px; font-weight: bold; color: var(--text-muted); min-width: 64px; text-align: center; font-variant-numeric: tabular-nums; }
+/* TRY: COPY under the result, DETAILS folding the tree (wcadvanced.js). */
+.wc-try-copy { width: 100%; margin-top: 8px; }
+.wc-try-details { justify-content: space-between; align-items: center; margin-top: 12px; cursor: pointer; }
+.wc-try-details label { margin: 0; font-size: 13px; cursor: pointer; }
+.wc-try-details svg { transition: transform 0.2s; }
+.wc-try-details[aria-expanded="true"] svg { transform: rotate(180deg); }
+.wc-try-details + .wc-tree { margin-top: 8px; }
+/* order:: progress under MORE SETTINGS (randomtokens.js). */
+.order-status { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.order-line { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--text-muted); min-height: 28px; }
+.order-line b { color: var(--text-main); font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.order-line span { white-space: nowrap; }
+.order-line .order-reset { margin-left: auto; flex: 0 0 28px; width: 28px; height: 28px; border-radius: 8px; border: 1px solid var(--border-color); background: transparent; color: var(--text-muted); display: flex; align-items: center; justify-content: center; padding: 0; cursor: pointer; }
+.scene-btn.on { color: #4fc3f7; border-color: rgba(79, 195, 247, 0.5); background: rgba(79, 195, 247, 0.15); }
+/* Always shown now: no taller in the row than Magic Prompt's button (24px, -2px margins). */
+.scene-btn { margin: -3px 0; }
+/* No wildcard in the prompt: greyed out (a tap says why). */
+.scene-btn.idle, .scene-btn.idle.on { color: #8e8e93; border-color: rgba(255, 255, 255, 0.12); background: rgba(255, 255, 255, 0.04); opacity: 0.45; }
+.scene-btn.hidden, body.hide-magic-prompt .scene-btn, body.mp-no-scene .scene-btn { display: none !important; }
+/* Wildcards off (Config): no scene optimization (item 72). */
+body.wc-off .scene-btn, body.wc-off .mp-scene-row, body.wc-off .wc-only-row { display: none !important; }
+/* Scene optimization off (Config): its options hidden (item 73). */
+body.mp-no-scene .mp-scene-row:not(.mp-scene-main) { display: none !important; }
+body.mp-no-button .magic-btn { display: none !important; }
+body.mp-no-wcgen .wc-magic { display: none !important; }
+body.mp-no-prompt #llmTabs, body.mp-no-describe #llmTabs { display: none !important; }
+.mp-scene-hint { font-size: 12px; line-height: 1.35; color: var(--text-muted); }
+body.hide-magic-prompt .magic-btn {
+    display: none;
+}
+/* ControlNet's image box: UPLOAD IMAGE with its icon, as the other upload boxes say it. */
+.cn-upload-label {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    white-space: nowrap;
+    overflow: hidden;
+    font-size: var(--fs-btn-small);
+    font-weight: 700;
+    color: var(--text-main);
+}
+.cn-upload-label.hidden {
+    display: none;
+}
+/* Under 360px wide, MAGIC PROMPT at 11px so the Prompt title's row still fits. */
+@media (max-width: 359px) {
+    button[onclick^="openLlmModal"] { font-size: 11px !important; }
+}
+/* Small buttons' 14px icons at 16px, beside 13px text. */
+.btn-small svg[width="14"] { width: 16px; height: 16px; }
+/* Buttons in the app's typeface (left alone they fall back to Arial); the X keeps Arial, which centres its glyph. */
+button { font-family: inherit; }
+.close-btn { font-family: Arial, sans-serif; }
 
 button:disabled, .btn-icon:disabled, .btn-small:disabled, .btn-main:disabled {
     pointer-events: none;
 }
 
+html {
+    overscroll-behavior: none; /* no stretch or glow at the ends of the page */
+}
 body {
     background-color: var(--bg-app);
     color: var(--text-main);
     font-family: var(--font-stack);
     margin: 0;
     padding: clamp(10px, 4vw, 20px); /* Fluid padding for responsiveness */
-    padding-top: env(safe-area-inset-top);
+    padding-top: var(--safe-top, env(safe-area-inset-top));
     padding-bottom: calc(var(--dock-height) + 20px + env(safe-area-inset-bottom)); /* Space for Dock */
     display: flex;
     flex-direction: column;
@@ -270,12 +408,166 @@ canvas {
 .batch-group .row { width: 0; min-width: 100%; }
 .batch-group .row input { flex: 1 1 0; min-width: 0; width: 0; }
 
-/* Abort / Clear View under the GENERATE button, each half its width. Width is calculated from the same variables as the real buttons: (W - 2.5*gap - pad - 2*border) / 3, so it tracks them at any screen width. Below about 340px the left edge drifts slightly off GENERATE's; both tabs still match. nowrap and tight padding stop "CLEAR VIEW" wrapping. */
-.under-generate {
-    flex: 0 0 calc((100% - 2.5 * var(--row-gap, 10px) - var(--cta-pad, 16px) - 2 * var(--cta-border, 1px)) / 3);
+/* ABORT and CLEAR: equal halves, 38px tall. */
+.gen-btn-row {
+    margin-bottom: 10px;
+    align-items: stretch;
+    flex-wrap: nowrap;
+}
+.gen-btn-row > button {
+    flex: 1 1 0;
+    min-width: 0;
+    width: auto;
+    height: 38px;
+    margin: 0;
+    padding: 0 4px;
     white-space: nowrap;
-    padding-left: 4px !important;
-    padding-right: 4px !important;
+}
+/* Auto-Save and Preview: buttons in halves, green while on; Preview's half stays when hidden. */
+.gen-toggle-row {
+    margin-bottom: 10px;
+    flex-wrap: nowrap;
+}
+.gen-toggle-row > .row {
+    flex: 1 1 0;
+    min-width: 0;
+    width: auto;
+    gap: 0;
+    justify-content: center;
+    align-items: center;
+}
+.gen-toggle-row input.bojro-switch {
+    display: none;
+}
+.gen-toggle-row label {
+    flex: 1;
+    color: var(--text-muted);
+    height: 38px;
+    box-sizing: border-box;
+    justify-content: center;
+    margin: 0;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-panel);
+    font-size: var(--fs-btn-small);
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+}
+.gen-toggle-row label:active {
+    transform: scale(0.96);
+}
+.gen-toggle-row > .row:has(input:checked) label {
+    color: #4caf50 !important;
+    border-color: rgba(76, 175, 80, 0.45);
+    background: rgba(76, 175, 80, 0.14);
+}
+.gen-toggle-row > .row:has(input:disabled) label {
+    opacity: 0.5;
+}
+/* Beside GENERATE / UPSCALE: the bin (confirmUnloadModels(), network.js) and QUEUE, icons only. */
+.btn-small.gen-vram-btn,
+.btn-secondary.gen-queue-btn {
+    flex: 0 0 44px;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.btn-small.gen-vram-btn {
+    color: #f44336;
+    border: 1px solid rgba(244, 67, 54, 0.3);
+    background: rgba(244, 67, 54, 0.15);
+}
+/* LORA, STYLES and SAAC share a row (two halves while SAAC is off). */
+.prompt-tools {
+    margin-top: 5px;
+    gap: 10px;
+    flex-wrap: nowrap;
+}
+.prompt-tools > .prompt-tool {
+    flex: 1 1 0;
+    min-width: 0;
+    margin: 0;
+    padding: 10px 4px;
+}
+.btn-small.prompt-tool {
+    gap: 5px;
+    color: var(--accent-primary);
+    border: 1px solid rgba(var(--accent-primary-rgb), 0.35);
+    background: rgba(var(--accent-primary-rgb), 0.12);
+}
+.gen-toggle-row .fmt-btn {
+    flex: 1;
+    min-width: 0;
+    height: 38px;
+    margin: 0;
+    padding: 0 4px;
+}
+/* Inpaint / img2img: the cards are spaced by the column's 10px gap alone, and a group whose card is switched off
+   (ADetailer, ControlNet in Config > Models) takes no space. */
+#canvasWrapper > div > .glass-box,
+#inpSettingsRow {
+    margin-bottom: 0;
+}
+#inpAdetailerGroup:not(:has(> .glass-box:not(.feature-hidden))),
+#img2imgAdetailerGroup:not(:has(> .glass-box:not(.feature-hidden))) {
+    display: none;
+}
+/* Slider values on the slider's title row. */
+.slider-val {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent-primary);
+}
+/* Tinted like the System buttons. JPEG: blue. PNG: the tab's accent. "—": Forge not reached. */
+.btn-small.fmt-btn {
+    transition: none;
+    color: #2196F3;
+    border: 1px solid rgba(33, 150, 243, 0.35);
+    background: rgba(33, 150, 243, 0.07);
+}
+.btn-small.fmt-btn.fmt-png {
+    color: var(--accent-primary);
+    border-color: rgba(var(--accent-primary-rgb), 0.45);
+    background: rgba(var(--accent-primary-rgb), 0.1);
+}
+.btn-small.fmt-btn.fmt-webp {
+    color: #ba68c8;
+    border-color: rgba(186, 104, 200, 0.5);
+    background: rgba(186, 104, 200, 0.12);
+}
+/* ABORT: faint red when idle, bright while a job runs (setAbortButtonState()). */
+.btn-small.gen-abort {
+    color: rgba(244, 67, 54, 0.55);
+    border: 1px solid rgba(244, 67, 54, 0.2);
+    background: rgba(244, 67, 54, 0.03);
+}
+.btn-small.gen-abort.running {
+    color: #f44336;
+    border-color: rgba(244, 67, 54, 0.5);
+    background: rgba(244, 67, 54, 0.14);
+}
+.btn-small.gen-clear {
+    color: var(--text-main);
+    border: 1px solid var(--border-color);
+    background: var(--bg-panel);
+}
+.fmt-btn.fmt-unknown {
+    opacity: 0.5;
+}
+
+/* A tab's last checkpoint, shown dimmed until the server's list confirms it (showCachedCheckpoints(), network.js). */
+.model-picker-trigger .model-picker-trigger-primary,
+.model-picker-trigger .model-picker-trigger-subtitle {
+    transition: opacity 0.3s ease;
+}
+.model-picker-trigger.model-cached .model-picker-trigger-primary,
+.model-picker-trigger.model-cached .model-picker-trigger-subtitle {
+    opacity: 0.5;
 }
 
 /* Lets a long VAE/Text Encoder filename shrink and ellipsise instead of pushing its column out of bounds: flex items default to min-width:auto. Targeted at columns containing these trigger buttons rather than changing .col globally. */
@@ -375,7 +667,7 @@ h2.glitch-paused::after {
 }
 
 label {
-    font-size: 11px;
+    font-size: var(--fs-label);
     color: var(--text-muted);
     text-transform: uppercase;
     font-weight: 700;
@@ -435,6 +727,8 @@ input:not(.bojro-switch):focus, select:focus, textarea:focus {
     flex-shrink: 0;
 }
 
+/* A modal being filled in (LoRA settings): its switches jump to place instead of sliding. */
+.no-anim, .no-anim *, .no-anim *::before, .no-anim *::after { transition: none !important; }
 .bojro-switch::after {
     content: '';
     position: absolute;
@@ -611,7 +905,7 @@ input[readonly]:not([data-touch-lock]), textarea[readonly]:not([data-touch-lock]
     border: 1px solid var(--border-color);
     border-radius: var(--radius-sm);
     font-weight: 700;
-    font-size: 11px;
+    font-size: var(--fs-btn-small);
     cursor: pointer;
     flex-shrink: 0;
     text-transform: uppercase;
@@ -628,7 +922,7 @@ input[readonly]:not([data-touch-lock]), textarea[readonly]:not([data-touch-lock]
     background: var(--btn-bg-hover);
 }
 
-/* Dashed Button (Add LoRA/Clear View) */
+/* Dashed Button (Add LoRA) */
 .btn-small.dashed {
     background: transparent;
     border: 1px dashed var(--border-color);
@@ -700,6 +994,33 @@ input[readonly]:not([data-touch-lock]), textarea[readonly]:not([data-touch-lock]
     cursor: not-allowed;
     border: 1px solid var(--border-color);
     text-shadow: none;
+}
+
+/* Running (disabled): Generate and Upscale take .btn-secondary's colour and border. No transition, or the border
+   fades in from white. */
+#genBtn, #inpGenBtn, #upscaleBtn { transition: none; }
+/* Pressed: no movement, just a little darker, which leads into the grey of the running state. */
+#genBtn:active, #inpGenBtn:active, #upscaleBtn:active {
+    transform: none;
+    filter: brightness(0.8);
+    box-shadow: 0 4px 15px var(--accent-glow) !important;
+}
+/* BUSY: another kind of job is running (refreshBusyButtons(), engine.js). */
+#genBtn.gen-busy, #inpGenBtn.gen-busy, #upscaleBtn.gen-busy, #startQueueBtn.gen-busy {
+    opacity: 0.45;
+}
+#startQueueBtn.gen-busy {
+    background: var(--bg-panel) !important;
+    color: var(--text-main) !important;
+    border: 1px solid var(--border-color) !important;
+}
+#genBtn:disabled, #inpGenBtn:disabled, #upscaleBtn:disabled,
+#genBtn.gen-pending, #inpGenBtn.gen-pending, #upscaleBtn.gen-pending {
+    background: var(--bg-panel) !important;
+    border: var(--cta-border) solid var(--border-color) !important;
+    color: var(--text-main) !important;
+    box-shadow: var(--shadow-soft) !important;
+    text-shadow: none !important;
 }
 
 /* --- THEME-AWARE BRICK BUTTON --- */
@@ -943,7 +1264,8 @@ input[readonly]:not([data-touch-lock]), textarea[readonly]:not([data-touch-lock]
     transition: opacity 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
     z-index: 0;
 }
-.dock-item.active::before {
+/* Until DockGlide has put its sliding pill in (dockglide.js), the active item lights up on its own. */
+.glass-dock:not(.has-glider) .dock-item.active::before {
     opacity: 1;
 }
 /* No separate :active state on dock items; only the ::before animation above. */
@@ -954,25 +1276,76 @@ input[readonly]:not([data-touch-lock]), textarea[readonly]:not([data-touch-lock]
 }
 
 .dock-item i { transition: color 0.2s; width: 22px; height: 22px; }
-.dock-item span {
-    font-size: 9px;
-    font-weight: 800;
-    margin-top: 4px;
-    opacity: 0.7;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
 
-.dock-item.active {
+.glass-dock:not(.has-glider) .dock-item.active {
     /* background/box-shadow live on .dock-item::before above. */
     color: var(--bg-app);         /* Inverse text color */
     transform: translateY(-8px) scale(1.1);
 }
 
-/* FIX: Shrink Navbar and hide labels on extremely small devices */
+/* ---- Dock glide (dockglide.js) ----
+   One pill slides to the lit item (the active tab, or the one under a sliding finger), with the item's icon lifting
+   inside it. --dl / --ds are the lift and scale the pill and the lit icon share. */
+.glass-dock { --dl: -8px; --ds: 1.1; }
+.glass-dock.pressing:not(.sliding) { --ds: 1.02; }
+.glass-dock.sliding { --dl: -14px; --ds: 1.18; }
+.glass-dock.has-glider .dock-item {
+    transition: color 0.25s ease, opacity 0.2s ease,
+                transform 0.38s cubic-bezier(0.22, 1.3, 0.36, 1);
+}
+.glass-dock.has-glider .dock-item.lit {
+    color: var(--bg-app);
+    transform: translateY(var(--dl)) scale(var(--ds));
+}
+.glass-dock.sliding .dock-item:not(.lit) { opacity: 0.6; }
+.dock-glider {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 55px;
+    height: 55px;
+    border-radius: 18px;
+    background: var(--text-main);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+    pointer-events: none;
+    opacity: 0;
+    transform: translate3d(var(--gx, 0px), calc(var(--gy, 0px) + var(--dl)), 0) scale(var(--ds));
+    transition: transform 0.38s cubic-bezier(0.22, 1.3, 0.36, 1),
+                width 0.25s ease, height 0.25s ease, opacity 0.2s ease;
+    will-change: transform;
+}
+.glass-dock.sliding .dock-glider { box-shadow: 0 10px 26px rgba(0, 0, 0, 0.4); }
+.glass-dock.cancelling .dock-glider { opacity: 0.45 !important; }
+.dock-glider.no-anim { transition: none; }
+/* The name of the item under a sliding finger. */
+.dock-tip {
+    position: absolute;
+    left: 0;
+    bottom: calc(100% + 18px);
+    padding: 6px 12px;
+    border-radius: 12px;
+    background: var(--text-main);
+    color: var(--bg-app);
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transform: translateX(calc(var(--tx, 0px) - 50%)) translateY(6px) scale(0.9);
+    transition: opacity 0.15s ease, transform 0.3s cubic-bezier(0.22, 1.3, 0.36, 1);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+}
+.glass-dock.sliding:not(.cancelling) .dock-tip {
+    opacity: 1;
+    transform: translateX(calc(var(--tx, 0px) - 50%)) translateY(0) scale(1);
+}
+@media (prefers-reduced-motion: reduce) {
+    .dock-glider, .dock-tip, .glass-dock.has-glider .dock-item { transition-duration: 0.01s; }
+}
+
+/* A smaller dock on very small screens. */
 @media screen and (max-width: 380px) {
-    .dock-item span { display: none; }
     .dock-item { height: 48px; width: 48px; border-radius: 50%; }
     .glass-dock { padding: 6px 10px; border-radius: 40px; gap: 2px; }
 }
@@ -991,13 +1364,6 @@ input[readonly]:not([data-touch-lock]), textarea[readonly]:not([data-touch-lock]
 }
 
 /* A box nested inside another settings box (External Tunnel Links, Cloudflare, inside Connection): keeps its coloured border but drops the outer box's shadow/margin/fill. */
-.glass-box.cfg-subbox {
-    background: transparent;
-    box-shadow: none;
-    margin-bottom: 12px;
-}
-.glass-box.cfg-subbox:last-child { margin-bottom: 0; }
-
 /* Mode Switcher (Tabs) */
 .mode-switcher {
     display: flex;
@@ -1119,6 +1485,31 @@ input[readonly]:not([data-touch-lock]), textarea[readonly]:not([data-touch-lock]
     color: #000;
     border-color: var(--accent-primary);
 }
+/* Inpaint's DRAW / ERASE and WHOLE / MASKED, Upscale's resize mode and Config's connection mode: tinted when on, as
+   ADetailer's choices and the aspect ratios. */
+.toggle-opt.toggle-tint {
+    padding: 7px 12px;
+    border-radius: 8px;
+    font-size: 11px;
+    background: var(--bg-panel);
+}
+.toggle-opt.toggle-tint.active {
+    color: var(--accent-primary);
+    background: rgba(var(--accent-primary-rgb), 0.14);
+    border-color: rgba(var(--accent-primary-rgb), 0.4);
+}
+/* Inpaint's Mask card: WHOLE / MASKED in halves, then COLOR MATCH / SOFT INPAINT as on/off buttons. */
+.mask-mode-row {
+    gap: 10px;
+}
+.mask-mode-row .toggle-opt {
+    flex: 1 1 0;
+    text-align: center;
+}
+.gen-toggle-row.mask-switch-row {
+    margin: 12px 0 0;
+    gap: 10px;
+}
 
 .ad-pass-chip {
     display: flex;
@@ -1158,28 +1549,42 @@ input[readonly]:not([data-touch-lock]), textarea[readonly]:not([data-touch-lock]
    ========================================= */
 .queue-section { margin-bottom: 20px; }
 
+/* ACTIVE's header: the batch's step count beside ABORT. */
+.queue-active-right {
+    display: flex;
+    align-items: flex-end;
+    gap: 12px;
+}
+/* As big as nearly the titles, its bottom on ACTIVE's line and level with ABORT's (item 79). */
+.queue-progress-text {
+    display: inline-block;
+    font-size: calc(var(--fs-window-title) * 0.88);
+    line-height: 0.83;
+    font-weight: 700;
+    color: var(--accent-primary);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
 .queue-header {
     display: flex;
     justify-content: space-between;
-    align-items: center;
+    align-items: flex-end;
     margin-bottom: 10px;
     border-bottom: 1px solid var(--border-color);
     padding-bottom: 8px;
 }
 
 .queue-label {
-    font-size: 12px;
-    font-weight: 800;
+    font-size: var(--fs-window-title); /* the tab's titles, as HISTORY */
+    /* A line box as tall as the capitals, so the text's baseline is the box's bottom and lines up with the buttons' bottom. */
+    line-height: 0.83;
+    font-weight: 700;
     color: var(--text-muted);
-    letter-spacing: 0.5px;
 }
 
+/* A Queue list: its cards the full width; an empty one shows "Empty" in a band as tall as a card. */
 .queue-zone {
-    background: rgba(0,0,0,0.02); /* Very subtle tint */
-    border: 1px dashed var(--border-color);
-    border-radius: var(--radius-md);
-    padding: 8px;
-    min-height: 60px;
+    min-height: 44px;
 }
 
 .q-card {
@@ -1194,33 +1599,29 @@ input[readonly]:not([data-touch-lock]), textarea[readonly]:not([data-touch-lock]
     box-shadow: 0 2px 4px rgba(0,0,0,0.05);
 }
 
-.q-handle {
-    color: var(--text-muted);
-    margin-right: 10px;
-    cursor: grab;
-}
-
-.q-details {
-    flex: 1;
-    min-width: 0;
-    text-align: left;
-}
-
-.q-meta {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
 /* Gallery Grid */
 #savedGalleryGrid {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: 4px;
-    padding-bottom: 20px;
+    margin-bottom: 10px;
+}
+/* At least the screen's height (placeGalleryControls(), engine.js). */
+#view-gal {
+    display: flex;
+    flex-direction: column;
+}
+#galleryPaginationRow {
+    margin-top: auto;
+}
+/* ◀ / ▶: as tall as the other small buttons (16px icon + their 10px padding). */
+#galleryPaginationRow .gal-page-btn {
+    width: 44px;
+    padding: 10px 0;
 }
 
 .gal-thumb {
+    display: block;
     width: 100%;
     aspect-ratio: 1;
     object-fit: cover;
@@ -1229,25 +1630,51 @@ input[readonly]:not([data-touch-lock]), textarea[readonly]:not([data-touch-lock]
     cursor: pointer;
 }
 
-/* Selection Tick (Added back for functionality) */
+/* A selected image: the circle filled with the tab's accent, with a dark tick (top left, as gallery apps have it). */
 .gal-tick {
-    /* The tick icon wrapper only positions the icon; colour comes from currentColor (the per-mode accent), via the icon's stroke set in loadGallery()/engine.js. */
-    color: var(--accent-primary);
+    position: absolute;
+    top: 5px;
+    left: 5px;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--accent-primary);
     z-index: 10;
+    pointer-events: none;
+}
+.gal-tick::after {
+    content: '';
+    position: absolute;
+    left: 8px;
+    top: 4.5px;
+    width: 5px;
+    height: 10px;
+    border: solid #000;
+    border-width: 0 2.5px 2.5px 0;
+    transform: rotate(45deg);
 }
 
 /* Gallery badges and selection-mode circle. */
+#savedGalleryGrid.selecting .gal-badges { display: none; }
 .gal-badges {
     position: absolute;
     left: 5px;
-    bottom: 9px; /* 5px inset + the 4px inline-image gap under the thumb */
+    bottom: 5px;
     display: flex;
     gap: 2px;
     max-width: calc(100% - 10px);
     pointer-events: none;
 }
-body.hide-gallery-badges .gal-badges {
-    display: none;
+/* fitGalleryBadges(), engine.js */
+.gal-badges.compact {
+    left: 4px;
+    gap: 1px;
+    max-width: calc(100% - 8px);
+}
+.gal-badges.compact .gal-badge {
+    font-size: 8px;
+    padding: 2px 3px;
+    letter-spacing: 0;
 }
 .gal-badge {
     padding: 2px 4px;
@@ -1263,7 +1690,7 @@ body.hide-gallery-badges .gal-badges {
     display: none;
     position: absolute;
     top: 5px;
-    right: 5px;
+    left: 5px;
     width: 22px;
     height: 22px;
     box-sizing: border-box;
@@ -1277,6 +1704,120 @@ body.hide-gallery-badges .gal-badges {
 }
 #savedGalleryGrid.selecting .gal-selected .gal-select-ring {
     display: none;
+}
+
+/* A slider straight under its title sits as far from it as Denoising's does (that one shares a row with its value). */
+.col > .slider-fake-thumb-wrap, .col > input[type="range"] {
+    margin-top: 6px;
+}
+
+/* History thumbnails: a long press and slide selects, so no callout, image drag or text selection from it. */
+#savedGalleryGrid, #savedGalleryGrid img {
+    -webkit-touch-callout: none;
+    -webkit-user-drag: none;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+/* Select-all circle, as the thumbnails'; as tall as DELETE ALL (38px), whose place it takes, so the header keeps its height. */
+#galSelectAll {
+    position: relative;
+    width: 34px;
+    height: 38px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+#galSelectAll.hidden { display: none; }
+#galSelectAll .gal-select-ring { display: block; position: static; }
+#galSelectAll.all .gal-select-ring { display: none; }
+#galSelectAll .gal-tick { position: relative; top: auto; right: auto; }
+
+#galClearAllBtn {
+    min-width: 116px;
+}
+/* Selecting: the dock's buttons give way to the count, CANCEL and DELETE, in the same shape. */
+.glass-dock { position: relative; }
+.glass-dock.selecting > :not(#galSelectBar) { visibility: hidden; }
+#galSelectBar {
+    position: absolute;
+    inset: -1px;
+    box-sizing: border-box;
+    border-radius: inherit;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 10px 0 20px;
+}
+/* "N selected" beside the select-all circle. */
+.gal-select-headcount { align-self: center; font-size: var(--fs-section); font-weight: 700; color: var(--text-main); white-space: nowrap; margin-right: 4px; }
+.gal-select-headcount.hidden { display: none; }
+/* SAVED on images already on the device (selecting, and in the Already Saved dialog). */
+.gal-saved-mark { position: absolute; left: 0; right: 0; bottom: 0; padding: 3px 0; text-align: center; font-size: 10px; font-weight: 800; letter-spacing: 0.5px; color: #fff; background: rgba(0, 0, 0, 0.6); z-index: 2; pointer-events: none; }
+#appConfirmExtra { margin: -8px 0 20px; }
+.gal-dl-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; max-height: 50vh; overflow-y: auto; }
+.gal-dl-tile { position: relative; height: 0; padding-bottom: calc(100% - 4px); border-radius: 10px; overflow: hidden; border: 2px solid var(--border-color); cursor: pointer; }
+.gal-dl-tile img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0.45; }
+.gal-dl-tile.on { border-color: var(--accent-primary); }
+.gal-dl-tile.on img { opacity: 1; }
+.gal-dl-tick { position: absolute; top: 6px; left: 6px; width: 20px; height: 20px; border-radius: 50%; border: 2px solid #fff; background: rgba(0, 0, 0, 0.5); z-index: 3; }
+.gal-dl-tile.on .gal-dl-tick { background: var(--accent-primary); }
+#galSelectBar .btn-small { border-radius: 24px; }
+#galDeleteBtn {
+    background: #f44336;
+    color: #fff;
+    border-color: #f44336;
+}
+/* Nothing selected. */
+#galDeleteBtn:disabled {
+    opacity: 0.5;
+}
+/* Dock styles (setDockStyle(), cfg.js). Bar types run along the bottom edge, with room for the gesture bar. */
+body.dock-bar .dock-wrapper {
+    bottom: 0;
+    padding-bottom: 0;
+}
+body.dock-bar .glass-dock {
+    max-width: none;
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+    border-bottom: none;
+    padding: 8px 20px calc(12px + env(safe-area-inset-bottom));
+    box-shadow: 0 -6px 20px rgba(0,0,0,0.35);
+}
+body.dock-round .glass-dock {
+    border-radius: 24px 24px 0 0;
+    border: 1px solid var(--border-color);
+    border-bottom: none;
+}
+body.dock-inset .dock-item.active {
+    transform: none;
+}
+/* Inset keeps its items flat in the bar, sliding included. */
+body.dock-inset .glass-dock { --dl: 0px; --ds: 1; }
+body.dock-inset .glass-dock.sliding { --dl: -4px; --ds: 1.06; }
+body.dock-inset .dock-item {
+    width: 64px;
+    height: 48px;
+    border-radius: 16px;
+}
+body.dock-fill .dock-wrapper::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -20px;
+    height: calc(100% - 20px);
+    background: linear-gradient(to bottom, transparent, var(--bg-app) 45%);
+    pointer-events: none;
+    z-index: -1;
 }
 
 /* DELETE ALL's disabled look matches the ABORT buttons. Toggled via the disabled attribute in loadGallery(). */
@@ -1316,8 +1857,10 @@ body.hide-gallery-badges .gal-badges {
     position: fixed;
     top: 0; left: 0;
     width: 100%; height: 100%;
-    background: rgba(0,0,0,0.8);
-    backdrop-filter: blur(5px);
+    /* A light blur and dimming behind windows. */
+    background: rgba(0,0,0,0.9);
+    backdrop-filter: blur(3.3px);
+    -webkit-backdrop-filter: blur(3.3px);
     z-index: 200;
     display: flex;
     justify-content: center;
@@ -1325,10 +1868,6 @@ body.hide-gallery-badges .gal-badges {
     flex-direction: column;
 }
 
-/* The model/module picker has a higher z-index so it opens above other modals (e.g. Add/Edit Pairing), like #saac-img-modal above. */
-#modelPickerModal {
-    z-index: 300;
-}
 
 /* Live Preview Border: a ring in the tab's accent colour round the preview image (shown only while a job runs). It's drawn
    over the preview's outer 3px rather than outside it, so the preview is the result's size and nothing moves when the
@@ -1339,7 +1878,11 @@ body:not(.lp-border-off) #livePreviewImg, body:not(.lp-border-off) #inpLivePrevi
 }
 
 /* Modals with text inputs are anchored to the top rather than centred, so the keyboard and varying content height don't push them out of view. */
-#loraModal, #img2imgPresetModal, #styleModal, #saacModal, #loraConfigModal, #styleEditorModal, #llmModal, #checkpointManagerModal, #checkpointConfigModal {
+#loraModal, #img2imgPresetModal, #styleModal, #saacModal, #loraConfigModal, #styleEditorModal, #llmModal, #checkpointManagerModal, #checkpointConfigModal,
+#loraVariantEditor, #loraGroupEditor, #loraGroupPicker, #wildcardsModal, #wcEditorModal,
+/* And windows whose contents change while open. */
+#wcCheckModal, #wcExportModal, #wcImportModal, #wcHistModal, #wcTryModal, #wcRerollModal, #promptHistoryModal,
+#adetailerLabelsModal, #folderManagerModal, #queueJobModal, #promptGuideModal, #img2imgPresetEditor, #promptViewModal, #civSearchModal {
     justify-content: flex-start;
     padding-top: 40px;
 }
@@ -1365,20 +1908,29 @@ body:not(.lp-border-off) #livePreviewImg, body:not(.lp-border-off) #inpLivePrevi
     align-items: center;
     width: 100%;
     box-sizing: border-box;
-    margin-bottom: 15px;
-    padding: 10px 15px;
+    /* The title at the separator's left edge; what follows starts as far under it (10px) as the title sits above it. */
+    margin-bottom: 10px;
+    padding: 10px 0;
+    gap: 10px;
     border-bottom: 1px solid var(--border-color);
 }
+/* A confirmation with no subtext: the title, then the buttons. */
+#appConfirmModal.no-sub .modal-header { border-bottom: none; padding-bottom: 0; margin-bottom: 20px; }
+#appConfirmModal.no-sub #appConfirmMessage { display: none; }
 
 .modal-header h3 {
     margin: 0;
     color: var(--accent-primary);
     text-transform: uppercase;
-    /* One title size for every popup/modal. The generic picker (modelPickerTitle) covers checkpoint, sampler, scheduler, upscaler, ADetailer, ControlNet, VRAM Profile and Low Bits; other modals and appConfirm/appAlert share it. Inline font-sizes were removed separately. */
-    font-size: 16px;
+    /* One title size for every window (fitModalTitles(), utils.js, keeps it to one line). */
+    font-size: var(--fs-window-title);
+    white-space: nowrap;
+    min-width: 0;
+    overflow: hidden;
 }
 
-.close-btn {
+.close-btn,
+.header-btn {
     background: var(--btn-bg);
     border: 1px solid var(--border-color);
     border-radius: 50%;
@@ -1429,7 +1981,7 @@ body:not(.lp-border-off) #livePreviewImg, body:not(.lp-border-off) #inpLivePrevi
 
 .notice-board-eyebrow {
     color: var(--accent-primary);
-    font-size: 9px;
+    font-size: var(--fs-small);
     font-weight: 900;
     letter-spacing: 1.8px;
 }
@@ -1501,10 +2053,12 @@ body:not(.lp-border-off) #livePreviewImg, body:not(.lp-border-off) #inpLivePrevi
 
 /* --- Individual Chip --- */
 .folder-chip {
+    box-sizing: border-box;
+    height: 34px;
     background: var(--bg-input);
     border: 1px solid var(--border-color);
     color: var(--text-muted);
-    padding: 8px 16px;
+    padding: 0 14px;
     border-radius: 20px;
     font-size: 11px;
     font-weight: 600;
@@ -1520,9 +2074,25 @@ body:not(.lp-border-off) #livePreviewImg, body:not(.lp-border-off) #inpLivePrevi
 .folder-chip:active {
     transform: scale(0.95);
 }
+.folder-chip svg {
+    flex-shrink: 0;
+}
+.folder-chip .chip-star {
+    color: #ffc107;
+}
+.folder-chip .chip-heart {
+    color: var(--error);
+}
+/* The LoRA window's refresh button, as tall as the chips beside it. */
+#loraRefreshBtn {
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    aspect-ratio: auto;
+}
 
 .lora-refresh-btn {
-    /* Same padding and font-size as .folder-chip so the height matches; aspect-ratio makes it square. */
+    /* Square (the Checkpoint Manager's is stretched to its search box). */
     padding: 8px;
     font-size: 11px;
     aspect-ratio: 1;
@@ -1545,12 +2115,12 @@ body:not(.lp-border-off) #livePreviewImg, body:not(.lp-border-off) #inpLivePrevi
     transform: scale(0.95);
 }
 
+/* Tinted as the other selected options. Not bolder than the base .folder-chip (600), so tapping a chip doesn't change
+   its width and reflow the row. */
 .folder-chip.active {
-    background: var(--accent-primary);
-    color: #000; /* Contrast text */
-    border-color: var(--accent-primary);
-    /* Not bolder than the base .folder-chip (600), so tapping a chip doesn't change its width and reflow the row. */
-    box-shadow: 0 2px 8px rgba(var(--accent-primary-rgb), 0.3);
+    background: rgba(var(--accent-primary-rgb), 0.14);
+    color: var(--accent-primary);
+    border-color: rgba(var(--accent-primary-rgb), 0.4);
 }
 
 /* --- Folder Manager List (Vertical) --- */
@@ -1564,7 +2134,7 @@ body:not(.lp-border-off) #livePreviewImg, body:not(.lp-border-off) #inpLivePrevi
     background: var(--bg-panel);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-sm);
-    padding: 12px 15px;
+    padding: 4px 4px 4px 12px;
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -1572,7 +2142,7 @@ body:not(.lp-border-off) #livePreviewImg, body:not(.lp-border-off) #inpLivePrevi
 }
 
 .folder-item-name {
-    font-size: 13px;
+    font-size: 14px;
     color: var(--text-main);
     font-weight: 600;
     display: flex;
@@ -1580,11 +2150,16 @@ body:not(.lp-border-off) #livePreviewImg, body:not(.lp-border-off) #inpLivePrevi
     gap: 8px;
 }
 
+.folder-item-name svg {
+    flex-shrink: 0;
+    color: var(--text-muted);
+}
+
 .folder-item-count {
-    font-size: 10px;
+    font-size: 12px;
     color: var(--text-muted);
     background: var(--bg-input);
-    padding: 2px 6px;
+    padding: 2px 7px;
     border-radius: 4px;
 }
 
@@ -1603,8 +2178,10 @@ body:not(.lp-border-off) #livePreviewImg, body:not(.lp-border-off) #inpLivePrevi
 }
 
 .folder-heart-btn.active {
-    color: var(--error); /* Red heart */
-    fill: var(--error);
+    color: var(--error);
+}
+.folder-heart-btn.active svg {
+    fill: currentColor;
 }
 
 .folder-heart-btn:active {
@@ -1669,7 +2246,7 @@ body:not(.lp-border-off) #livePreviewImg, body:not(.lp-border-off) #inpLivePrevi
     display: flex;
     align-items: center;
     gap: 12px; /* Space between columns */
-    transition: all 0.2s;
+    transition: all 0.2s, margin-bottom 0s;
 }
 
 .lora-item-row.active {
@@ -1696,7 +2273,7 @@ body:not(.lp-border-off) #livePreviewImg, body:not(.lp-border-off) #inpLivePrevi
 }
 
 .lora-item-name {
-    font-size: 13px;
+    font-size: 15px;
     font-weight: 600;
     color: var(--text-main);
     /* Wraps long LoRA names onto a second line instead of truncating. */
@@ -1704,13 +2281,18 @@ body:not(.lp-border-off) #livePreviewImg, body:not(.lp-border-off) #inpLivePrevi
 }
 
 .lora-item-meta {
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 700;
     color: var(--text-muted);
     text-transform: uppercase;
 }
 .lora-item-row.active .lora-item-meta {
     color: var(--accent-primary);
+}
+/* inline-block: moves to the next line whole, but can still wrap on a very narrow screen. */
+.name-group {
+    display: inline-block;
+    max-width: 100%;
 }
 
 /*
@@ -1810,6 +2392,9 @@ button[data-kind="cn-resize-mode"] {
 .lora-btn-action {
     width: 36px;
     height: 36px;
+    padding: 0;
+    border: none;
+    background: var(--btn-bg);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1869,6 +2454,27 @@ body.fs-viewer-open .container {
 body.fs-viewer-open .dock-wrapper {
     visibility: hidden;
 }
+/* The gap under INITIALIZE ENGINE is the Dev Power row's, so with that hidden the button has the same space above and below. */
+#initEngineBtn {
+    margin-bottom: 0;
+}
+#devPowerSection {
+    margin-top: 15px !important;
+}
+#devPowerSection:last-child {
+    border-bottom: none !important;
+    padding-bottom: 0 !important;
+    margin-bottom: 0 !important;
+}
+/* Shown while Android's photo picker is up (PickerCover, editor.js). */
+#pickerCover {
+    position: fixed;
+    inset: 0;
+    background: var(--bg-app);
+    z-index: 100000;
+}
+#pickerCover.hidden { display: none; }
+#pickerCover.fading { opacity: 0; transition: opacity 0.25s ease; pointer-events: none; }
 /* A just-closed viewer or Live Preview full screen, kept drawn until the app behind it is (coverUntilAppDrawn(), engine.js). */
 #fullScreenModal.hidden.closing-cover, #lpFullscreen.hidden.closing-cover {
     display: flex !important;
@@ -1901,15 +2507,16 @@ body.fs-viewer-open .dock-wrapper {
 }
 
 /* Auto-Delete Warning: the RECENT grid, with SAVED on images already saved to the phone. Viewing one from here
-   offers only close, download and delete. */
-.autodel-text { font-size: 13px; color: var(--text-main); margin: 4px 0 10px; line-height: 1.4; }
+   offers only close, share, download and delete, in their usual places (SEND's space kept). */
+.autodel-text { font-size: 13px; color: var(--text-main); margin: 0 0 10px; line-height: 1.4; }
 .autodel-saved {
     position: absolute; left: 0; right: 0; bottom: 0;
     padding: 3px 0; text-align: center;
     font-size: 10px; font-weight: 900; letter-spacing: 1px; color: #fff;
     background: rgba(0, 0, 0, 0.55);
 }
-#fullScreenModal.fs-from-autodelete button[onclick="editCurrentFs()"],
+#fullScreenModal.fs-from-autodelete #fsSendBtn { visibility: hidden; }
+#fullScreenModal.fs-from-autodelete #fsSendMenu,
 #fullScreenModal.fs-from-autodelete #fsSendToCnBtn,
 #fullScreenModal.fs-from-autodelete #fsAnalyzeBtn { display: none !important; }
 
@@ -1921,23 +2528,23 @@ body.fs-viewer-open .dock-wrapper {
     justify-content: space-between;
 }
 #lpFsControls { gap: var(--row-gap, 10px); }
+/* CLOSE as in the image viewer, as wide as ABORT. */
 #lpFsControls .lp-fs-close {
-    flex: 0 0 44px;
-    width: 44px;
+    flex: 0 0 64px;
+    width: 64px;
     height: 44px;
     padding: 0;
-    border-radius: 50%;
     background: #333;
 }
-#lpFsControls .lp-fs-close svg { width: 20px; height: 20px; }
+/* ABORT sits right of GENERATE, as wide as CLOSE on the left, so GENERATE is centred. */
 #lpFsControls .lp-fs-abort {
-    flex: 0 0 auto !important;
-    width: auto !important;
+    flex: 0 0 64px !important;
+    width: 64px !important;
     height: 44px !important;
     margin: 0 !important;
     padding: 0 6px !important;
 }
-#lpFsControls .lp-fs-gen { flex: 1 1 0 !important; }
+#lpFsControls .lp-fs-gen { flex: 1 1 0 !important; min-width: 0 !important; white-space: pre !important; overflow: hidden; }
 body.lp-fs-open .container { content-visibility: hidden; }
 body.lp-fs-open .dock-wrapper { visibility: hidden; }
 
@@ -1946,6 +2553,289 @@ body.lp-fs-open .dock-wrapper { visibility: hidden; }
     display: none;
 }
 
+/* Viewer: CLOSE, then send-to buttons, then Download and Delete, tinted as the rest of the app. */
+#fullScreenModal .lightbox-controls {
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+}
+#fullScreenModal .fs-group {
+    display: flex;
+    gap: 10px;
+}
+.btn-icon.fs-act {
+    width: 42px;
+    height: 42px;
+    flex: 0 0 42px;
+}
+.btn-icon.fs-send {
+    color: var(--accent-primary);
+    background: rgba(var(--accent-primary-rgb), 0.15);
+    border: none;
+}
+.btn-icon.fs-download {
+    color: #4caf50;
+    background: rgba(76, 175, 80, 0.15);
+    border: none;
+}
+.btn-icon.fs-delete {
+    color: #f44336;
+    background: rgba(244, 67, 54, 0.15);
+    border: none;
+}
+/* Up to two lines, then "…". */
+.card-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-main);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+}
+.card-sub {
+    margin-top: 3px;
+    font-size: 12px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.card-btn {
+    width: 34px;
+    height: 34px;
+    flex: 0 0 34px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    border: none;
+    color: var(--text-muted);
+    background: var(--btn-bg);
+    cursor: pointer;
+}
+.card-btn-accent {
+    color: var(--accent-primary);
+    background: rgba(var(--accent-primary-rgb), 0.15);
+}
+.card-btn-delete {
+    color: #f44336;
+    background: rgba(244, 67, 54, 0.15);
+}
+.card-btn:active {
+    transform: scale(0.94);
+}
+/* The rangeslider.js sliders' values in the shared slider-value style. */
+/* − / + either side of a slider's value (nudgeSlider(), editor.js). */
+.slider-nudge {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: -6px 0;
+}
+.nudge-btn {
+    width: 26px;
+    height: 26px;
+    flex: 0 0 26px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--accent-primary);
+    background: rgba(var(--accent-primary-rgb), 0.15);
+    cursor: pointer;
+}
+.nudge-btn:active {
+    transform: scale(0.94);
+}
+/* Inpaint / img2img Denoising: − and + either side of the slider. */
+.denoise-nudge-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 6px;
+}
+.cn-slider-head:has(.slider-nudge) {
+    align-items: center;
+}
+.cn-slider-head .slider-val {
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent-primary);
+}
+/* ADetailer: Max masks, Mask blur and Padding in a row; More settings as an inset card with Config-style option
+   names, full-width choices and round buttons beside Prompt / Negative. */
+.ad-num-row input {
+    text-align: center;
+}
+.ad-more-card,
+.inset-card {
+    padding: 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.18);
+}
+.ad-more-card .ad-opt-name {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-main);
+    text-transform: none;
+    letter-spacing: 0;
+    margin: 0;
+}
+.ad-more-opt {
+    margin-top: 12px;
+}
+.ad-seg {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+}
+.ad-seg .toggle-opt {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 6px;
+    border-radius: 8px;
+    font-size: 12px;
+    white-space: nowrap;
+    background: var(--bg-panel);
+}
+.ad-seg .toggle-opt.active {
+    color: var(--accent-primary);
+    background: rgba(var(--accent-primary-rgb), 0.14);
+    border-color: rgba(var(--accent-primary-rgb), 0.4);
+}
+.ad-more-switch {
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 12px;
+}
+.ad-prompt-head {
+    justify-content: space-between;
+    align-items: center;
+    margin: 12px 0 5px;
+}
+.ad-prompt-btns {
+    width: auto;
+    gap: 8px;
+}
+.ad-prompt-btns .card-btn {
+    width: 28px;
+    height: 28px;
+    flex-basis: 28px;
+}
+.card-btn-green {
+    color: #4caf50;
+    background: rgba(76, 175, 80, 0.15);
+}
+/* Window option names as in Config, and the windows' SAVE button. */
+label.opt-name {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-main);
+    text-transform: none;
+    letter-spacing: 0;
+    margin: 0;
+}
+.btn-small.btn-save {
+    background: var(--accent-gradient);
+    color: white;
+}
+.btn-small.btn-cancel {
+    background: var(--btn-bg);
+    border: 1px solid var(--border-color);
+    color: var(--text-main);
+}
+/* Magic Prompt: PERSISTENT CHAT (two thirds) and RESET (a third, dimmed while chat is off). */
+.gen-toggle-row.llm-chat-row {
+    margin: 0;
+    gap: 10px;
+}
+.llm-chat-row > .row {
+    flex: 2 1 0;
+}
+.btn-small.llm-reset-btn {
+    flex: 1 1 0;
+    min-width: 0;
+    height: 38px;
+    padding: 0 4px;
+    gap: 5px;
+    color: #f44336;
+    border: 1px solid rgba(244, 67, 54, 0.35);
+    background: rgba(244, 67, 54, 0.12);
+}
+.btn-small.llm-reset-btn:disabled {
+    opacity: 0.5;
+}
+/* Partial Control: rows as the Checkpoint Manager's, tinted ON / KILL. */
+.model-item-row.pwk-row {
+    margin: 0;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    cursor: default;
+}
+/* Dev Power's PWK and KILL!, tinted as Partial Control's buttons. */
+.btn-small.dev-power-btn {
+    width: auto;
+    height: 36px;
+    padding: 0 12px;
+    border: none;
+}
+.btn-small.dev-power-pwk {
+    color: var(--accent-primary);
+    background: rgba(var(--accent-primary-rgb), 0.15);
+}
+.btn-small.dev-power-kill {
+    color: #f44336;
+    background: rgba(244, 67, 54, 0.15);
+}
+.btn-small.pwk-on,
+.btn-small.pwk-kill {
+    width: auto;
+    padding: 6px 14px;
+    border: none;
+}
+.btn-small.pwk-on {
+    color: #4caf50;
+    background: rgba(76, 175, 80, 0.15);
+}
+.btn-small.pwk-kill {
+    color: #f44336;
+    background: rgba(244, 67, 54, 0.15);
+}
+/* Saving or renaming a preset: the name box full width, its buttons under it. */
+/* ADetailer Toast Text: one card per model, with the toast it gives. */
+.ad-label-card {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    background: var(--bg-panel);
+}
+.ad-label-card .col label {
+    margin: 0 0 5px;
+}
+.ad-label-card .card-btn {
+    width: 38px;
+    height: 38px;
+    flex-basis: 38px;
+}
+.ad-label-preview {
+    font-size: 12px;
+    color: var(--text-muted);
+}
 .lightbox-controls {
     width: 100%;
     padding: 20px;
@@ -1970,7 +2860,7 @@ body.lp-fs-open .dock-wrapper { visibility: hidden; }
     margin: 20px auto;
     display: none;
 }
-/* "Hide Loading Circle" (Settings > Interface): hides only the two spinners above the results galleries while generating (main tabs, and Inpaint/img2img/Upscale). Scoped by id since .spinner is used elsewhere. !important overrides engine.js's inline display. Off by default. */
+/* "Show loading circle" switched off (Config > Interface): hides only the two spinners above the results galleries while generating (main tabs, and Inpaint/img2img/Upscale). Scoped by id since .spinner is used elsewhere. !important overrides engine.js's inline display. */
 body.hide-gen-spinner #loadingSpinner,
 body.hide-gen-spinner #inpLoadingSpinner { display: none !important; }
 
@@ -2033,6 +2923,7 @@ body.hide-gen-spinner #inpLoadingSpinner { display: none !important; }
 /* Connection Button States */
 .connection-btn {
     position: relative;
+    gap: 6px;
     transition: all 0.3s ease;
 }
 
@@ -2043,11 +2934,11 @@ body.hide-gen-spinner #inpLoadingSpinner { display: none !important; }
     animation: pulse 1.5s infinite;
 }
 
+/* Green as AUTO-SAVE / PREVIEW when on. */
 .connection-btn.connected {
-    background: rgba(0, 230, 118, 0.2);
-    border-color: var(--success);
-    color: var(--success);
-    box-shadow: 0 0 10px rgba(0, 230, 118, 0.3);
+    background: rgba(76, 175, 80, 0.14);
+    border-color: rgba(76, 175, 80, 0.45);
+    color: #4caf50;
 }
 
 .connection-btn.disconnected {
@@ -2130,8 +3021,8 @@ body.hide-gen-spinner #inpLoadingSpinner { display: none !important; }
 /* Keep the accent on the outer section card and flatten its inner wrappers. */
 #view-cfg .cfg-card {
     box-sizing: border-box;
-    padding: 16px;
-    margin-bottom: 12px;
+    padding: 15px;
+    margin-bottom: 10px;
     border: 1px solid rgba(255, 255, 255, 0.06);
     border-left: 3.5px solid var(--cfg-theme-accent, var(--accent-primary));
     border-radius: 14px;
@@ -2147,22 +3038,12 @@ body.hide-gen-spinner #inpLoadingSpinner { display: none !important; }
     box-shadow: none !important;
 }
 
-#view-cfg .cfg-card .cfg-subbox {
-    padding: 0;
-    margin-bottom: 12px;
-}
-
 #view-cfg .cfg-model-toggle label {
     color: var(--cfg-theme-accent);
 }
 
 #view-cfg .cfg-model-toggle input[type="checkbox"] {
     accent-color: var(--cfg-theme-accent);
-}
-
-#view-cfg .cfg-card:hover,
-#view-cfg .cfg-card:focus-within {
-    box-shadow: 0 0 10px rgba(var(--cfg-theme-rgb), 0.2);
 }
 
 /* Section Header Matching */
@@ -2194,9 +3075,107 @@ body.hide-gen-spinner #inpLoadingSpinner { display: none !important; }
     color: var(--text-main);
     padding: 12px;
     border-radius: var(--radius-sm);
-    font-family: 'monospace';
+    font-family: inherit;
     font-size: 14px;
     width: 100%;
+}
+
+/* A field: its name above its box. */
+#view-cfg .cfg-field {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 0 5px;
+}
+#view-cfg .cfg-field > label {
+    margin: 0;
+    color: var(--text-main);
+}
+#view-cfg .cfg-hint {
+    font-size: var(--fs-hint);
+    color: var(--text-muted);
+    line-height: 1.4;
+    margin: 0;
+    padding: 0 5px;
+}
+/* Local ports: four small boxes in a row, named above. */
+#view-cfg .conn-ports {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+}
+#view-cfg .conn-ports .col {
+    gap: 5px;
+    min-width: 0;
+}
+#view-cfg .conn-ports label {
+    margin: 0;
+}
+#view-cfg .conn-ports input {
+    text-align: center;
+    padding-left: 4px;
+    padding-right: 4px;
+}
+/* Option names (the label beside a switch, box or picker). */
+#view-cfg label.cfg-opt {
+    font-size: 14px;
+    font-weight: 500;
+    text-transform: none;
+    letter-spacing: 0;
+}
+/* The stripe marks the open section only. */
+#view-cfg .cfg-card:has(> .cfg-accordion-content.hidden) {
+    border-left-color: rgba(255, 255, 255, 0.06);
+}
+/* Visible Tabs: chips, coloured while on. */
+#view-cfg .cfg-model-toggle {
+    flex: 1 1 0;
+    min-width: 0;
+}
+#view-cfg .cfg-model-toggle input.bojro-switch {
+    display: none;
+}
+#view-cfg .cfg-model-toggle label {
+    width: 100%;
+    box-sizing: border-box;
+    justify-content: center;
+    margin: 0 !important;
+    padding: 10px 0;
+    border-radius: 10px;
+    border: 1.5px solid var(--cfg-theme-accent);
+    background: rgba(var(--cfg-theme-rgb), 0.15);
+    font-size: 13px;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+}
+#view-cfg .cfg-model-toggle:not(:has(input:checked)) label {
+    color: var(--text-muted);
+    border-color: rgba(255, 255, 255, 0.12);
+    background: transparent;
+}
+#view-cfg .cfg-theme-comfy {
+    --cfg-theme-accent: #ff5722;
+    --cfg-theme-rgb: 255, 87, 34;
+}
+/* Confirmation with a checkbox (appConfirm(..., { checkbox })). */
+#appConfirmModal.has-check #appConfirmMessage {
+    margin-bottom: 10px !important;
+}
+.app-confirm-check {
+    margin: 0 0 20px;
+    gap: 10px;
+    font-size: 13px;
+    font-weight: 500;
+    text-transform: none;
+    color: var(--text-main);
+    cursor: pointer;
+}
+.app-confirm-check input {
+    width: 18px;
+    height: 18px;
+    margin: 0;
+    accent-color: var(--accent-primary);
 }
 
 #view-cfg input:not(.bojro-switch):focus {
@@ -2470,7 +3449,7 @@ body.hide-gen-spinner #inpLoadingSpinner { display: none !important; }
     display: none !important;
 }
 
-/* 3. Hide the buttons OUTSIDE the canvas wrapper (Generate, New Image, Clear View) */
+/* 3. Hide the buttons OUTSIDE the canvas wrapper (Generate, Clear) */
 .comfy-mode-active #view-inp > .row {
     display: none !important;
 }
@@ -2524,32 +3503,33 @@ button[onclick*="setComfyLoraStrength"] {
     height: 100%;
     /* Off-screen cards skip layout, so long lists stay quick to grow. */
     content-visibility: auto;
-    contain-intrinsic-size: auto 135px;
+    contain-intrinsic-size: auto 139px; /* the content box: the card less its borders */
 }
 
-/* --- THE NEON GLOW --- */
+/* In the prompt: as a selected LoRA row. */
 .saac-card.saac-active {
-    border-color: var(--accent-primary, #ff9800) !important;
-    box-shadow: 
-        0 0 10px var(--accent-glow, rgba(255, 152, 0, 0.4)),
-        0 0 20px var(--accent-glow, rgba(255, 152, 0, 0.2));
-    transform: translateY(-2px);
-    z-index: 5;
+    border-color: var(--accent-primary) !important;
+    background: rgba(var(--accent-primary-rgb), 0.05);
+}
+.saac-card.saac-active .saac-card-info {
+    background: transparent;
 }
 
 /* --- RESIZED FULL IMAGE --- */
 .saac-card-thumb {
     width: 100%;
-    height: 85px !important; 
+    height: 101px !important;
     background: #000;
     position: relative;
     flex-shrink: 0;
 }
 
+/* Filling the tile; headshots, so cropped from the bottom. */
 .saac-card-thumb img {
     width: 100%;
     height: 100%;
-    object-fit: contain; /* Shows full uncropped image */
+    object-fit: cover;
+    object-position: center top;
     display: block;
 }
 
@@ -2563,10 +3543,12 @@ button[onclick*="setComfyLoraStrength"] {
     color: var(--text-muted);
 }
 
-/* --- TEXT SIZE UPGRADE --- */
+/* Room for the name's two lines. */
 .saac-card-info {
-    padding: 10px 4px;
-    flex: 1;
+    box-sizing: border-box;
+    height: 38px;
+    padding: 0 4px;
+    flex: none;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -2575,12 +3557,11 @@ button[onclick*="setComfyLoraStrength"] {
 }
 
 .saac-card-name {
-    font-size: 13px !important; /* Larger text */
-    font-weight: 800;
-    color: var(--text-main, #fff);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-main);
     text-align: center;
-    line-height: 1.1;
-    text-transform: uppercase;
+    line-height: 1.2;
     word-break: break-word;
     display: -webkit-box;
     -webkit-line-clamp: 2;
@@ -2592,29 +3573,6 @@ button[onclick*="setComfyLoraStrength"] {
     color: var(--accent-primary, #ff9800);
 }
 
-/* --- FIXED ZOOM BUTTON --- */
-.saac-card-zoom {
-    position: absolute;
-    top: 5px;
-    right: 5px;
-    background: rgba(0, 0, 0, 0.7);
-    padding: 6px;
-    border-radius: 6px;
-    color: white;
-    z-index: 10;
-    cursor: pointer;
-    backdrop-filter: blur(2px);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.saac-card-zoom:active {
-    background: var(--accent-primary);
-    color: black;
-}
-
 /* FULL SCREEN MODAL Z-INDEX FIX */
 #saac-img-modal {
     position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); 
@@ -2624,43 +3582,6 @@ button[onclick*="setComfyLoraStrength"] {
 }
 #saac-img-modal.active { opacity: 1; pointer-events: auto; }
 #saac-img-content { max-width: 90%; max-height: 80%; object-fit: contain; border-radius: 12px; }
-
-/* --- SAAC ROUNDED CLOSE OPTION --- */
-.saac-close-btn {
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    background: var(--bg-input);
-    border: 1px solid var(--border-color);
-    color: var(--text-muted);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    padding: 0;
-    flex-shrink: 0;
-}
-
-.saac-close-btn:hover {
-    color: var(--text-main);
-    border-color: var(--text-muted);
-    background: var(--bg-panel);
-}
-
-.saac-close-btn:active {
-    transform: scale(0.9);
-    background: var(--error);
-    border-color: var(--error);
-    color: white;
-    box-shadow: 0 0 10px rgba(244, 67, 54, 0.4);
-}
-
-/* Ensure the SVG inside is perfectly centered */
-.saac-close-btn svg {
-    display: block;
-}
-
 
 /* Analyzer tab (analyzer.js): settings and LoRA chips, and collapsible prompt text. A chip is a button; tapping copies its value. */
 .ana-chips {
@@ -2689,7 +3610,7 @@ button[onclick*="setComfyLoraStrength"] {
     border-color: var(--accent-primary);
 }
 .ana-chip-key {
-    font-size: 9px;
+    font-size: var(--fs-small);
     text-transform: uppercase;
     letter-spacing: 0.5px;
     color: var(--text-muted);
@@ -2745,7 +3666,7 @@ button[onclick*="setComfyLoraStrength"] {
 
 /* Analyzer "Send image to" buttons: the same outlined look as the "Use In" buttons (renderUseInButtons(), engine.js). */
 .ana-send-btn {
-    /* Sized by their text plus a minimum padding, with spare row width shared equally. The row never wraps; padding and type size step down on narrower phones. */
+    /* Sized by their text plus a minimum padding, with spare row width shared equally. The row never wraps; padding steps down on narrower phones. */
     flex: 1 1 auto;
     min-width: 0;
     white-space: nowrap;
@@ -2782,7 +3703,7 @@ button[onclick*="setComfyLoraStrength"] {
     gap: 10px;
     max-width: 500px;
     margin: 0 auto;
-    padding: calc(8px + env(safe-area-inset-top, 0px)) 14px 8px;
+    padding: calc(8px + var(--safe-top, env(safe-area-inset-top, 0px))) 14px 8px;
 }
 .ana-sticky-thumb {
     width: 40px;
@@ -2817,13 +3738,11 @@ button[onclick*="setComfyLoraStrength"] {
 @media (max-width: 420px) {
     .ana-send-btn {
         padding: 10px 10px;
-        font-size: 10.5px;
     }
 }
 @media (max-width: 370px) {
     .ana-send-btn {
         padding: 10px 8px;
-        font-size: 10px;
     }
 }
 /* Only below any phone that exists would it fail to fit; let it wrap there rather than clip. */
@@ -2835,17 +3754,27 @@ button[onclick*="setComfyLoraStrength"] {
 }
 
 /* Analyzer history sheet (analyzerhistory.js) */
+.ana-history-wrap {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
 .ana-history-grid {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 10px;
     overflow-y: auto;
+    overscroll-behavior: contain;
+    flex: 1 1 auto;
+    min-height: 0;
     max-height: 62vh;
     padding: 4px 2px 2px;
 }
+/* Square by padding (of its width), not aspect-ratio, so a full grid can't shrink the rows under the tiles. */
 .ana-history-tile {
     position: relative;
-    aspect-ratio: 1;
+    height: 0;
+    padding-bottom: calc(100% - 2px);
     border-radius: 10px;
     overflow: hidden;
     border: 1px solid var(--border-color);
@@ -2853,6 +3782,8 @@ button[onclick*="setComfyLoraStrength"] {
     cursor: pointer;
 }
 .ana-history-tile img {
+    position: absolute;
+    inset: 0;
     width: 100%;
     height: 100%;
     object-fit: cover;
@@ -2885,9 +3816,14 @@ button[onclick*="setComfyLoraStrength"] {
 .ana-history-empty {
     grid-column: 1 / -1;
     padding: 30px 10px;
+}
+/* Empty lists (Queue, History, recent images, Data Usage, presets, Checkpoint Manager): as the upload boxes' "Tap to ..." line. */
+.empty-note, .ana-history-empty {
     text-align: center;
     color: var(--text-muted);
-    font-size: 12px;
+    font-size: var(--fs-btn-small);
+    font-weight: 700;
+    text-transform: uppercase;
 }
 
 /* Nothing under Copy Metadata unless the Additional Upscale Features fields follow. */
@@ -2922,18 +3858,15 @@ button[onclick*="setComfyLoraStrength"] {
 .brush-size-preview {
     position: fixed;
     border-radius: 50%;
-    border: 1px solid #000;
+    /* The mask's colour, as the stroke will look; no edge. */
     background: rgba(255, 165, 0, 0.5);
-    box-shadow: 0 0 4px rgba(0,0,0,0.6);
-    box-sizing: border-box;
     pointer-events: none;
     z-index: 101;
     opacity: 0;
     transition: opacity 0.2s ease;
 }
 .brush-size-preview.erase {
-    background: rgba(0, 0, 0, 0.25);
-    border-style: dashed;
+    background: rgba(0, 0, 0, 0.35);
 }
 .brush-size-preview.visible {
     opacity: 1;
@@ -2943,7 +3876,7 @@ button[onclick*="setComfyLoraStrength"] {
 /* Data Usage Tracker (datausage.js). */
 .data-usage-pill {
     position: fixed;
-    top: calc(env(safe-area-inset-top) + 8px);
+    top: calc(var(--safe-top, env(safe-area-inset-top)) + 8px);
     left: 50%;
     transform: translateX(-50%);
     padding: 5px 12px;
@@ -3046,6 +3979,15 @@ button[onclick*="setComfyLoraStrength"] {
 .data-usage-net.mobile {
     background: rgba(255, 152, 0, 0.3);
 }
+.data-usage-fmt {
+    background: rgba(33, 150, 243, 0.3);
+}
+.data-usage-fmt.png {
+    background: rgba(var(--accent-primary-rgb), 0.3);
+}
+.data-usage-fmt.webp {
+    background: rgba(186, 104, 200, 0.35);
+}
 .data-usage-figures {
     display: flex;
     align-items: center;
@@ -3059,5 +4001,926 @@ button[onclick*="setComfyLoraStrength"] {
     color: var(--accent-primary);
 }
 
-/* Debug log (Config > Experimental). */
+/* Debug log (Config > Diagnostics). */
 .debug-log-text { flex: 1; min-height: 200px; overflow: auto; margin: 0; font-size: 10px; line-height: 1.4; white-space: pre-wrap; word-break: break-all; color: var(--text-main); user-select: text; -webkit-user-select: text; }
+
+/* A closed section's header has no gap under it, so its title is centred. */
+.row:has([id^="arr-"]):not(.cfg-accordion-header):has(+ .hidden) {
+    margin-bottom: 0 !important;
+}
+/* A header title without its own margin (Active Checkpoint) would sit 5px low (label's margin-top). */
+.glass-box > .row:not(.cfg-accordion-header):has(> [id^="arr-"]) > label {
+    margin-top: 0;
+}
+
+/* HISTORY sits as the Queue tab's titles do: at the left edge, its text's bottom on the line of its buttons' bottom. */
+.history-title {
+    margin: 0;
+    line-height: 0.83;
+}
+/* An empty Queue / Active / Completed list: "Empty" in the middle of the box. */
+.queue-zone:has(> .empty-note) {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Generation Params' save / load default buttons sit beside its title while the section is open. */
+.gp-icons { display: inline-flex; gap: 8px; align-items: center; }
+.row:has(+ .hidden) .gp-icons { display: none; }
+/* A closed Config section: no gap under its title. */
+#view-cfg .cfg-accordion-header:has(+ .hidden) {
+    margin-bottom: 0 !important;
+}
+/* Config's section titles (CONNECTION, INTERFACE...) at the section-title size, as Prompt and HISTORY. */
+#view-cfg .cfg-accordion-header > label {
+    font-size: var(--fs-section);
+    margin-top: 0;
+}
+/* Config search: a magnifier inside the box, an X to clear it. */
+#cfgSearchWrap {
+    position: relative;
+    margin-bottom: 10px;
+}
+#cfgSearchWrap > svg {
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-muted);
+    pointer-events: none;
+}
+#view-cfg #cfgSearch {
+    padding-left: 36px;
+    padding-right: 36px;
+    font-family: inherit;
+}
+#cfgSearchClear {
+    position: absolute;
+    right: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    padding: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.cfg-search-miss { display: none !important; }
+mark.cfg-search-hit {
+    background: rgba(255, 152, 0, 0.35);
+    color: inherit;
+    border-radius: 3px;
+}
+.lora-item-info .model-item-subtitle {
+    font-size: 12px;
+}
+
+/* A LoRA with variants: a count badge on its thumbnail's corner. */
+.lv-thumb-wrap { position: relative; display: flex; flex-shrink: 0; }
+.lv-thumb-count {
+    position: absolute; right: -6px; bottom: -6px; min-width: 22px; height: 22px; padding: 0 5px; box-sizing: border-box;
+    border-radius: 11px; background: var(--accent-primary); color: #000; font-size: 11px; font-weight: 800;
+    display: flex; align-items: center; justify-content: center; gap: 2px; border: 2px solid var(--bg-panel);
+}
+/* Variant rows: indented under their LoRA, with a line down the left; the same height as a LoRA row. */
+.lora-item-row.lv-child { margin-left: 22px; position: relative; }
+.lora-item-row.lv-child::before {
+    content: ''; position: absolute; left: -13px; top: -9px; bottom: -1px;
+    border-left: 2px solid rgba(255, 152, 0, 0.35);
+}
+.lv-pin { color: var(--text-muted); }
+.lv-pin.pinned { color: #2196F3; }
+.lv-sub { font-size: 12px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lv-add-row {
+    justify-content: center; gap: 6px; background: transparent; border: 1.5px dashed var(--border-color);
+    color: var(--text-muted); font-size: 13px; font-weight: 700;
+}
+.lv-add-spacer { visibility: hidden; width: 0; overflow: hidden; margin: 0 0 0 -12px; padding: 0; }
+.modal-header h3.lv-title { max-width: 70%; cursor: text; font-size: var(--fs-window-title); text-transform: none; white-space: normal; }
+.modal-header h3.lv-title-empty { color: var(--text-muted); }
+.lv-thumb-pick { position: relative; width: 56px; height: 84px; padding: 0; border-radius: 6px; border: 1px solid var(--border-color); background: var(--bg-input); overflow: hidden; flex-shrink: 0; cursor: pointer; }
+.lv-thumb-pick img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.lv-thumb-badge { position: absolute; right: 3px; bottom: 3px; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.7); color: #fff; }
+.lv-thumb-hint { font-size: 12px; color: var(--text-muted); line-height: 1.4; }
+/* Backup & Restore's buttons (System Settings). */
+.br-btns { gap: 10px; }
+.br-btns .btn-small { flex: 1; min-width: 0; width: auto; gap: 6px; }
+.br-backup { color: #4caf50; border-color: rgba(76, 175, 80, 0.3); background: rgba(76, 175, 80, 0.05); }
+.br-restore { color: #ff9800; border-color: rgba(255, 152, 0, 0.3); background: rgba(255, 152, 0, 0.05); }
+
+/* Character Select's database download (saac.js). */
+.saac-sync { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 28px 8px 22px; }
+.saac-sync-icon { width: 56px; height: 56px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: rgba(255, 152, 0, 0.15); color: var(--accent-primary); margin-bottom: 14px; }
+.saac-sync-title { font-size: 17px; font-weight: 700; color: var(--text-main); }
+.saac-sync-note { font-size: 13px; color: var(--text-muted); margin-top: 6px; line-height: 1.4; }
+.saac-sync-track { width: 100%; height: 8px; border-radius: 4px; background: var(--bg-input); overflow: hidden; margin-top: 20px; }
+.saac-sync-fill { width: 0%; height: 100%; background: var(--accent-gradient); transition: width 0.1s; }
+.saac-sync-row { width: 100%; display: flex; justify-content: space-between; margin-top: 8px; font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.saac-sync-pct { color: var(--accent-primary); font-weight: 600; }
+
+/* A drag starting on the dock doesn't scroll the page (boot.js stops it too, for WebViews that ignore this). */
+.dock-wrapper, .glass-dock { touch-action: none; }
+
+/* ADetailer's Denoise in the same − slider + row (rangeslider.js). */
+.denoise-nudge-row .cn-slider-wrap { flex: 1; min-width: 0; }
+
+/* A text box with an X that clears it (initClearField(), ui.js), as the LoRA search. */
+.clear-field { position: relative; }
+.clear-field:has(> input.hidden) { display: none; }
+/* Specific enough to beat the general input padding (a long value would run under the X). */
+.clear-field > input:not([type="checkbox"]):not([type="range"]):not([type="radio"]) { padding-right: 36px; }
+.clear-field-btn { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 6px; display: flex; align-items: center; justify-content: center; }
+/* LoRA settings: the LoRA's thumbnail with its switches beside it, level with the top one. */
+.lora-cfg-thumb-row { display: flex; gap: 14px; align-items: flex-start; }
+.lv-thumb-pick.lora-cfg-thumb { width: 60px; height: 90px; }
+.lora-cfg-switches { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.lora-cfg-switches > .row { padding-left: 0; }
+/* LoRA weight sliders under a prompt box (lorasliders.js): name, slider and value on one line. */
+.lora-slider-area { display: flex; flex-direction: column; gap: 2px; margin: 8px 2px 0; }
+.lora-slider-row > .col.cn-slider-col { display: flex; flex-direction: row; align-items: center; gap: 6px; width: 100%; }
+.lora-slider-row .cn-slider-head { display: contents; }
+/* 110px: a name too wide for it has its text made smaller to fit (lorasliders.js), never cut off. */
+.lora-slider-row .cn-slider-label { margin: 0; width: 110px; flex: none; white-space: nowrap; overflow: hidden; }
+.lora-slider-row .cn-slider-wrap { flex: 1 1 auto; min-width: 0; order: 1; height: 28px; }
+.lora-slider-row .cn-slider-val { order: 2; width: 40px; text-align: right; flex: none; }
+/* LoRA settings: the slider's Weight Range, two small boxes beside Slider Name. */
+#cfgLoraSliderNameRow > .col { gap: 0; }
+#cfgLoraSliderNameRow label { white-space: nowrap; }
+.lora-cfg-range { gap: 6px; align-items: center; flex-wrap: nowrap; }
+#cfgLoraSliderNameRow .lora-cfg-range input { width: 58px; flex: none; text-align: center; padding-left: 4px; padding-right: 4px; }
+.lora-cfg-range span { color: var(--text-muted); }
+/* LoRA groups (loragroups.js): a header, and its rows indented as variants. */
+.lg-meta { display: flex; align-items: center; gap: 4px; }
+.lg-meta > svg { flex: 0 0 auto; }
+.more-combos-count { color: var(--text-muted); font-weight: 600; }
+.combos-reset { display: inline-flex; align-items: center; justify-content: center; vertical-align: middle; width: 24px; height: 24px; padding: 0; margin-left: 4px; border-radius: 7px; border: 1px solid var(--border-color); background: transparent; color: var(--text-muted); cursor: pointer; }
+input.combos-locked { opacity: .55; }
+.combo-now-btn { width: 100%; margin-top: 14px; height: 44px; border: 1px solid rgba(var(--accent-primary-rgb), .45); background: rgba(var(--accent-primary-rgb), .12); color: var(--accent-primary); font-weight: 800; border-radius: 12px; }
+/* The dice: random::group:: (loragroups.js); filled while the token is in the prompt. */
+.lr-dice { flex: 0 0 auto; display: inline-flex; align-items: center; padding: 2px 6px; margin: 0; border: none; border-radius: 9px;
+    color: var(--accent-primary); background: rgba(var(--accent-primary-rgb), .15); cursor: pointer; line-height: 0; }
+.lr-dice.on { background: var(--accent-primary); color: #000; }
+.lg-meta .lr-active { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.lg-meta .lr-active:empty { display: none; }
+.lora-item-row.lg-child { margin-left: 22px; position: relative; }
+.lora-item-row.lg-child::before { content: ''; position: absolute; left: -13px; top: -9px; bottom: -1px; border-left: 2px solid rgba(255, 152, 0, 0.35); }
+/* Group settings and the LoRA picker. */
+.lg-members { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.lg-mem { display: flex; align-items: center; gap: 10px; padding: 6px 6px 6px 8px; border: 1px solid var(--border-color); border-radius: 10px; background: var(--bg-input); }
+.lg-mem img { width: 30px; height: 45px; object-fit: cover; border-radius: 4px; flex-shrink: 0; }
+.lg-mem-name { flex: 1; min-width: 0; font-size: 14px; font-weight: 600; color: var(--text-main); overflow: hidden; text-overflow: ellipsis; }
+.lg-mem-x { background: none; border: none; color: var(--text-muted); padding: 8px; display: flex; cursor: pointer; }
+.lg-add { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; height: 44px; margin-top: 6px; border-radius: 10px; border: 1.5px dashed var(--border-color); background: transparent; color: var(--text-muted); font-size: 13px; font-weight: 700; cursor: pointer; }
+.lg-pick-list { max-height: 55vh; overflow-y: auto; flex: 1; min-width: 0; }
+.lg-pick { cursor: pointer; padding-right: 10px; }
+.lg-pick.on { border-color: rgba(255, 152, 0, 0.6); }
+.lg-pick-off { opacity: 0.45; }
+.lg-pick-head { display: flex; align-items: center; gap: 4px; width: 100%; background: none; border: none; padding: 8px 2px 4px; cursor: pointer; font-family: inherit; font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin: 4px 0 0; text-align: left; }
+.lg-pick-empty { color: var(--text-muted); font-size: 13px; text-align: center; padding: 20px 0; }
+.lg-check { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--border-color); flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+.lg-check.on { background: var(--accent-primary); border-color: var(--accent-primary); color: #000; }
+/* The end of a search the model type chip hides matches from (lora.js). */
+.lora-item-row.lora-more-all { min-height: 56px; cursor: pointer; }
+.lora-more-all-tap { font-weight: 600; }
+.folder-chip .chip-funnel, .folder-chip .chip-funnel-x { color: inherit; }
+/* Character Select favourites (saac.js): a star in the thumbnail's corner, yellow when on; the header's star shows
+   only favourites. */
+.saac-fav { position: absolute; top: 5px; right: 5px; width: 28px; height: 28px; padding: 0; border: none; border-radius: 50%; background: rgba(0, 0, 0, 0.55); color: rgba(255, 255, 255, 0.85); display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 2; }
+.saac-fav.on { background: #ffc107; color: #000; }
+#saacCardsGrid .saac-empty { grid-column: 1 / -1; text-align: center; color: var(--text-muted); font-size: 13px; padding: 24px 8px; }
+#saacFavBtn.saac-fav-filter-on { color: #ffc107; border-color: rgba(255, 193, 7, 0.5); background: rgba(255, 193, 7, 0.15); }
+/* The Back Up and Restore windows (backup.js): a row per part, ticked or not; greyed when the backup hasn't it. */
+.br-pick-from { font-size: 12px; color: var(--text-muted); line-height: 1.45; margin: -2px 0 12px; overflow-wrap: anywhere; }
+.br-pick-from b { color: var(--text-main); }
+.br-pick { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 10px; background: var(--bg-input); cursor: pointer; }
+.br-pick.on { border-color: rgba(255, 152, 0, 0.6); }
+.br-pick.off { opacity: 0.45; cursor: default; }
+.br-pick-icon { width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: rgba(255, 152, 0, 0.12); color: var(--accent-primary); flex-shrink: 0; }
+.br-pick-text { flex: 1; min-width: 0; }
+.br-pick-name { font-size: 14px; font-weight: 700; color: var(--text-main); }
+.br-pick-sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+.btn-small.br-danger { background: #f44336; color: #fff; border-color: #f44336; }
+/* The group picker's and Back Up / Restore's button while nothing is ticked. */
+#lgPickOk:disabled, #backupWindowOk:disabled { opacity: 0.45; }
+/* LoRA window rows: the name at the top and the status line (dice, active variant, Weight) at the bottom. */
+#loraVerticalList .lora-item-info { align-self: stretch; justify-content: space-between; padding: 3px 0 2px; }
+#loraVerticalList .lora-item-name { margin-bottom: 0; }
+#loraVerticalList .lora-item-meta:empty { display: none; }
+#loraVerticalList .lora-item-meta, #loraVerticalList .lv-sub { font-size: 12px; font-weight: 600; }
+/* A LoRA row's saved thumbnail not read yet (lora.js): the box without the app icon. */
+.lora-item-thumb.thumb-wait { object-position: 0 300px; }
+/* A LoRA name's series or outfit (loraNameHtml(), engine.js), or a style's bracket, on a line under it. */
+.lora-item-sub { display: block; font-size: 12.5px; font-weight: 600; color: var(--text-main); opacity: 0.75; line-height: 1.25; margin-top: 1px; }
+/* Buttons kept in view under a window's scrolling content: pinned to the bottom when they're inside the scrolling part,
+   on the window's own background. */
+.pin-scroll > .pin-foot, .pin-scroll .pin-foot { position: sticky; bottom: -20px; margin-bottom: -20px !important; padding: 12px 0 20px; background: var(--bg-app); z-index: 5; }
+.pin-foot { position: relative; z-index: 5; flex: 0 0 auto; }
+/* Config > Experimental > Notification icon: one button per status bar icon. */
+.notif-icon-btns { display: flex; gap: 6px; flex-shrink: 0; }
+.notif-icon-btn { width: 42px; height: 38px; padding: 0; border-radius: 10px; border: 1px solid var(--border-color); background: var(--bg-input); color: var(--text-muted); display: flex; align-items: center; justify-content: center; }
+.notif-icon-btn.active { border-color: var(--accent-primary); color: var(--text-main); background: rgba(var(--accent-primary-rgb), 0.12); }
+/* Style Manager rows (styles.js), laid out as the LoRA list's: the name, then as much of the prompt as fits. */
+#styleList .st-info { align-self: stretch; height: 72px; justify-content: flex-start; gap: 3px; }
+#styleList .st-name { flex-shrink: 0; margin-bottom: 0; line-height: 1.25; max-height: 54px; overflow: hidden; overflow-wrap: anywhere; }
+#styleList .lora-item-row.active .st-main { color: var(--accent-primary); }
+.st-prev { font-size: 12.5px; color: var(--text-muted); opacity: 0.6; font-style: italic; line-height: 1.3; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; overflow-wrap: anywhere; }
+.lora-item-row.st-partial { border: 1px dashed var(--accent-primary); background: rgba(255, 152, 0, 0.03); }
+.st-count { display: inline-block; margin-left: 7px; font-size: 12px; font-weight: 700; color: var(--accent-primary); }
+.lora-btn-action.st-btn-delete { color: #f44336; background: rgba(244, 67, 54, 0.15); }
+#styleList .lora-star-toggle-stack { justify-content: center; }
+.header-btn.style-ed-delete { color: #f44336; background: rgba(244, 67, 54, 0.15); border-color: rgba(244, 67, 54, 0.3); }
+/* The style editor's thumbnail beside the name. */
+.style-ed-top { display: flex; gap: 12px; align-items: stretch; }
+.style-ed-top > .lv-thumb-pick { height: auto; width: 72px; margin-top: 7px; }
+/* A search box's switch at its right end (Styles: search prompts too), after the clear X and a divider. */
+.search-in-sep { position: absolute; right: 40px; top: 12px; bottom: 12px; width: 1px; background: var(--border-color); }
+.search-in-btn { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); background: none; border: none; padding: 6px; display: flex; align-items: center; justify-content: center; color: var(--text-muted); cursor: pointer; }
+.search-in-btn.active { color: var(--accent-primary); }
+/* LoRA window: the type searched for, tap to clear. */
+.type-pill { display: inline-flex; align-items: center; gap: 4px; margin: 8px 0 0; padding: 4px 10px; border: none; border-radius: 14px; font: inherit; font-size: 12px; font-weight: 700; color: var(--accent-primary); background: rgba(var(--accent-primary-rgb), 0.15); }
+/* SKIP beside ABORT (engine.js), while more images are to come. */
+.btn-small.gen-skip { color: #ffb300; border: 1px solid rgba(255, 179, 0, 0.4); background: rgba(255, 179, 0, 0.1); }
+/* Prompt history (prompthistory.js). */
+.prompt-hist-reg { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 12px; line-height: 1.3; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.prompt-hist-reg .fc-dot { width: 8px; height: 8px; flex-basis: 8px; }
+.no-prompt-history .prompt-hist-btn { display: none !important; }
+.prompt-hist-row { display: block; width: 100%; text-align: left; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--border-color); background: rgba(255, 255, 255, 0.04); color: var(--text-main); cursor: pointer; font: inherit; }
+.prompt-hist-age { font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 3px; }
+.prompt-hist-text { font-size: 13px; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word; }
+/* History search. */
+.btn-small.gal-search-btn { width: 36px; padding: 0; display: flex; align-items: center; justify-content: center; }
+.btn-small.gal-search-btn.active { color: var(--accent-primary); border-color: var(--accent-primary); }
+/* Forge Couple (forgecouple.js): region boxes under the prompt box, and its card above Hi-Res Fix. */
+.fc-regions { display: flex; flex-direction: column; margin-bottom: 5px; }
+/* Hi-Res Fix, ADetailer, ControlNet and Forge Couple switches in one line (the titles' inline min-width is 135px). */
+label[style*="min-width:135px"] { min-width: 145px !important; }
+@keyframes fc-pulse { 0%, 40% { border-color: var(--accent-primary); } 100% { border-color: var(--border-color); } }
+.fc-pulse { animation: fc-pulse 0.7s ease-out; }
+.fc-reg-head { display: flex; align-items: center; gap: 8px; height: 24px; margin: 10px 0 5px; }
+.fc-reg-head label { margin: 0; font-size: var(--fs-section); }
+.fc-dot { width: 12px; height: 12px; border-radius: 50%; flex: 0 0 12px; display: inline-block; }
+.fc-clear { width: 20px; height: 20px; padding: 2px; color: #f44336; }
+.fc-del { margin-left: auto; width: 24px; height: 24px; padding: 2px; color: var(--text-muted); }
+.fc-swap { align-self: center; width: 30px; height: 30px; margin: 9px 0 -26px; padding: 0; border-radius: 50%; position: relative; z-index: 1; border: 1px solid var(--border-color); background: var(--bg-panel); color: var(--text-muted); display: flex; align-items: center; justify-content: center; }
+.fc-add { margin-top: 10px; height: 40px; border: 1px dashed var(--border-color); border-radius: var(--radius-md); background: transparent; color: var(--text-muted); font: inherit; font-weight: 700; font-size: 13px; display: flex; align-items: center; justify-content: center; gap: 6px; }
+.fc-bgtag { display: block; width: max-content; height: 22px; line-height: 22px; margin: -31px 4px 4px auto; padding: 0 7px; position: relative; z-index: 1; pointer-events: none; border-radius: 6px; font-size: 11px; font-weight: 800; letter-spacing: .3px; color: var(--accent-primary); background: color-mix(in srgb, var(--accent-primary) 14%, var(--bg-input)); }
+textarea.fc-bg.fc-bg-row { padding-bottom: 30px; }
+.fc-card .fc-sub { display: block; margin: 12px 0 0; }
+.fc-card .ad-seg .toggle-opt { flex: 1 1 0; }
+.fc-card .fc-sub:first-child { margin-top: 5px; }
+.fc-prev { position: relative; margin: 12px auto 0; border-radius: 8px; border: 1px solid var(--border-color); background: #000; touch-action: none; user-select: none; -webkit-user-select: none; }
+.fc-r { position: absolute; box-sizing: border-box; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 800; border: 0 dashed; }
+.fc-prev:not(.fc-edit) .fc-r + .fc-r { border-left-width: 2px; }
+.fc-prev.fc-v:not(.fc-edit) .fc-r + .fc-r { border-left-width: 0; border-top-width: 2px; }
+.fc-prev:not(.fc-edit) { touch-action: auto; overflow: hidden; }
+.fc-edit .fc-r { border-width: 2px; border-style: solid; border-radius: 4px; }
+.fc-edit .fc-r.sel { z-index: 2; }
+.fc-both { position: absolute; z-index: 3; pointer-events: none; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800; color: #fff; background: repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.16) 0 6px, transparent 6px 12px); }
+.fc-h { position: absolute; z-index: 4; width: 14px; height: 14px; border-radius: 50%; background: #fff; border: 2px solid; box-sizing: border-box; transform: translate(-50%, -50%); }
+.fc-h::before { content: ''; position: absolute; inset: -12px; }
+.fc-note { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; font-size: 12px; color: var(--text-muted); }
+.fc-reset { width: auto; margin: 0; padding: 4px 10px; flex: 0 0 auto; }
+.fc-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; padding: 8px 10px; border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; }
+.fc-row.sel { border-color: var(--c); background: rgba(255, 255, 255, 0.04); }
+.fc-row-txt { flex: 1; min-width: 0; }
+.fc-row-txt b { display: block; font-size: 14px; }
+.fc-row-txt small { display: block; margin-top: 2px; font-size: 12px; color: var(--text-muted); }
+.fc-wlab { margin: 0; font-size: 11px; }
+.fc-row input { width: 60px; flex: 0 0 60px; text-align: center; }
+.fc-prev:not(.fc-edit) .fc-r { border-color: rgba(255, 255, 255, 0.35) !important; }
+
+/* Wildcards (wildcards.js) */
+.wc-token, .tac-name.tac-wc { color: #4dd0e1; }
+.wc-hint { font-size: 12px; color: var(--text-muted); line-height: 1.4; margin: 10px 0 0; }
+.wc-count { margin-left: 6px; padding: 1px 6px; border-radius: 6px; font-size: 11px; font-weight: 800; color: #4dd0e1; background: rgba(77, 208, 225, 0.12); vertical-align: 2px; }
+.wc-row { cursor: pointer; }
+/* One height for every row, room for a two-line name (Advanced: badges under it); content centred. */
+#wcList .wc-row { height: 60px; box-sizing: border-box; padding-top: 6px; padding-bottom: 6px; flex-shrink: 0; }
+#wcList.wc-adv .wc-row { height: 76px; }
+.wc-info { --wc-lh: 20px; justify-content: center; min-width: 0; }
+.wc-name { font-size: 15px; font-weight: 600; color: var(--text-main); line-height: var(--wc-lh); margin-bottom: 0; display: flex; align-items: center; min-width: 0; }
+.wc-name .wc-name-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; min-width: 0; }
+.wc-name .wc-count { flex: 0 0 auto; }
+.wc-badges { height: var(--wc-lh); display: flex; align-items: center; overflow: hidden; white-space: nowrap; }
+.wc-badges .wc-badge:first-child { margin-left: 0; }
+.wc-wrap2 .wc-badges { height: auto; flex-wrap: wrap; row-gap: 2px; white-space: normal; }
+.wc-wrap2 .wc-badges .wc-badge { margin: 0 6px 0 0; }
+.wc-wrap2 .wc-name .wc-name-text { -webkit-line-clamp: 1; }
+/* Star and pencil side by side. */
+#wcList .wc-row .lora-star-toggle-stack { flex-direction: row; align-items: center; gap: 6px; height: auto; }
+.wc-gen { display: flex; gap: 8px; margin-top: 5px; }
+.wc-gen-head { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; }
+.wc-gen-head label { margin: 0; }
+.wc-gen-head .wc-gen-mode { margin: 0; flex: 0 0 auto; }
+.wc-gen-head .wc-gen-mode .toggle-opt { padding: 3px 10px; font-size: 11px; min-height: 0; height: auto; }
+.wc-gen input { flex: 1; min-width: 0; }
+.wc-gen .btn-small { width: auto; flex: 0 0 auto; padding: 0 14px; gap: 6px; color: var(--accent-primary); border: 1px solid rgba(var(--accent-primary-rgb), 0.35); background: rgba(var(--accent-primary-rgb), 0.12); }
+.wc-hint.wc-missing { color: #f44336; }
+/* Advanced wildcards (wcadvanced.js). */
+.wc-badge { display: inline-flex; margin-left: 6px; padding: 1px 7px; border-radius: 9px; font-size: 11px; font-weight: 700; vertical-align: 2px; color: var(--accent-primary); background: rgba(var(--accent-primary-rgb), 0.15); }
+.wc-badge.bad { color: #f44336; background: rgba(244, 67, 54, 0.15); }
+.wc-badge.muted { color: var(--text-muted); background: rgba(127, 127, 127, 0.18); }
+.wc-count-bad { margin-left: 5px; padding: 0 6px; border-radius: 9px; font-size: 11px; color: #fff; background: #f44336; }
+.wc-chips { flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.wc-chip { padding: 4px 10px; }
+.wc-rule { display: flex; align-items: center; gap: 8px; padding: 8px 10px; font-size: 13px; }
+.wc-rule b { color: var(--accent-primary); }
+.wc-x { margin-left: auto; border: none; background: none; color: var(--text-muted); font-size: 18px; line-height: 1; padding: 0 2px; }
+.wc-dim { color: var(--text-muted); }
+/* Import Wildcards (wcimport.js) */
+.wi-label { display: block; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; color: var(--text-muted); margin: 0 0 6px; }
+.wi-link { display: flex; align-items: center; gap: 10px; padding: 10px 12px; }
+.wi-link-main { flex: 1; min-width: 0; }
+.wi-link-name { font-weight: 700; font-size: 14px; }
+.wi-link-url { font-size: 12px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wi-add { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; padding: 10px; border: 1px dashed rgba(255, 255, 255, 0.25); border-radius: 10px; background: none; color: var(--text-muted); font: inherit; font-size: 13px; font-weight: 700; }
+.wi-from { font-size: 13px; color: var(--text-muted); }
+.wi-from b { color: var(--text-primary, #fff); }
+.wi-row { display: flex; align-items: center; gap: 8px; padding: 8px 12px; font-size: 14px; }
+.wi-row-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wi-row.keep .wi-row-name { color: var(--text-muted); }
+.wi-go { color: #4caf50; border-color: rgba(76, 175, 80, 0.5); background: rgba(76, 175, 80, 0.15); }
+.wi-link .btn-small:disabled { opacity: 0.4; }
+.wc-bad { color: #f44336; }
+.wc-try-result { font-weight: 700; font-size: 13px; line-height: 1.5; word-break: break-word; }
+.wc-tree { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; font-size: 13px; line-height: 1.45; word-break: break-word; }
+.wc-check { padding: 10px; font-size: 13px; line-height: 1.45; word-break: break-word; }
+.wc-check u, .wc-tree u, #wcUsedBy u, #wcHintAdv u { cursor: pointer; }
+.wc-guide { font-size: 13px; line-height: 1.5; }
+.wc-guide h4 { margin: 12px 0 2px; font-size: 13px; color: var(--accent-primary); }
+.wc-guide p { margin: 0 0 4px; }
+/* Advanced editor, LIST view (wclist.js): option cards, an open card's fields, EXAMPLE. */
+.wx-seg { display: flex; flex-shrink: 0; border: 1px solid var(--border-color); border-radius: 10px; overflow: hidden; margin: 0 0 10px; }
+.wx-seg button { flex: 1; background: transparent; border: 0; color: var(--text-muted); padding: 7px 0; font-weight: 700; font-size: 12px; letter-spacing: .06em; }
+.wx-seg button.on { background: var(--accent-primary); color: #000; }
+.wx-head { display: flex; justify-content: space-between; align-items: center; margin: 0 0 6px; }
+.wx-head label { margin: 0; }
+.wx-dim { color: var(--text-muted); font-size: 11px; }
+.wx-row { border: 1px solid var(--border-color); border-radius: 12px; padding: 9px 11px; margin: 0 0 6px; display: flex; gap: 8px; align-items: flex-start; cursor: pointer; }
+.wx-main { flex: 1; min-width: 0; }
+.wx-text { font-size: 14px; color: var(--text-main); word-break: break-word; }
+.wx-ref { color: #38bdf8; }
+.wx-meta { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.wx-pill { font-size: 11px; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--border-color); color: var(--text-muted); background: transparent; white-space: nowrap; }
+.wx-pill.w { color: #000; background: var(--accent-primary); border-color: var(--accent-primary); font-weight: 700; }
+.wx-pill.if { color: var(--accent-primary); border-color: var(--accent-primary); white-space: normal; }
+.wx-pill-x, .wx-pill-pick { font-size: 12px; padding: 4px 9px; color: var(--text-main); cursor: pointer; }
+.wx-chev { color: var(--text-muted); margin-top: 2px; flex-shrink: 0; }
+.wx-open { border-color: var(--accent-primary); flex-direction: column; align-items: stretch; cursor: default; }
+/* An open option's text: several lines (auto-expand fits it). */
+#wxText { margin: 0; width: 100%; resize: none; min-height: 0; }
+/* Its bin on the "Only if" row (item 30). */
+.wx-cond-row { justify-content: space-between; align-items: center; gap: 8px; flex-wrap: nowrap; }
+.wx-bin { flex: 0 0 auto; width: 44px; height: 38px; padding: 0; display: flex; align-items: center; justify-content: center; color: #f44336; border: 1px solid rgba(244, 67, 54, 0.45); background: rgba(244, 67, 54, 0.10); border-radius: 10px; }
+.wc-ed-foot { display: flex; gap: 10px; }
+.wc-ed-foot .btn-small { flex: 1; }
+/* TRY a fixed width: CHECK gets the room for its badge. */
+#wcAdvTools .wc-tools-try { flex: 0 0 84px; width: 84px; min-width: 0; padding-left: 0; padding-right: 0; }
+/* Check: a section's title folds it. */
+.wc-check > b { display: flex; align-items: center; justify-content: space-between; cursor: pointer; }
+.wc-check > b .wc-chev { flex: 0 0 auto; margin-left: 8px; color: var(--text-muted); transition: transform .15s; }
+.wc-check.folded > b .wc-chev { transform: rotate(-90deg); }
+.wc-check.folded > div { display: none; }
+/* Back to the wildcard before (item 40). */
+.wc-back-chip { display: inline-flex; align-self: flex-start; width: fit-content; max-width: 100%; min-height: 36px; align-items: center; gap: 6px; padding: 0 14px; margin: 0 0 10px; font-size: 13px; font-weight: 800; color: var(--accent-primary); background: rgba(var(--accent-primary-rgb), 0.12); border: 1px solid rgba(var(--accent-primary-rgb), 0.35); border-radius: 10px; box-sizing: border-box; cursor: pointer; }
+.wc-back-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wc-back-chip.hidden { display: none; }
+.wx-ref { cursor: pointer; }
+.wx-field label { font-size: 12px; margin: 8px 0 4px; display: block; }
+.wx-steps { display: flex; gap: 6px; }
+.wx-steps button { flex: 1; border: 1px solid var(--border-color); background: transparent; color: var(--text-muted); border-radius: 8px; padding: 6px 0; font-weight: 700; }
+.wx-steps button.on { border-color: var(--accent-primary); color: var(--accent-primary); }
+.wx-cond { display: flex; gap: 6px; align-items: center; margin: 0 0 6px; }
+.wx-cond .wx-in { flex: 1; min-width: 0; margin: 0; padding: 6px 9px; }
+.wx-sel { flex: 0 0 auto; border: 1px solid var(--border-color); border-radius: 8px; padding: 6px 9px; color: var(--accent-primary); background: transparent; font-size: 13px; }
+.wx-pick { margin-top: 6px; border: 1px solid var(--border-color); border-radius: 10px; padding: 8px; }
+.wx-pick input { margin: 0 0 6px; }
+.wc-chip.on { border-color: var(--accent-primary); color: var(--accent-primary); }
+.wx-add { width: 100%; border: 1px dashed var(--border-color); border-radius: 12px; padding: 9px; background: transparent; color: var(--text-muted); font-weight: 700; font-size: 12px; letter-spacing: .06em; }
+.wx-try { display: flex; align-items: center; gap: 8px; border: 1px solid var(--border-color); border-radius: 12px; padding: 8px 11px; margin-top: 10px; }
+.wx-try .r { flex: 1; font-size: 13px; color: var(--text-main); cursor: pointer; word-break: break-word; }
+.wx-try .l { font-size: 11px; color: var(--text-muted); font-weight: 700; letter-spacing: .06em; }
+.wx-dice { background: none; border: 0; color: var(--accent-primary); padding: 4px; display: flex; }
+
+/* The guide's cards: what it's for, how, then what you type → what you get. */
+.wc-g-intro { margin: 0 0 10px; color: var(--text-muted); }
+.wc-g-card { border: 1px solid var(--border-color); border-radius: 12px; padding: 10px 12px; margin: 0 0 8px; }
+.wc-g-card h4 { margin: 0 0 4px; }
+.wc-g-card p { margin: 0 0 6px; color: var(--text-muted); }
+.wc-g-ex { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 2px 0; }
+.wc-g-arrow { color: var(--text-muted); }
+.wc-g-card .wc-example { margin: 0; }
+.wc-example { padding: 10px; margin: 4px 0 8px; line-height: 1.7; }
+.wc-title { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; margin: 0; color: var(--text-muted); cursor: text; }
+#wcEditorName { flex: 0 1 auto; min-width: 0; max-width: 100%; font-family: inherit; height: auto; margin: 0; padding: 0; border: none; border-radius: 0; background: none; box-shadow: none; font-size: var(--fs-window-title, 17px); font-weight: 700; color: var(--accent-primary); }
+#wcEditorName:focus { outline: none; border: none; box-shadow: none; }
+#wcEditorModal .pin-foot { margin-top: 12px; }
+/* Try's two buttons: equal halves, icon spaced from the word. */
+.btn-small.wc-try-btn { flex: 1 1 0; display: flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; }
+.wc-more { color: var(--accent-primary); cursor: pointer; }
+.btn-small.wc-manage-btn { width: auto; padding: 8px 12px; }
+/* LoRA settings: the Type picker, the width of a short word. */
+#loraConfigModal .lora-cfg-type { flex: 0 0 160px; width: 160px; min-width: 0; }
+
+/* History favourites (galleryfavs.js): a star top right on favourites; the selection bar's and the viewer's stars. */
+.gal-fav { position: absolute; top: 5px; right: 5px; z-index: 9; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.45); color: #ffc107; pointer-events: none; }
+.gal-fav svg { width: 13px; height: 13px; }
+.gal-fav.hidden { display: none; }
+.btn-icon.fs-fav { color: #ffc107; background: rgba(255, 193, 7, 0.15); border: none; }
+.btn-small.gal-fav-btn.active { color: #ffc107; border-color: #ffc107; }
+#galClearAllBtn.gal-delete-all { width: auto; min-width: 0; gap: 4px; padding-left: 10px; padding-right: 12px; }
+/* History date sections (datesections.js): a label across the grid before each date's first image on the page. */
+.gal-sec { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 6px; padding: 10px 2px 2px; font-size: 13px; font-weight: 700; color: var(--text-main); }
+.gal-sec:first-child { padding-top: 0; }
+.gal-sec span { color: var(--text-muted); font-weight: 600; font-size: 12px; }
+.gal-search-box { position: relative; margin: 0 0 10px; }
+.gal-search-box input { padding-right: 36px; }
+.gal-search-box button { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-muted); padding: 6px; display: flex; }
+/* Viewer: X (close) and Share; ORIGINAL while an image is held (viewercompare.js). */
+.btn-icon.fs-close { color: #e0e0e0; background: rgba(255, 255, 255, 0.12); border: none; }
+.btn-icon.fs-share { color: #4a9df8; background: rgba(74, 157, 248, 0.15); border: none; }
+.fs-compare-label { position: absolute; top: calc(12px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); padding: 4px 10px; border-radius: 999px; background: rgba(0, 0, 0, 0.6); color: #fff; font-size: 11px; font-weight: 900; letter-spacing: 1px; pointer-events: none; z-index: 3; }
+/* Magic Prompt: PROMPT | DESCRIBE (describe.js). */
+.mp-tabs { gap: 0; margin: 0 0 12px; flex: 0 0 auto; border: 1px solid var(--border-color); border-radius: 10px; overflow: hidden; }
+.mp-tabs .toggle-opt { flex: 1; padding: 9px 0; border: none; border-radius: 0; font-size: 13px; font-weight: 700; text-align: center; font-family: inherit; }
+.desc-image-box { width: 96px; height: 144px; flex-shrink: 0; padding: 0; border-radius: 8px; border: 1px dashed var(--border-color); background: var(--bg-input) center / cover no-repeat; color: var(--text-muted); display: flex; align-items: center; justify-content: center; cursor: pointer; }
+.desc-image-box.has-image { border-style: solid; }
+.desc-image-box.has-image svg { display: none; }
+.desc-warn { border: 1px solid rgba(244, 67, 54, 0.4); background: rgba(244, 67, 54, 0.08); border-radius: 10px; padding: 10px 12px; font-size: 13px; line-height: 1.45; color: var(--text-main); }
+.desc-warn b { color: #f44336; }
+.desc-clear { background: none; border: none; color: var(--text-muted); font-size: 12px; font-weight: 600; padding: 4px 0; cursor: pointer; }
+.desc-recent { display: flex; gap: 8px; margin-top: 6px; overflow-x: auto; }
+.desc-recent-thumb { width: 52px; height: 52px; flex-shrink: 0; padding: 0; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-input) center / cover no-repeat; cursor: pointer; }
+/* Tag autocomplete: suggestions above the keyboard (tagcomplete.js). */
+/* 2px more at the bottom, placed 2px lower (under the keyboard's edge): no gap shows. The gear has its own slot. */
+.tac-bar { position: fixed; left: 0; right: 0; top: 0; z-index: 3500; display: flex; padding: 0 0 2px; background: var(--bg-panel); border-top: 1px solid var(--border-color); }
+.tac-fixed { flex: 0 0 auto; display: flex; padding: 8px 8px 8px 10px; border-right: 1px solid var(--border-color); }
+.tac-scroll { flex: 1 1 auto; min-width: 0; display: flex; gap: 8px; padding: 8px 10px; overflow-x: auto; scrollbar-width: none; }
+.tac-scroll::-webkit-scrollbar { display: none; }
+.tac-chip { flex: 0 0 auto; display: flex; align-items: baseline; gap: 6px; padding: 7px 12px; border-radius: 999px; border: 1px solid var(--border-color); background: #000; font: inherit; font-size: 14px; font-weight: 600; white-space: nowrap; cursor: pointer; }
+.tac-name.tac-net { color: var(--accent-primary); }
+.tac-chip.tac-gear { align-self: stretch; align-items: center; justify-content: center; padding: 0 10px; color: var(--text-muted); }
+.tac-count { font-size: 12px; font-weight: 600; color: var(--text-muted); }
+.btn-small.desc-clear-btn { margin-top: auto; }
+.desc-image-box { height: auto; min-height: 144px; align-self: stretch; }
+/* Viewer SEND menu (viewercompare.js), above the button. */
+#fullScreenModal .fs-group { display: contents; }
+.fs-send-wrap { position: relative; }
+.fs-send-menu { position: absolute; left: 50%; transform: translateX(-50%); bottom: 54px; z-index: 300; padding: 8px; display: flex; gap: 10px; border-radius: 29px; border: 1px solid var(--border-color); background: var(--bg-panel); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5); }
+.fs-send-menu.hidden { display: none; }
+.fs-send-item { width: 42px; height: 42px; flex: 0 0 42px; padding: 0; display: flex; align-items: center; justify-content: center; border: none; border-radius: 50%; color: var(--accent-primary); background: rgba(var(--accent-primary-rgb), 0.15); cursor: pointer; }
+.fs-send-item span { display: none; }
+.fs-send-item.hidden { display: none; }
+.prompt-hist-neg { margin-top: 4px; font-size: 12px; line-height: 1.3; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.prompt-tools > .prompt-tool.prompt-hist-tool { flex: 0 0 38px; width: 38px; align-self: stretch; padding: 0; }
+/* img2img: LORA narrower so PRESETS has more room. */
+.prompt-tools > #img2img_add_lora_btn { flex-grow: 0.82; }
+.prompt-tools > #img2imgPresetsBtn { flex-grow: 1.18; }
+.prompt-hist-tags { font-weight: 600; opacity: 0.85; }
+/* Show UI hints off (Config > Interface): the grey how-to text goes, and the space it took. */
+body.no-ui-hints :is(.ui-hint, .cfg-hint, .mp-scene-hint, .model-hint, .lv-thumb-hint, .fc-note > span) { display: none !important; }
+body.no-ui-hints .fc-note { justify-content: flex-end; }
+/* The status bar's shadow, as Samsung Gallery's: 25% at the top, a smooth fade to nothing just under the bar (its
+   height plus 6px); taps go through. Not while the bar is hidden. */
+#statusBarScrim { position: fixed; top: 0; left: 0; right: 0; height: calc(var(--safe-top, env(safe-area-inset-top, 0px)) + 6px); z-index: 9000; pointer-events: none;
+    background: linear-gradient(to bottom, rgba(0, 0, 0, 0.247) 0%, rgba(0, 0, 0, 0.196) 13%, rgba(0, 0, 0, 0.153) 25%, rgba(0, 0, 0, 0.125) 33%, rgba(0, 0, 0, 0.11) 38%, rgba(0, 0, 0, 0.09) 46%, rgba(0, 0, 0, 0.067) 54%, rgba(0, 0, 0, 0.051) 62%, rgba(0, 0, 0, 0.031) 69%, rgba(0, 0, 0, 0.02) 77%, rgba(0, 0, 0, 0.012) 85%, rgba(0, 0, 0, 0.004) 92%, rgba(0, 0, 0, 0) 100%); }
+body.sb-hidden #statusBarScrim { display: none; }
+/* Recent Prompts: the whole entry's button, Forge Couple's mark, and the entry in a window. */
+.prompt-hist-row { position: relative; }
+.prompt-hist-row .prompt-hist-age { padding-right: 40px; }
+.prompt-hist-full { position: absolute; top: 6px; right: 6px; width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; background: rgba(255, 255, 255, 0.06); color: var(--text-muted); }
+.prompt-hist-couple { display: inline-flex; align-items: center; gap: 4px; margin-left: 8px; padding: 1px 7px; border-radius: 6px; background: rgba(0, 188, 212, 0.15); color: #4dd0e1; font-size: 10px; letter-spacing: 0.04em; vertical-align: 1px; }
+.prompt-hist-reg .t { overflow: hidden; text-overflow: ellipsis; }
+.pv-meta { display: flex; align-items: center; gap: 0; font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 8px; text-transform: uppercase; }
+.pv-meta .prompt-hist-couple { text-transform: none; }
+.pv-box { margin-top: 5px; padding: 10px 12px; font-size: 14px; line-height: 1.45; word-break: break-word; white-space: pre-wrap; color: var(--text-main); user-select: text; -webkit-user-select: text; }
+.pv-reg-label { display: flex; align-items: center; gap: 6px; }
+.pv-reg-label .fc-dot { width: 9px; height: 9px; flex: 0 0 9px; }
+/* Preset editor: number boxes, and what else the preset holds (several ADetailer passes / ControlNet units expand). */
+.pe-num { margin-top: 5px; text-align: center; }
+.pe-summary { padding: 4px 14px 6px; }
+.pe-summary-h { font-size: 12px; font-weight: 700; letter-spacing: 0.04em; color: var(--text-muted); padding: 6px 0; }
+.pe-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 7px 0; border-top: 1px solid var(--border-color); font-size: 14px; }
+.pe-k { color: var(--text-muted); flex: 0 0 auto; }
+.pe-v { text-align: right; min-width: 0; overflow-wrap: anywhere; display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.pe-v.dim, .pe-more { color: var(--text-muted); }
+.pe-multi { cursor: pointer; }
+.pe-multi svg { flex: 0 0 auto; color: var(--text-muted); transition: transform 0.15s; }
+.pe-multi.open svg { transform: rotate(180deg); }
+.pe-units { margin: -2px 0 8px 10px; padding-left: 10px; border-left: 2px solid var(--border-color); font-size: 13px; line-height: 1.7; }
+.pe-units .dim { color: var(--text-muted); }
+.tac-bar.tac-moving { visibility: hidden; }
+body.kb-up .dock-wrapper { visibility: hidden; }
+/* Measures the status bar's height (rememberSafeTop(), engine.js). */
+#safeTopProbe { position: fixed; top: 0; left: 0; width: 0; height: env(safe-area-inset-top, 0px); visibility: hidden; pointer-events: none; }
+#promptHistoryList { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+
+/* LoRA and Wildcards: four whole rows (lora.js, wildcards.js) as far as the screen allows, not 85% of it. */
+#loraModal .modal-content, #wildcardsModal .modal-content { max-height: none; }
+
+/* Couple styles: the Styles window's Forge Couple button when on. */
+.st-couple-btn.active { color: var(--accent-primary); border-color: var(--accent-primary); }
+
+/* Reroll (wcreroll.js): the picks, kept (lock) or redrawn (dice, orange); the strip under the prompt box while armed. */
+.wc-reroll-label { font-size: 12px; font-weight: 800; letter-spacing: 0.5px; color: var(--text-muted); margin: 0 2px 10px; }
+.wc-pick { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-color); background: var(--bg-panel); cursor: pointer; flex-shrink: 0; }
+.wc-pick-text { flex: 1; min-width: 0; }
+.wc-pick-text b { display: block; font-size: 14px; color: var(--text-main); }
+.wc-pick-text span { display: block; font-size: 12px; font-style: italic; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wc-pick-btn { width: 40px; height: 40px; flex: 0 0 40px; padding: 0; display: flex; align-items: center; justify-content: center; border-radius: 50%; border: 1px solid var(--border-color); background: var(--bg-input); color: var(--text-muted); pointer-events: none; }
+.wc-pick.redraw, .wc-pick.under { border-color: color-mix(in srgb, var(--accent-primary) 60%, var(--border-color)); }
+.wc-pick.redraw .wc-pick-keep, .wc-pick.under:not(.out) .wc-pick-keep { color: var(--accent-primary); border-color: var(--accent-primary); background: rgba(var(--accent-primary-rgb), 0.12); }
+/* Left out (the ban button): red, struck through; what's inside it too, dimmed. */
+.wc-pick .wc-pick-out { pointer-events: auto; cursor: pointer; }
+.wc-pick.out { border-color: rgba(244, 67, 54, 0.55); }
+.wc-pick.out .wc-pick-text b, .wc-pick.out .wc-pick-text span { text-decoration: line-through; }
+.wc-pick.out .wc-pick-out { color: #f44336; border-color: #f44336; background: rgba(244, 67, 54, 0.12); }
+.wc-reroll-head { font-size: 11px; font-weight: 800; letter-spacing: 0.5px; color: var(--text-muted); text-transform: uppercase; margin: 6px 2px 0; flex-shrink: 0; }
+.wc-reroll-strip .wc-out { color: #f44336; font-weight: 700; }
+.wc-pick.under { opacity: 0.55; cursor: default; }
+.wc-reroll-note { font-size: 12px; color: var(--text-muted); margin: 10px 2px 12px; }
+.wc-reroll-go:disabled { opacity: 0.5; }
+/* Show UI hints off: the note's gap kept by the button. */
+body.no-ui-hints .wc-reroll-go { margin-top: 12px; }
+.wc-reroll-strip { display: flex; align-items: center; gap: 8px; margin-top: 5px; padding: 6px 6px 6px 12px; border-radius: var(--radius-sm); border: 1px solid color-mix(in srgb, var(--accent-primary) 55%, var(--border-color)); background: rgba(var(--accent-primary-rgb), 0.1); color: var(--accent-primary); font-size: 13px; font-weight: 700; }
+.wc-reroll-strip > svg { flex-shrink: 0; }
+.wc-reroll-strip > span { flex: 1; min-width: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.3; }
+.wc-reroll-strip > button { width: 30px; height: 30px; flex: 0 0 30px; padding: 0; border: none; background: none; color: var(--text-muted); display: flex; align-items: center; justify-content: center; cursor: pointer; }
+
+/* Versions and Recently deleted (wchistory.js); the UNDO bar after a delete. */
+.wc-ver { padding: 10px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-color); background: var(--bg-panel); flex-shrink: 0; }
+.wc-ver.cur { border-color: color-mix(in srgb, var(--accent-primary) 45%, var(--border-color)); }
+.wc-ver-h { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-weight: 700; font-size: 14px; color: var(--text-main); }
+.wc-ver-h small { font-weight: 500; font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+.wc-ver-diff { margin-top: 6px; font-size: 12px; line-height: 1.5; word-break: break-word; }
+.wc-ver-diff .add { color: #6fd08c; }
+.wc-ver-diff .del { color: #e86a6a; text-decoration: line-through; }
+.wc-ver-diff .more { color: var(--text-muted); }
+.wc-ver-foot { display: flex; justify-content: flex-end; margin-top: 8px; }
+.wc-ver-foot .btn-small { padding: 6px 16px; }
+.wc-hist-note { font-size: 12px; color: var(--text-muted); margin: 4px 2px 0; }
+.wc-snack { position: fixed; left: 16px; right: 16px; bottom: calc(24px + env(safe-area-inset-bottom, 0px)); z-index: 4000; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border-color); background: var(--bg-panel); color: var(--text-main); font-size: 14px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5); }
+.wc-snack > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wc-snack > button { border: none; background: none; padding: 4px 2px; color: var(--accent-primary); font: inherit; font-size: 13px; font-weight: 800; letter-spacing: 0.5px; cursor: pointer; }
+
+/* Wildcards search: empty, only the search-in button needs room (the clear button shows once there's text). */
+#wcSearch:placeholder-shown { padding-right: 42px !important; }
+/* DELETED (Advanced tools row): its icon fills its box, so a little more space than CHECK's and TRY's. */
+
+/* Wildcard editor: A-Z beside the options label (wildcards.js sortOptions()). */
+.wc-opt-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.wc-opt-head > label { margin-bottom: 0; }
+.wc-sort-btn { flex: 0 0 auto; min-height: 0; padding: 4px 10px; gap: 4px; font-size: 12px; }
+
+/* order::ratio / random::ratio in the prompt (randomtokens.js): the size presets can't be changed. */
+.res-locked { opacity: 0.4; }
+input:disabled[id$="_width"], input:disabled[id$="_height"] { opacity: 0.4; }
+
+/* Only if: the ON / NOT button as tall as the label box beside it. */
+.wx-cond .wx-sel { align-self: stretch; display: flex; align-items: center; }
+
+/* Import preview (wcimport.js): imported ones highlighted, tapped-out ones dimmed. */
+.wi-row.on { cursor: pointer; border-color: color-mix(in srgb, var(--accent-primary) 55%, var(--border-color)); }
+.wi-row.off { cursor: pointer; opacity: 0.5; }
+.wi-row.off .wi-row-name { text-decoration: line-through; }
+/* A tick to import or skip; the rest of the row opens it (options, or a comparison with yours). */
+.wi-row { cursor: pointer; }
+.wi-row .lg-check { margin: -4px 0; }
+.wi-row.keep .lg-check { opacity: 0.3; }
+.wi-chev { color: var(--text-muted); flex: 0 0 auto; }
+/* Libraries: CHECK for updates, and a link with one. */
+.wi-check { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; }
+.wi-upd { color: #ff9800; font-weight: 600; }
+.wi-link .btn-small.wi-upd-btn { color: #ff9800; border-color: rgba(255, 152, 0, 0.5); background: rgba(255, 152, 0, 0.18); }
+
+/* + RULE (wcadvanced.js): the kind, its label boxes and what it does; the tag bar is the usual one above the keyboard. */
+.wr-panel { display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px solid var(--accent-primary); border-radius: var(--radius-sm); background: var(--bg-panel); }
+.wr-types { display: flex; flex-wrap: wrap; gap: 8px; }
+.wr-types button { border: 1px solid var(--border-color); border-radius: 8px; padding: 7px 11px; background: transparent; color: var(--text-muted); font-size: 12px; font-weight: 700; letter-spacing: 0.5px; }
+.wr-types button.on { border-color: var(--accent-primary); color: var(--accent-primary); background: color-mix(in srgb, var(--accent-primary) 12%, transparent); }
+.wr-line { display: flex; align-items: center; gap: 8px; }
+.wr-line > span { color: var(--text-muted); font-size: 14px; white-space: nowrap; }
+.wr-line .wx-in { flex: 1 1 0; min-width: 0; margin: 0; padding: 10px 12px; }
+.wr-hint { margin: 0; font-size: 12px; line-height: 1.5; color: var(--text-muted); }
+.wr-btns { display: flex; gap: 8px; }
+.wr-btns button { flex: 1; padding: 10px 12px; }
+.wr-btns .wr-add { background: var(--accent-gradient); color: #fff; border: none; }
+
+/* Wildcards' Advanced row (p408): CHECK keeps to one line (a red border when its count doesn't fit); import/export icons. */
+.wc-check-btn { white-space: nowrap; min-width: 0; }
+.wc-check-btn > svg, .wc-check-btn > .wc-count-bad { flex-shrink: 0; }
+.wc-check-btn.wc-check-flag { box-shadow: inset 0 0 0 2px #f44336; }
+.wc-io-btn { flex: 0 0 48px; padding: 0; justify-content: center; align-self: stretch; }
+
+/* Versions / Recently deleted when empty (p409): an icon, a short title and one muted line. */
+.wv-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 14px 8px 6px; text-align: center; }
+.wv-empty svg { color: var(--text-muted); opacity: 0.7; }
+.wv-empty b { font-size: 15px; font-weight: 700; color: var(--text-main); }
+.wv-empty span { font-size: 13px; line-height: 1.45; color: var(--text-muted); }
+#wcHistLabel:empty { display: none; }
+
+/* Tapping a thumbnail (LoRA, variant, group settings): USE LAST IMAGE / CHOOSE FILE under it. */
+#thumbMenu { background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; z-index: 5000; pointer-events: none; }
+#thumbMenu > * { pointer-events: auto; }
+.thumb-menu-box { position: fixed; display: flex; flex-direction: column; gap: 4px; padding: 6px; background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: 12px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6); }
+.thumb-menu-box .btn-small { justify-content: flex-start; gap: 8px; padding: 10px 14px; white-space: nowrap; }
+
+/* Held editor boxes (item 80): the pill inside the bottom edge, the text fading out behind it. */
+.cap-wrap { position: relative; }
+.cap-wrap > textarea.cap-held { padding-bottom: 28px; overflow-y: auto; }
+.cap-wrap.capped::after { content: ''; position: absolute; left: 1px; right: 1px; bottom: 1px; height: 40px; border-radius: 0 0 var(--radius-sm, 10px) var(--radius-sm, 10px); background: linear-gradient(transparent, var(--bg-input, #000) 75%); pointer-events: none; }
+.cap-btn { position: absolute; left: 50%; bottom: -1px; transform: translateX(-50%); z-index: 1; display: flex; align-items: center; gap: 4px; padding: 3px 12px 4px; border-radius: 10px 10px 0 0; border: 1px solid var(--border-color); border-bottom: none; background: var(--bg-panel); color: var(--text-muted); font: inherit; font-size: 11px; font-weight: 700; letter-spacing: .04em; white-space: nowrap; cursor: pointer; }
+/* Analyze, a Forge Couple image (item 81). */
+.fc-ana-sum { display: flex; flex-wrap: wrap; gap: 4px; margin: 2px 0 2px; }
+.fc-ana-sum span { font-size: 10.5px; font-weight: 700; letter-spacing: .03em; padding: 2px 6px; border-radius: 5px; background: rgba(77, 208, 225, .12); color: #4dd0e1; }
+.fc-ana-reg { border: 1px solid var(--border-color); border-radius: 10px; padding: 8px 10px; margin-top: 8px; background: rgba(0, 0, 0, .25); }
+.fc-ana-reg .h { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.fc-ana-reg .h b { flex: 0 0 auto; font-size: 10.5px; font-weight: 800; letter-spacing: .05em; padding: 2px 7px; border-radius: 6px; background: rgba(77, 208, 225, .12); color: #4dd0e1; text-transform: uppercase; }
+.fc-ana-reg.bg .h b { background: rgba(255, 255, 255, .08); color: var(--text-main); }
+.fc-ana-reg .h .where { flex: 1; min-width: 0; font-size: 11px; color: var(--text-muted); }
+.fc-ana-reg .t { font-size: 12px; line-height: 1.45; color: var(--text-main); overflow-wrap: anywhere; white-space: pre-wrap; }
+.fc-ana-reg .t .lo { color: var(--accent-primary); }
+.fc-ana-more { display: flex; align-items: center; gap: 6px; margin-top: 10px; font: inherit; font-size: 12px; font-weight: 700; color: var(--text-muted); letter-spacing: .04em; background: none; border: none; padding: 0; cursor: pointer; }
+.fc-ana-det { margin-top: 8px; display: flex; gap: 12px; align-items: flex-start; }
+.fc-ana-map { flex: 0 0 120px; height: 82px; border: 1px solid var(--border-color); border-radius: 6px; position: relative; overflow: hidden; }
+.fc-ana-map div { position: absolute; box-sizing: border-box; border: 1px dashed rgba(77, 208, 225, .5); display: flex; align-items: center; justify-content: center; font-size: 9.5px; font-weight: 800; color: #4dd0e1; background: rgba(77, 208, 225, .06); }
+.fc-ana-kv { flex: 1; min-width: 0; display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; font-size: 11.5px; }
+.fc-ana-kv b { color: var(--text-muted); font-weight: 700; font-size: 10.5px; letter-spacing: .03em; }
+
+/* History selection bar (item 58): the viewer's round buttons, spread across. */
+#galSelectBar { justify-content: space-around; padding: 0 12px; }
+#galSelectBar .fs-act:disabled { opacity: 0.4; }
+/* Viewer trash: greyed for a favourite (item 48); a red ring while a second tap would delete (item 57). */
+.btn-icon.fs-act.fs-delete:disabled { opacity: 0.3; filter: grayscale(1); }
+.btn-icon.fs-act.fs-delete.armed { box-shadow: 0 0 0 2px #f44336; }
+/* Analyze: the prompt and negative coloured (LoRA tags, wildcard syntax). */
+.ana-colour { font-size: 12px; line-height: 1.45; color: var(--text-main); white-space: pre-wrap; overflow-wrap: anywhere; }
+.ana-colour .lo, .fc-ana-reg .t .lo { color: var(--accent-primary); }
+.ana-colour .wc, .fc-ana-reg .t .wc { color: #4dd0e1; }
+
+/* Style favourites (item 76): the LoRA list's star. A missing wildcard in the style editor (item 65). */
+.style-row .lora-btn-star { color: var(--text-muted); }
+.style-row .lora-btn-star.on { color: #ffc107; }
+.st-wc-missing { margin: 6px 0 0; color: #f44336; font-size: 12px; line-height: 1.4; display: flex; gap: 6px; align-items: flex-start; }
+.st-wc-missing svg { flex: 0 0 auto; margin-top: 2px; }
+.st-wc-missing .wc-token { overflow-wrap: anywhere; }
+
+/* Couple style editor (item 37): what picking it does, across the window. */
+.st-fc-banner { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; box-sizing: border-box; padding: 9px 12px; border-radius: 10px; font-size: 12.5px; font-weight: 800; letter-spacing: .04em; text-align: center; color: var(--accent-primary); background: rgba(var(--accent-primary-rgb), 0.15); }
+.st-fc-banner svg { flex: 0 0 auto; }
+
+/* Export Wildcards (item 21): picked rows as the list's selected ones, no tick. */
+.wxp-content { max-height: 85vh; display: flex; flex-direction: column; }
+.wxp-ext { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); color: var(--text-muted); font-size: 14px; pointer-events: none; }
+.wxp-list { flex: 1 1 auto; min-height: 120px; overflow-y: auto; overscroll-behavior: contain; }
+.wxp-row { display: flex; align-items: center; gap: 8px; height: 52px; padding: 0 12px; box-sizing: border-box; margin-bottom: 8px; border: 1px solid var(--border-color); border-radius: var(--radius-sm, 10px); background: var(--bg-panel); cursor: pointer; }
+.wxp-row.picked { border-color: var(--accent-primary); background: rgba(var(--accent-primary-rgb), 0.12); }
+.wxp-row .n { flex: 1; min-width: 0; font-size: 15px; font-weight: 600; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wxp-row .need { font-size: 10.5px; font-weight: 800; letter-spacing: .04em; color: var(--accent-primary); }
+.wxp-row .c { font-size: 11px; font-weight: 700; color: #4dd0e1; background: rgba(77, 208, 225, .12); padding: 1px 6px; border-radius: 6px; }
+
+/* Wildcards delete mode (item 83): the count and select-all circle in place of BASIC / ADVANCED, as History's. */
+#wcModeRow { position: relative; display: flex; gap: 8px; align-items: stretch; margin: 0 0 12px; }
+#wcModeSeg { flex: 1 1 auto; min-width: 0; }
+body.wc-selecting #wcModeRow > .wc-fav-filter { visibility: hidden; }
+.wc-sel-head { position: absolute; inset: 0; display: none; align-items: center; justify-content: flex-end; gap: 12px; }
+body.wc-selecting #wcModeSeg > .toggle-opt { visibility: hidden; }
+body.wc-selecting .wc-sel-head { display: flex; }
+#wcSelAll { position: relative; width: 34px; height: 38px; padding: 0; border: none; background: transparent; display: flex; align-items: center; justify-content: center; flex-shrink: 0; cursor: pointer; }
+#wcSelAll .gal-select-ring { display: block; position: static; }
+#wcSelAll.all .gal-select-ring { display: none; }
+#wcSelAll .gal-tick { position: relative; top: auto; left: auto; }
+
+/* Export Wildcards selection (item 84): the count and select-all circle under the search, lined up with the circles on
+   group headers; a circle is empty, ticked (all) or has a dash (some). */
+.wxp-head { display: flex; align-items: center; justify-content: flex-end; gap: 12px; height: 34px; margin: -6px 0 4px; }
+#wxpAll, .wxp-gring { width: 34px; height: 38px; padding: 0; border: none; background: transparent; display: flex; align-items: center; justify-content: center; flex-shrink: 0; cursor: pointer; }
+#wxpAll { margin-right: 3px; }
+.wxp-gring { margin-right: -6px; }
+.wxp-ring { position: relative; width: 22px; height: 22px; box-sizing: border-box; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.85); background: rgba(0, 0, 0, 0.35); }
+[data-theme="light"] .wxp-ring { border-color: var(--text-muted); background: transparent; }
+.wxp-ring.all { background: var(--accent-primary); border-color: var(--accent-primary); }
+.wxp-ring.all::after { content: ''; position: absolute; left: 6px; top: 2px; width: 5px; height: 10px; border: solid #fff; border-width: 0 2.5px 2.5px 0; transform: rotate(45deg); }
+.wxp-ring.some { border-color: var(--accent-primary); }
+.wxp-ring.some::after { content: ''; position: absolute; left: 4px; right: 4px; top: 8px; height: 2.5px; border-radius: 2px; background: var(--accent-primary); }
+.wxp-list .wc-group { display: flex; align-items: center; height: 52px; box-sizing: border-box; margin-bottom: 8px; }
+.wxp-list .wc-group > span:first-of-type { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wxp-row.child { margin-left: 18px; }
+#wxpGroups, #wxpSelect { flex-shrink: 0; }
+.wxp-menu .thumb-menu-box { min-width: 236px; gap: 2px; }
+.wxp-menu .btn-small { justify-content: flex-start; gap: 10px; border: none; background: transparent; }
+.wxp-menu .btn-small small { margin-left: auto; padding-left: 12px; color: var(--text-muted); font-weight: 600; font-size: 11px; }
+.wxp-menu .btn-small:disabled { opacity: 0.4; }
+.wxp-menu hr { border: none; border-top: 1px solid var(--border-color); margin: 4px 6px; }
+
+/* ADetailer chip names (item 9): a second line under the pass number and checkbox, centered, in the labels' font,
+   1.5px down (a transform: positions snap to whole pixels) so its letters sit midway between the checkbox and the tile's bottom edge. */
+.ad-pass-name { display: none; }
+body.ad-chip-names .ad-pass-chip { flex-wrap: wrap; row-gap: 4px; align-content: center; min-height: 52px; }
+body.ad-chip-names .ad-pass-name, .ad-chip-preview .ad-pass-name { display: block; flex: 0 0 100%; min-width: 0; text-align: center; font-size: var(--fs-label); font-weight: 700; text-transform: uppercase; color: var(--text-muted); white-space: nowrap; overflow: hidden; line-height: 14px; min-height: 14px; pointer-events: none; transform: translateY(1.5px); }
+.ad-pass-chip.active .ad-pass-name { color: var(--accent-primary); }
+.ad-chip-preview { flex-wrap: wrap; row-gap: 4px; align-content: center; min-height: 52px; flex: 0 0 auto; cursor: default; }
+.ad-chip-name-input.full { border-color: var(--danger, #ff5252); }
+
+/* Color-coded prompts (item 77): a clear colored copy over the box (taps go through), the box's own text clear. */
+:root { --pc-brk: rgba(255, 255, 255, 0.16); --pc-d0: #ffd54f; --pc-d1: #da70d6; --pc-d2: #4fc3f7; --pc-bad: #e53935; --pc-badfg: #fff; --pc-wt: #9ccc65; --pc-lo: #ff9800; --pc-wc: #4dd0e1; --pc-kw: #b388ff; --pc-ch: #ff8a80; --pc-lab: #90a4ae; --pc-warn: #ffb300; --pc-wave: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='9' height='6'%3E%3Cpath d='M0 3.8 Q2.25 0.8 4.5 3.8 T9 3.8' fill='none' stroke='%23ffb300' stroke-width='1.6'/%3E%3C/svg%3E"); }
+[data-theme="light"] { --pc-brk: rgba(0, 0, 0, 0.1); --pc-d0: #b8860b; --pc-d1: #a0309f; --pc-d2: #0277bd; --pc-bad: #d32f2f; --pc-wt: #558b2f; --pc-lo: #e65100; --pc-wc: #00838f; --pc-kw: #6a1b9a; --pc-ch: #d9534f; --pc-lab: #607d8b; --pc-warn: #e69500; --pc-wave: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='9' height='6'%3E%3Cpath d='M0 3.8 Q2.25 0.8 4.5 3.8 T9 3.8' fill='none' stroke='%23e69500' stroke-width='1.6'/%3E%3C/svg%3E"); }
+.pc-view { position: absolute; margin: 0; background: transparent; pointer-events: none; overflow: hidden; white-space: pre-wrap; border-style: solid; border-color: transparent; color: var(--text-main); box-sizing: border-box; }
+/* Both layers at exactly their CSS size: Android's WebView can enlarge page text but not a text box, so the colored text
+   would draw wider than the box's own and the caret drift behind it (promptcolors.js also checks and corrects). */
+.pc-view, textarea.pc-on { -webkit-text-size-adjust: none; text-size-adjust: none; }
+textarea.pc-on { color: transparent !important; -webkit-text-fill-color: transparent; caret-color: var(--text-main); }
+textarea.pc-on::placeholder { color: var(--text-muted); -webkit-text-fill-color: var(--text-muted); }
+textarea.pc-on::selection { -webkit-text-fill-color: transparent; background: rgba(var(--accent-primary-rgb), 0.35); }
+/* No bold or padding in the copy: it must take exactly the room the box's own text does. */
+:is(.pc-view, .pc-legend, .wx-text, .ana-colour, .fc-ana-reg .t, .pc-text) .pc-d0 { color: var(--pc-d0); } :is(.pc-view, .pc-legend, .wx-text, .ana-colour, .fc-ana-reg .t, .pc-text) .pc-d1 { color: var(--pc-d1); } :is(.pc-view, .pc-legend, .wx-text, .ana-colour, .fc-ana-reg .t, .pc-text) .pc-d2 { color: var(--pc-d2); }
+:is(.pc-view, .pc-legend, .wx-text, .ana-colour, .fc-ana-reg .t, .pc-text) .pc-bad { color: var(--pc-badfg); background: var(--pc-bad); border-radius: 3px; }
+:is(.pc-view, .pc-legend, .wx-text, .ana-colour, .fc-ana-reg .t, .pc-text) .pc-wt { color: var(--pc-wt); } :is(.pc-view, .pc-legend, .wx-text, .ana-colour, .fc-ana-reg .t, .pc-text) .pc-lo { color: var(--pc-lo); }
+:is(.pc-view, .pc-legend, .wx-text, .ana-colour, .fc-ana-reg .t, .pc-text) :is(.pc-wc, .pc-pipe) { color: var(--pc-wc); }
+:is(.pc-view, .pc-legend, .wx-text, .ana-colour, .fc-ana-reg .t, .pc-text) :is(.pc-wcb, .pc-wcin) { color: var(--pc-ch); }
+:is(.pc-view, .pc-legend, .wx-text, .ana-colour, .fc-ana-reg .t, .pc-text) .pc-wc.pc-wcin { color: var(--pc-wc); }
+:is(.pc-view, .pc-legend, .wx-text, .ana-colour, .fc-ana-reg .t, .pc-text) .pc-kw { color: var(--pc-kw); } :is(.pc-view, .pc-legend, .wx-text, .ana-colour, .fc-ana-reg .t, .pc-text) .pc-cm { color: var(--text-muted); }
+.pc-view.pc-muted, .pc-view.pc-muted * { color: var(--text-muted) !important; background: none !important; }
+:is(.pc-view, .pc-legend, .wx-text, .ana-colour, .fc-ana-reg .t, .pc-text) .pc-warn { background: var(--pc-wave) repeat-x left bottom / 9px 6px; padding-bottom: 5px; }
+.pc-help-btn { width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid var(--text-muted); background: transparent; color: var(--text-muted); font-weight: 800; font-size: 13px; line-height: 1; padding: 0; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; cursor: pointer; }
+.pc-help-text { font-size: 14px; color: var(--text-muted); line-height: 1.5; margin: 0 0 12px; }
+.pc-legend { display: grid; grid-template-columns: auto 1fr; gap: 10px 14px; align-items: center; font-size: 14px; color: var(--text-main); }
+.pc-legend b { font-family: monospace; font-size: 15px; }
+.pc-legend .pc-bad { padding: 0 3px; }
+
+/* Gallery columns (item 82): AUTO fits tiles of about 115px, never fewer than 3; or a set 3 / 4 / 5. */
+.gal-cols-seg { display: flex; gap: 4px; flex-shrink: 0; }
+.gal-cols-seg .toggle-opt { padding: 6px 10px; min-width: 34px; font-size: 11px; }
+#savedGalleryGrid { grid-template-columns: repeat(auto-fill, minmax(min(115px, calc((100% - 8px) / 3)), 1fr)); }
+body.gal-cols-3 #savedGalleryGrid { grid-template-columns: repeat(3, 1fr); }
+body.gal-cols-4 #savedGalleryGrid { grid-template-columns: repeat(4, 1fr); }
+body.gal-cols-5 #savedGalleryGrid { grid-template-columns: repeat(5, 1fr); }
+/* Full width in landscape: only while History is the tab shown. */
+@media (orientation: landscape) {
+    body.gal-wide .container:has(> #view-gal:not(.hidden)) { max-width: none; }
+}
+
+/* The LIST view's wildcard names keep their tap (they open that wildcard) in the wildcard color. */
+.wx-text .pc-wc.wx-ref { color: var(--pc-wc); }
+/* A folded region in Analyze: the prompt's height, fading out (its card has a background of its own). */
+.fc-ana-reg .t.ana-collapsed { max-height: 68px; overflow: hidden; -webkit-mask-image: linear-gradient(to bottom, #000 60%, transparent); mask-image: linear-gradient(to bottom, #000 60%, transparent); }
+.fc-ana-reg > .ana-more-btn { margin-top: 4px; }
+
+/* ---- Queue tab (item 79) ---- */
+#queueProgressBox { display: flex; align-items: flex-end; line-height: 0.83; }
+.queue-label .q-count { font-size: 0.88em; font-weight: 700; color: var(--text-muted); margin-left: 8px; }
+.qc { position: relative; overflow: hidden; align-items: stretch; gap: 10px; min-height: 84px; box-sizing: border-box; padding: 10px 10px 10px 12px; cursor: pointer; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.qc.sel { border-color: var(--accent-primary); box-shadow: 0 0 0 1px var(--accent-primary) inset; }
+.qc-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; justify-content: center; }
+.qc-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.qc-mode { flex: 0 0 auto; font-size: 11px; font-weight: 800; letter-spacing: .04em; padding: 2px 7px; border-radius: 6px; background: rgba(var(--accent-primary-rgb), .15); color: var(--accent-primary); }
+.qc-next { flex: 0 0 auto; font-size: 10.5px; font-weight: 800; letter-spacing: .05em; padding: 2px 7px; border-radius: 6px; background: var(--accent-primary); color: #000; }
+.qc-model { flex: 1; min-width: 0; font-size: 12px; font-weight: 600; color: #b8b8c4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qc-status { flex: 0 0 auto; font-size: 11px; font-weight: 700; color: var(--accent-primary); }
+.qc-status.done { color: #00e676; }
+.qc-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.qc-chip { font-size: 10.5px; font-weight: 700; letter-spacing: .03em; padding: 2px 6px; border-radius: 5px; background: rgba(255, 255, 255, .09); color: #d4d4dc; white-space: nowrap; }
+.qc-chip.hi { background: rgba(77, 208, 225, .12); color: #4dd0e1; }
+[data-theme="light"] .qc-model { color: #55556a; }
+[data-theme="light"] .qc-chip { background: rgba(0, 0, 0, .07); color: #33333f; }
+[data-theme="light"] .qc-chip.hi { color: #00838f; }
+.qc-side { flex: 0 0 auto; display: flex; align-items: center; }
+.qc-btn { width: 34px; height: 34px; border-radius: 50%; border: none; background: rgba(255, 255, 255, .06); display: flex; align-items: center; justify-content: center; padding: 0; cursor: pointer; }
+.qc-x { color: #f44336; }
+.qc-grip { align-self: center; display: flex; color: var(--text-muted); opacity: .6; margin-left: -4px; touch-action: none; }
+/* Every card three rows tall; a finished one's thumbnail fills them. */
+.qc-thumb { flex: 0 0 42px; border-radius: 6px; cursor: pointer; background: rgba(255, 255, 255, .05) center / cover no-repeat; }
+.qc-prog { position: absolute; left: 0; bottom: 0; height: 3px; background: var(--accent-primary); transition: width .4s linear; }
+/* Dragging: a gap with a dashed accent outline where it will land; the card held, with a solid accent border. */
+.qc-slot { border: 2px dashed var(--accent-primary); border-radius: var(--radius-sm); background: rgba(var(--accent-primary-rgb), .08); margin-bottom: 8px; box-sizing: border-box; }
+.qc.qc-hidden { visibility: hidden; position: absolute; height: 0; padding: 0; margin: 0; border: 0; }
+.qc-lift { border: 2px solid var(--accent-primary) !important; box-shadow: none !important; background: var(--bg-panel); }
+body.qc-dragging { overscroll-behavior: none; }
+/* The job's details. */
+.qd-content { max-width: 440px; overflow-y: auto; }
+.qd-sub { font-size: 13px; color: var(--text-muted); margin: -4px 0 6px; }
+#qdTitle { display: flex; align-items: center; gap: 8px; }
+.qd-label { font-size: 12px; font-weight: 700; color: var(--text-muted); letter-spacing: .04em; margin: 14px 0 0; }
+.qd-card .h .where { flex: 1; }
+.qd-card .t { font-size: 14px; }
+.qd-grid { margin-top: 8px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; font-size: 13px; color: var(--text-main); background: var(--bg-input); border: 1px solid var(--border-color); border-radius: 10px; padding: 10px 12px; overflow-wrap: anywhere; }
+.qd-grid b { display: block; font-size: 10.5px; color: var(--text-muted); letter-spacing: .04em; }
+.qd-foot { gap: 10px; margin-top: 16px; }
+/* The finished job window's SETTINGS title folds its grid. */
+.qd-fold { display: flex; align-items: center; gap: 6px; width: 100%; background: none; border: none; padding: 0; cursor: pointer; font-family: inherit; text-align: left; }
+.qd-fold svg { transition: transform .2s; }
+.qd-fold.folded svg { transform: rotate(-90deg); }
+.qd-foot .btn-small { flex: 1; }
+.qd-remove { color: #f44336 !important; }
+.qd-card .t.ana-collapsed { max-height: 74px; overflow: hidden; -webkit-mask-image: linear-gradient(to bottom, #000 60%, transparent); mask-image: linear-gradient(to bottom, #000 60%, transparent); }
+
+/* Prompt Guide: the ? beside the prompt's buttons; the examples colored as the prompt boxes. */
+.pg-help-btn { width: 20px; height: 20px; font-size: 12px; }
+#promptGuideModal .wc-g-ex .pc-text { font-family: inherit; color: var(--text-main); }
+
+/* A title's small icon buttons (save, default, clear, ?) closer together, the same in every tab (Prompt Guide room). */
+:has(> label + button.btn-icon[style*="width:20px"]) { gap: 5px !important; }
+/* Narrow phones: PROMPT without its robot, the buttons beside it a little closer. */
+@media (max-width: 359px) { .btn-small.magic-btn svg { width: 0; margin-right: -4px; } .mp-btns { gap: 5px; } }
+
+/* Sorting (item 85): the button at the end of a search row, and its menu. */
+.sort-btn { flex: 0 0 auto; }
+.sort-menu-h { font-size: 11px; font-weight: 800; letter-spacing: .06em; color: var(--text-muted); padding: 6px 10px 4px; }
+.sort-menu .btn-small .sort-ck { margin-left: auto; }
+
+/* Flyouts (sort, LoRA thumbnail, wildcards export, every dropdown): each option a bordered button, the chosen one with
+   the accent border and tint. */
+#thumbMenu .thumb-menu-box { gap: 6px; }
+#thumbMenu .thumb-menu-box .btn-small { border: 1px solid var(--border-color); background: var(--bg-input); border-radius: 8px; }
+#thumbMenu .thumb-menu-box .btn-small.on { color: var(--accent-primary); background: rgba(var(--accent-primary-rgb), .14); border-color: rgba(var(--accent-primary-rgb), .4); }
+#thumbMenu .thumb-menu-box .btn-small:disabled { background: transparent; }
+/* A dropdown's flyout: its heading, then its options scrolling under it. */
+.pick-fly .thumb-menu-box { position: fixed; display: flex; flex-direction: column; padding: 0; overflow: hidden; gap: 0; }
+.pick-fly .sort-menu-h { flex: 0 0 auto; padding: 10px 14px 6px; }
+.pick-fly .pf-list { position: relative; flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 6px; padding: 0 6px 6px; }
+.pick-fly .model-item-row { margin: 0; padding: 9px 12px; background: var(--bg-input); border: 1px solid var(--border-color); border-radius: 8px; transition: none; }
+.pick-fly .model-item-row.active { background: rgba(var(--accent-primary-rgb), .14); border-color: rgba(var(--accent-primary-rgb), .4); }
+.pick-fly .model-item-name { font-size: 14px; white-space: normal; overflow-wrap: anywhere; }
+.pick-fly .model-item-row.active .model-item-subtitle { color: rgba(var(--accent-primary-rgb), .75); }
+.pick-fly .model-item-group-label { margin: 8px 6px 0; font-size: 10px; letter-spacing: .06em; }
+.pick-fly .model-item-group-label:first-child { margin-top: 0; }
+
+/* The wildcard editor's own syntax: labels after ## blue-grey; a condition's names and a rule's tags plain. */
+:is(.pc-view, .pc-legend, .wx-text, .ana-colour, .fc-ana-reg .t, .pc-text) .pc-lab { color: var(--pc-lab); }
+:is(.pc-view, .pc-legend, .wx-text, .ana-colour, .fc-ana-reg .t, .pc-text) :is(.pc-cond, .pc-rule) { color: var(--text-main); }
+/* Import Wildcards: the Civitai key's state. */
+.wi-key-set { color: #4caf50; font-weight: 600; }
+
+/* Gallery Badges (Config > Interface): one row per badge, with its switch. */
+.gb-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 6px 5px; }
+.gb-row .gb-name { display: flex; align-items: center; gap: 12px; min-width: 0; font-size: 15px; color: var(--text-main); }
+.gb-row .gal-badge { min-width: 40px; text-align: center; font-size: 11px; padding: 3px 6px; flex: 0 0 auto; }
+
+/* img2img Presets rows (network.js): the Styles rows' height, no thumbnail; name, checkpoint, chips. */
+#img2imgPresetList .preset-row { height: 92px; box-sizing: border-box; cursor: pointer; }
+#img2imgPresetList .st-info { gap: 3px; min-width: 0; }
+#img2imgPresetList .st-name { margin-bottom: 0; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#img2imgPresetList .preset-row.active .st-main { color: var(--accent-primary); }
+.pt-model { font-size: 12px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pt-chips { white-space: nowrap; overflow: hidden; min-height: 18px; }
+.pt-chip { display: inline-block; padding: 1px 4px; margin-right: 3px; border-radius: 5px; background: rgba(255, 255, 255, 0.07); color: var(--text-muted); font-size: 10.5px; font-weight: 700; line-height: 1.5; }
+.pt-chip.on { background: rgba(var(--accent-primary-rgb), 0.16); color: var(--accent-primary); }
+
+/* Import Wildcards > From URL: room for the clear × only while there is text. */
+#wiUrl:placeholder-shown, #wiCivQ:placeholder-shown, #csQ:placeholder-shown { padding-right: 12px !important; }
+
+/* Civitai Search (wcimport.js): rows one set height, whatever they hold. */
+.cs-row { display: flex; gap: 10px; flex: 0 0 auto; height: 112px; box-sizing: border-box; padding: 8px; border: 1px solid var(--border-color); border-radius: 12px; background: rgba(255, 255, 255, 0.03); }
+.cs-thumb { flex: 0 0 64px; height: 96px; border-radius: 8px; position: relative; overflow: hidden; background: rgba(255, 255, 255, 0.06); display: flex; align-items: center; justify-content: center; color: var(--text-muted); }
+.cs-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cs-18 { position: absolute; left: 4px; top: 4px; font-size: 9px; font-weight: 800; padding: 1px 4px; border-radius: 4px; background: #e53935; color: #fff; }
+.cs-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.cs-name { font-size: 15px; font-weight: 600; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.25; }
+.cs-sub { font-size: 12px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.3; }
+.cs-btns { display: flex; gap: 6px; margin-top: auto; }
+.cs-btns .btn-small { flex: 1 1 0; min-width: 0; padding: 0 4px; height: 30px; min-height: 30px; font-size: 11.5px; white-space: nowrap; }
+.cs-btns .btn-small.cs-imp { color: var(--accent-primary); border-color: rgba(var(--accent-primary-rgb), 0.45); background: rgba(var(--accent-primary-rgb), 0.1); }
+.cs-btns .btn-small:disabled, .cs-foot .btn-small:disabled { opacity: 0.4; }
+.cs-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-top: 10px; flex: 0 0 auto; }
+
+/* Uninstall Library (wcimport.js): UNINSTALL in red; REMOVE LINK ONLY plain. */
+#wuGo.wu-red { color: #f44336; border-color: rgba(244, 67, 54, 0.5); background: rgba(244, 67, 54, 0.12); }
+#wuGo:disabled { opacity: 0.4; }
+
+/* Import: single options picked (wcimport.js). A dash: some picked. */
+.lg-check.some { border-color: var(--accent-primary); }
+.lg-check.some::after { content: ''; width: 10px; height: 3px; border-radius: 2px; background: var(--accent-primary); }
+.wi-ring { background: none; padding: 0; cursor: pointer; flex: 0 0 auto; }
+.wi-ring.hidden { display: none; }
+.wi-open-all { flex: 0 0 auto; width: 34px; height: 30px; padding: 0; display: flex; align-items: center; justify-content: center; background: none; border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-muted); cursor: pointer; }
+.wo-row { display: flex; align-items: flex-start; gap: 10px; padding: 9px 12px; font-size: 14px; cursor: pointer; }
+.wo-row .lg-check { margin-top: -1px; }
+.wo-text { flex: 1; min-width: 0; line-height: 1.4; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wo-row.open .wo-text { white-space: normal; overflow-wrap: anywhere; }
+.wo-row.on { border-color: color-mix(in srgb, var(--accent-primary) 55%, var(--border-color)); }
+.wo-row.off { opacity: 0.5; }
+.wo-row.off .wo-text { text-decoration: line-through; }
+.wo-row.dim { opacity: 0.55; }
+.wo-row .wc-badge { flex: 0 0 auto; }
+.wo-w { flex: 0 0 auto; font-size: 11px; font-weight: 700; color: var(--text-muted); padding-top: 2px; }
+
+/* LIST view: an open option's head (its place, and ▲ to fold it). */
+.wx-open-head { display: flex; align-items: center; justify-content: space-between; margin: -2px 0 2px; }
+.wx-open-head span { font-size: 11px; font-weight: 700; letter-spacing: 0.5px; color: var(--text-muted); }
+.wx-fold { background: none; border: none; color: var(--text-muted); padding: 4px; display: flex; cursor: pointer; }
+
+/* BREAK / AND: the text's own color on a grey highlight (a background only, so widths don't change). */
+:is(.pc-view, .pc-legend, .wx-text, .ana-colour, .fc-ana-reg .t, .pc-text) .pc-brk { color: var(--text-main); background: var(--pc-brk); border-radius: 4px; }
+
+/* Wildcard editor LIST: a folded option at most 6 lines (open, it's whole). */
+.wx-row:not(.wx-open) .wx-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 6; overflow: hidden; }
+/* Analyze: Resolution / Ratio / Type / Size never touch or clip (fitAnaStats() makes the figures smaller). */
+.ana-stats { gap: 10px; flex-wrap: nowrap; }
+.ana-stats .col { min-width: 0; }
+.ana-stats .col > div { white-space: nowrap; }
+
+/* Password Needed: moved clear of the keyboard (askPassword(), wcimport.js). */
+#wiPwModal .modal-content { transition: transform 0.15s ease; }

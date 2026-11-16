@@ -1,8 +1,10 @@
 {
-  "id": "Beta-test-announcement-3",
-  "title": "kotlin-beta-announcement-3",
-  "message": "The second apk for the beta test is released which includes most of Bungles patch. Those who are interested in a beta test for the kotlin app. Check Issue no #55. ",
+  "id": "v3.0-release",
+  "title": "Resolver v3.0 Released",
+  "message": "Resolver v3.0 is out, our biggest update yet: Wildcards, Forge Couple, prompt history, LoRA variants & groups, Backup & Restore, a new dock and 40+ fixes. Huge thanks to Bungles for the v3.0 patch! It needs a new APK: install it over your current app and your images, history and settings stay as they are.",
   "type": "info",
-  "date": "2026-10-21",
-  "active": true
+  "date": "2026-11-16",
+  "active": true,
+  "link": "https://github.com/bojrodev/Resolver-Stable-Diffusion-Client-for-android/releases",
+  "linkText": "GET v3.0"
 }

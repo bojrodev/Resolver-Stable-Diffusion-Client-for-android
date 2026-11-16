@@ -1,7 +1,5 @@
-// Config > "Clean Up Model Data": finds LoRAs with custom data (custom name, edited config, ADetailer-link
-// opt-out, favourite) and checkpoints with saved settings (ckptcleanup.js) that are no longer on the server,
-// lists them, and clears that data after confirmation. Compares only against lists fetched live from the
-// server, stops on a failed or empty answer, and re-fetches when the user confirms.
+// Config > "Clean Up Model Data": data of LoRAs and checkpoints no longer on the server (checked against a fresh list
+// each time) and thumbnails of styles that are gone, cleared after confirmation.
 (function () {
     const FAV_PREFIX = 'bojroLoraFavs';
 
@@ -77,6 +75,9 @@
             const list = readJson(key, []);
             if (Array.isArray(list)) list.forEach(n => add(n, 'favourite'));
         }
+        if (window.LoraVariants) window.LoraVariants.namesWithVariants().forEach(n => add(n, 'variants'));
+        if (window.LoraVariants) window.LoraVariants.parentThumbNames().forEach(n => add(n, 'thumbnail'));
+        if (window.LoraGroups) window.LoraGroups.memberNames().forEach(n => add(n, 'group'));
         return found;
     }
 
@@ -107,6 +108,8 @@
         }
         Object.keys(loraConfigs).filter(isGone).forEach(n => delete loraConfigs[n]);
         localStorage.setItem('bojroLoraConfigs', JSON.stringify(loraConfigs));
+        if (window.LoraVariants) window.LoraVariants.clearFor(isGone);
+        if (window.LoraGroups) window.LoraGroups.clearFor(isGone);
 
         const favKeys = [];
         for (let i = 0; i < localStorage.length; i++) {
@@ -138,10 +141,27 @@
     const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
     // Fetches both live lists; throws if either can't be trusted.
+    // The server's thumbnails cached for LoRAs it no longer has (checkpoints' are ckptcleanup.js's).
+    function clearCachedThumbs(installed) {
+        const LM = window.LoraManager;
+        if (!LM || !LM.metaCache) return;
+        const gone = Object.keys(LM.metaCache).filter(n => !n.startsWith('ckpt_') && !installed.has(n.toLowerCase()));
+        gone.forEach(n => {
+            delete LM.metaCache[n];
+            delete LM.thumbnailMemCache[n];
+            if (LM.fs) LM.fs.deleteFile({ path: `${LM.CACHE_DIR}/${n.replace(/[^a-zA-Z0-9.\-_]/g, '_')}.jpg`, directory: 'CACHE' }).catch(() => {});
+        });
+        if (gone.length && typeof LM.saveMetaCache === 'function') LM.saveMetaCache();
+    }
+
     async function findAllStale() {
         const ckpt = window.__ckptCleanup;
         const [loras, checkpoints] = await Promise.all([fetchInstalledNames(), ckpt ? ckpt.fetchInstalledKeys() : null]);
-        return { loras: findStale(loras), checkpoints: ckpt ? ckpt.findStale(checkpoints) : [] };
+        clearCachedThumbs(loras);
+        const SM = window.StyleManager;
+        if (SM && SM.thumbsReady) await SM.thumbsReady;
+        const styles = SM ? SM.orphanThumbNames().sort((a, b) => a.localeCompare(b)).map(n => ({ key: n, name: n, kinds: ['thumbnail'] })) : [];
+        return { loras: findStale(loras), checkpoints: ckpt ? ckpt.findStale(checkpoints) : [], styles };
     }
 
     function showModal(stale) {
@@ -150,29 +170,33 @@
         modal.id = 'loraCleanupModal';
         modal.className = 'modal';
         const row = (name, kinds) => `
-            <div style="padding:8px 10px; border:1px solid var(--border-color); border-radius:10px; background:rgba(255,255,255,0.02);">
-                <div style="font-size:13px; font-weight:800; color:var(--text-main); word-break:break-word;">${esc(name)}</div>
-                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">${esc(kinds.join(' · '))}</div>
+            <div class="model-item-row" style="margin:0; cursor:default;">
+                <div class="card-name">${esc(name)}</div>
+                <div class="card-sub" style="margin-top:1px;">${esc(kinds.join(' • '))}</div>
             </div>`;
         const section = (label, items, nameOf) => items.length
             ? `<div class="model-item-group-label" style="margin:4px 2px 0;">${label}</div>` + items.map(s => row(nameOf(s), s.kinds)).join('')
             : '';
         const rows = section('LoRAs', stale.loras, s => s.name)
-            + section('Checkpoints', stale.checkpoints, s => (typeof splitCheckpointDisplayName === 'function' && splitCheckpointDisplayName(s.name).primary) || s.name);
+            + section('Checkpoints', stale.checkpoints, s => (typeof splitCheckpointDisplayName === 'function' && splitCheckpointDisplayName(s.name).primary) || s.name)
+            + section('Styles', stale.styles, s => s.name);
         const counts = [stale.loras.length ? plural(stale.loras.length, 'LoRA') : '', stale.checkpoints.length ? plural(stale.checkpoints.length, 'checkpoint') : ''].filter(Boolean).join(' and ');
-        const total = stale.loras.length + stale.checkpoints.length;
+        const models = stale.loras.length + stale.checkpoints.length;
+        const total = models + stale.styles.length;
+        const said = [models ? `${counts} ${models === 1 ? 'is' : 'are'} no longer on the server.` : '',
+            stale.styles.length ? `${plural(stale.styles.length, 'style thumbnail')} ${stale.styles.length === 1 ? 'belongs' : 'belong'} to a style that no longer exists.` : ''].filter(Boolean).join(' ');
         modal.innerHTML = `
             <div class="modal-content" style="max-height:85vh; display:flex; flex-direction:column;">
                 <div class="modal-header">
                     <h3>Clean up model data</h3>
                     <button type="button" class="close-btn" onclick="closeLoraCleanup()">×</button>
                 </div>
-                <div style="font-size:12px; color:var(--text-muted); margin:4px 0 10px;">
-                    ${counts} ${total === 1 ? 'is' : 'are'} no longer on the server but still ${total === 1 ? 'has' : 'have'} custom data in the app. Deleting clears that data for good.
+                <div style="font-size:13px; color:var(--text-main); line-height:1.5; margin:0 0 10px;">
+                    ${said} Delete ${total === 1 ? 'its' : 'their'} saved data for good?
                 </div>
                 <div id="loraCleanupList" class="col" style="gap:8px; overflow-y:auto; min-height:0; flex:1;">${rows}</div>
                 <div class="row" style="gap:10px; margin-top:12px;">
-                    <button type="button" class="btn-small" style="flex:1;" onclick="closeLoraCleanup()">CANCEL</button>
+                    <button type="button" class="btn-small" style="flex:1; background:transparent; border:1px solid var(--border-color); color:var(--text-muted);" onclick="closeLoraCleanup()">CANCEL</button>
                     <button type="button" id="loraCleanupDeleteBtn" class="btn-small" style="flex:1; background:#f44336; color:#fff; border:none;" onclick="confirmLoraCleanup()">DELETE DATA</button>
                 </div>
             </div>`;
@@ -195,7 +219,7 @@
                 await window.appAlert(`${e.message} Nothing was changed.`, { title: 'Cannot compare models' });
                 return;
             }
-            if (stale.loras.length + stale.checkpoints.length === 0) {
+            if (stale.loras.length + stale.checkpoints.length + stale.styles.length === 0) {
                 if (typeof Toast !== 'undefined') Toast.show({ text: 'Nothing to clean up', duration: 'short' });
                 return;
             }
@@ -227,11 +251,14 @@
             const shownC = new Set(modal._stale.checkpoints.map(s => s.key));
             const goneL = fresh.loras.filter(s => shownL.has(s.key));
             const goneC = fresh.checkpoints.filter(s => shownC.has(s.key));
+            const shownS = new Set(modal._stale.styles.map(s => s.key));
+            const goneS = fresh.styles.filter(s => shownS.has(s.key));
             clearData(goneL.map(s => s.key));
             if (window.__ckptCleanup) window.__ckptCleanup.clearData(goneC);
+            if (window.StyleManager) await window.StyleManager.removeThumbs(goneS.map(s => s.key));
             closeModal();
             if (typeof Toast !== 'undefined') {
-                const parts = [goneL.length ? plural(goneL.length, 'LoRA') : '', goneC.length ? plural(goneC.length, 'checkpoint') : ''].filter(Boolean).join(' and ');
+                const parts = [goneL.length ? plural(goneL.length, 'LoRA') : '', goneC.length ? plural(goneC.length, 'checkpoint') : '', goneS.length ? plural(goneS.length, 'style thumbnail') : ''].filter(Boolean).join(' and ');
                 Toast.show({ text: `Cleared custom data for ${parts || 'nothing'}`, duration: 'long' });
             }
         } finally {

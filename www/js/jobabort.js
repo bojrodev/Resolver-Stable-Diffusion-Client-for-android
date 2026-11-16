@@ -1,4 +1,4 @@
-// Abort Job If App Closes or Disconnects (Config > Experimental, off by default): Forge's job is stopped when the
+// Abort On Close or Disconnect (Config > Experimental, off by default): Forge's job is stopped when the
 // app is swiped away (native, ResolverForegroundService), on the next launch after the app closed or crashed
 // mid-job, and once the connection is back after it was lost mid-job.
 (function () {

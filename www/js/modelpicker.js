@@ -70,14 +70,14 @@ function splitCheckpointDisplayName(rawTitle) {
         return { primary: stripCheckpointPathNoise(rawTitle) || rawTitle, subtitle: '' };
     }
 
-    const subtitle = technicalParts.map(t => modelPickerPrettifyToken(t)).filter(Boolean).join(' · ');
+    const subtitle = technicalParts.map(t => modelPickerPrettifyToken(t)).filter(Boolean).join(' • ');
     return { primary: clean, subtitle };
 }
 
 let modelPickerTargetSelectId = null;
 
-// Opens the picker for a trigger button, reading the target select's options. data-kind="checkpoint" runs names through splitCheckpointDisplayName(); other kinds are shown as is. data-modal-title sets the heading.
-window.openModelPicker = function(trigger) {
+// Opens the picker for a trigger button, as a flyout (placeFlyout()), reading the target select's options. data-kind="checkpoint" runs names through splitCheckpointDisplayName(); other kinds are shown as is. data-modal-title sets the heading.
+window.openModelPicker = function(trigger, anchor) {
     const selectId = trigger.dataset.target;
     const kind = trigger.dataset.kind || 'checkpoint';
     // A value always placed first (e.g. Upscaler 2's "None"). hasAttribute() because an empty string is a valid value.
@@ -88,12 +88,15 @@ window.openModelPicker = function(trigger) {
     if (!select) return;
     modelPickerTargetSelectId = selectId;
 
-    const titleEl = document.getElementById('modelPickerTitle');
-    if (titleEl) titleEl.textContent = trigger.dataset.modalTitle || (kind === 'checkpoint' ? 'Select Checkpoint' : 'Select an Option');
-
-    const list = document.getElementById('modelPickerList');
-    if (!list) return;
-    list.innerHTML = '';
+    // The flyout: its heading (the title without "Select"), then the list.
+    document.getElementById('thumbMenu')?.remove();
+    const fly = document.createElement('div');
+    fly.id = 'thumbMenu';
+    fly.className = 'modal pick-fly';
+    fly.innerHTML = '<div class="thumb-menu-box"><div class="sort-menu-h"></div><div id="modelPickerList" class="pf-list"></div></div>';
+    const title = trigger.dataset.modalTitle || (kind === 'checkpoint' ? 'Select Checkpoint' : 'Select an Option');
+    fly.querySelector('.sort-menu-h').textContent = title.replace(/^Select (an? )?/i, '').toUpperCase();
+    const list = fly.querySelector('.pf-list');
 
     const currentValue = select.value;
     let anyOptions = false;
@@ -170,10 +173,76 @@ window.openModelPicker = function(trigger) {
         list.appendChild(empty);
     }
 
-    document.getElementById('modelPickerModal')?.classList.remove('hidden');
-    if (typeof lockBodyScroll === 'function') lockBodyScroll();
+    document.body.appendChild(fly);
+    // Placed by what was tapped: the box itself, or (a hidden box opened by another button) that button.
+    const shown = el => el && el.getClientRects().length && el.getBoundingClientRect().width > 0;
+    const at = [anchor, trigger, document.activeElement, flyLastPress()].find(shown) || trigger;
+    placeFlyout(fly.firstChild, list, at);
 }
 
+// A flyout's box placed by what opened it: below (above if there's more room), at least its width, at most 60% of the
+// screen or the room there is (above the dock), the list scrolling inside; the chosen row in view.
+window.placeFlyout = function(box, list, anchor) {
+    const t = anchor.getBoundingClientRect(), W = window.innerWidth, H = window.innerHeight;
+    const dock = document.querySelector('.dock-wrapper'), d = dock && dock.getClientRects().length && getComputedStyle(dock).visibility !== 'hidden' ? dock.getBoundingClientRect() : null;
+    const bottom = (d && d.height && d.top > t.bottom + 60 ? d.top : H) - 8;
+    const w = Math.min(W - 16, Math.max(t.width, 236));
+    box.style.width = `${w}px`;
+    box.style.left = `${Math.max(8, Math.min(t.left, W - w - 8))}px`;
+    const below = bottom - (t.bottom + 6), above = t.top - 6 - 8, cap = H * 0.6;
+    const down = below >= Math.min(box.scrollHeight, cap) || below >= above;
+    const room = Math.max(120, Math.min(cap, down ? below : above));
+    box.style.maxHeight = `${room}px`;
+    // Whole rows only, as other lists: the list ends after the last row that fits (with equal rows, scrolled to the end
+    // it's clean too).
+    if (list) {
+        list.style.maxHeight = '';
+        const pad = parseFloat(getComputedStyle(list).paddingBottom) || 0, top = list.offsetTop;
+        const rows = [...list.children].filter(r => r.offsetHeight);
+        let end = 0;
+        for (const r of rows) { const b = r.offsetTop + r.offsetHeight + pad; if (top + b > room) break; end = b; }
+        if (end && rows.length && rows[rows.length - 1].offsetTop + rows[rows.length - 1].offsetHeight + pad > end) list.style.maxHeight = `${end}px`;
+    }
+    box.style.top = `${down ? t.bottom + 6 : t.top - 6 - box.offsetHeight}px`;
+    // The chosen row about the middle, scrolled to a row's top so no row is cut.
+    const on = list && list.querySelector('.active, .on');
+    if (on && list.scrollHeight > list.clientHeight) {
+        const rows = [...list.children].filter(r => r.offsetHeight), want = on.offsetTop - (list.clientHeight - on.offsetHeight) / 2;
+        const top = rows.map(r => r.offsetTop).filter(t => t <= Math.max(0, want)).pop() || 0;
+        list.scrollTop = Math.min(top, list.scrollHeight - list.clientHeight);
+    }
+};
+window.addEventListener('resize', () => { if (document.querySelector('#thumbMenu.pick-fly')) closeModelPicker(); });
+// Any flyout (#thumbMenu): the page held still while it's open, whichever way it closes (tap, back, a pick); a tap
+// outside closes it and goes on to what's under it (its backdrop takes no taps), except on the button that opened it.
+(() => {
+    let held = null, lastPress = null, opener = null;
+    window.flyLastPress = () => lastPress;
+    new MutationObserver(() => {
+        const fly = document.getElementById('thumbMenu');
+        if (fly === held) return;
+        if (held && typeof unlockBodyScroll === 'function') unlockBodyScroll();
+        held = fly;
+        if (held && typeof lockBodyScroll === 'function') lockBodyScroll();
+        // What opened it: the button last pressed before it appeared.
+        if (held) opener = lastPress;
+    }).observe(document.body, { childList: true });
+    document.addEventListener('pointerdown', e => {
+        const fly = document.getElementById('thumbMenu');
+        const btn = e.target.closest ? e.target.closest('button, [role="button"], .model-picker-trigger, .lv-thumb-pick') : null;
+        if (!fly || !fly.firstElementChild?.contains(e.target)) lastPress = btn;
+        if (fly && !fly.firstElementChild?.contains(e.target)) {
+            const own = opener && opener.contains(e.target);
+            if (fly.classList.contains('pick-fly')) closeModelPicker(); else fly.remove();
+            if (own) {
+                const swallow = ev => { ev.stopPropagation(); ev.preventDefault(); };
+                document.addEventListener('click', swallow, { capture: true, once: true });
+                setTimeout(() => document.removeEventListener('click', swallow, { capture: true }), 600);
+            }
+            opener = null;
+        }
+    }, true);
+})();
 // ADetailer detection models are raw filenames, so give them a cleaner display name. Only the display changes; the full filename is still submitted.
 function stripModelFileExtension(name) {
     return (name || '').replace(/\.[a-zA-Z0-9]+$/, '');
@@ -187,8 +256,12 @@ function stripModuleExtension(name) {
 
 function appendModelPickerRow(list, opt, currentValue, kind) {
     let primary, subtitle;
-    if (kind === 'checkpoint') {
+    if (kind === 'checkpoint' && opt.value) {
         ({ primary, subtitle } = splitCheckpointDisplayName(opt.value));
+    } else if (kind === 'checkpoint') {
+        // An empty choice ("None", "Same as main") shows its label.
+        primary = opt.textContent;
+        subtitle = '';
     } else if (kind === 'detection-model') {
         primary = stripModelFileExtension(opt.textContent || opt.value);
         subtitle = '';
@@ -240,8 +313,7 @@ function selectModelFromPicker(title) {
 }
 
 window.closeModelPicker = function() {
-    document.getElementById('modelPickerModal')?.classList.add('hidden');
-    if (typeof unlockBodyScroll === 'function') unlockBodyScroll();
+    document.querySelector('#thumbMenu.pick-fly')?.remove();
     modelPickerTargetSelectId = null;
 }
 

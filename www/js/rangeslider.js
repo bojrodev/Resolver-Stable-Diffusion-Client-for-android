@@ -1,10 +1,5 @@
-// Slider widgets for ControlNet Weight (one ball), Guidance start/end (two balls) and the preprocessor's own
-// settings, in the ControlNet sections and ADetailer's ControlNet. Steps come from the input; a ball must be touched to move (the track
-// scrolls the page). The hidden <input type=number> stays the single source of truth, so payload
-// builders, save functions and presets keep working through .value. The widget stays in step with
-// the input both ways (dragging writes it and fires input/change; programmatic .value changes are
-// caught by watching the property). Ball position is a CSS --p property (0..1), so sliders inside
-// hidden sections are already placed when shown.
+// Sliders over number inputs (ControlNet Weight / Guidance and preprocessor settings, inputs with data-slider-label);
+// the hidden input stays the source of truth, in step both ways. The ball's place is CSS --p, so hidden ones are set.
 (function () {
     'use strict';
 
@@ -36,23 +31,35 @@
     }
 
     // inputs: one number input (Weight) or [start, end] (Guidance). anchorCols: original .col wrappers to hide.
-    function build(inputs, anchorCols, labelText) {
+    // plain: the label without the range (ADetailer's sliders).
+    function build(inputs, anchorCols, labelText, plain) {
         const isRange = inputs.length === 2;
         const first = inputs[0];
         // let: a preprocessor slider's range changes with the preprocessor (refreshRange below).
         let min = parseFloat(first.min);
         let max = parseFloat(first.max);
         let step = parseFloat(first.step) || 0.05;
-        let decimals = (String(step).split('.')[1] || '').length;
+        let decimals = first.dataset.sliderDecimals !== undefined ? parseInt(first.dataset.sliderDecimals, 10) : (String(step).split('.')[1] || '').length;
 
         const block = document.createElement('div');
         block.className = 'col cn-slider-col';
         block.innerHTML =
-            `<div class="cn-slider-head"><label class="cn-slider-label">${labelText} (${min}-${max})</label><span class="cn-slider-val"></span></div>` +
+            `<div class="cn-slider-head"><label class="cn-slider-label">${plain ? labelText : `${labelText} (${min}-${max})`}</label><span class="cn-slider-val slider-val"></span></div>` +
             `<div class="cn-slider-wrap"><div class="cn-slider-track">${isRange ? '<div class="cn-slider-fill"></div>' : ''}</div></div>`;
         const wrap = block.querySelector('.cn-slider-wrap');
         const fill = block.querySelector('.cn-slider-fill');
         const readout = block.querySelector('.cn-slider-val');
+        // data-slider-nudge: − and + either side of the slider, 0.01 at a time (nudgeSlider(), editor.js), as Inpaint's
+        // Denoising.
+        if (first.dataset.sliderNudge !== undefined && first.id) {
+            const row = document.createElement('div');
+            row.className = 'denoise-nudge-row';
+            wrap.before(row);
+            const btn = (d, icon, label) => `<button type="button" class="nudge-btn" onclick="nudgeSlider('${first.id}', ${d})" aria-label="${label}"><i data-lucide="${icon}" width="14" height="14"></i></button>`;
+            row.insertAdjacentHTML('beforeend', btn(-0.01, 'minus', 'Decrease by 0.01'));
+            row.appendChild(wrap);
+            row.insertAdjacentHTML('beforeend', btn(0.01, 'plus', 'Increase by 0.01'));
+        }
 
         const thumbs = inputs.map((input, i) => {
             const thumb = document.createElement('div');
@@ -99,6 +106,7 @@
 
         // ---- dragging: only a ball moves it ----
         let drag = null; // { index, pointerId, lastStepIndex }
+        let lastTap = null; // { index, time }: the last tap on a ball, for a double tap
 
         // Which ball a touch grabbed, chosen by distance because the 36px targets can overlap. Returns the index,
         // -1 for none, or { tie: [left, right] } settled by the direction the finger moves first.
@@ -143,9 +151,16 @@
             return v;
         }
 
+        // Where the finger is on the ball (from its centre) and the step it's on, so the ball moves only as the finger
+        // does.
+        function grab() {
+            const r = thumbs[drag.index].getBoundingClientRect();
+            drag.grab = drag.startX - (r.left + r.width / 2);
+            drag.lastStepIndex = Math.round((readNumber(inputs[drag.index], min) - min) / step);
+        }
         function apply(clientX) {
             const input = inputs[drag.index];
-            const v = valueFromClientX(clientX);
+            const v = valueFromClientX(clientX - drag.grab);
             if (readNumber(input, NaN) === v) return;
             input.value = v; // the watcher above re-syncs the widget
             input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -158,20 +173,22 @@
             e.preventDefault();
             const tie = typeof picked === 'object' ? picked.tie : null;
             // index stays null for an undecided tie (see pickBall) until the finger moves
-            drag = { index: tie ? null : picked, tie, startX: e.clientX, pointerId: e.pointerId, lastStepIndex: null };
+            drag = { index: tie ? null : picked, tie, startX: e.clientX, pointerId: e.pointerId, lastStepIndex: null, grab: 0, moved: 0 };
             try { wrap.setPointerCapture(e.pointerId); } catch (err) {}
             if (drag.index !== null) {
                 thumbs[drag.index].classList.add('dragging');
-                apply(e.clientX);
+                grab();
             }
         });
         wrap.addEventListener('pointermove', (e) => {
             if (!drag || e.pointerId !== drag.pointerId) return;
+            drag.moved = Math.max(drag.moved, Math.abs(e.clientX - drag.startX));
             if (drag.index === null) {
                 const dx = e.clientX - drag.startX;
                 if (Math.abs(dx) < 2) return; // not moving yet - nothing to decide on
                 drag.index = dx < 0 ? drag.tie[0] : drag.tie[1];
                 thumbs[drag.index].classList.add('dragging');
+                grab();
             }
             apply(e.clientX);
         });
@@ -182,6 +199,19 @@
             try { wrap.releasePointerCapture(e.pointerId); } catch (err) {}
             if (finished.index === null) return; // an undecided tie that never moved: nothing changed, nothing to commit
             thumbs[finished.index].classList.remove('dragging');
+            // A double tap on the ball: its default back (data-slider-default).
+            const input = inputs[finished.index];
+            if (finished.moved < 8 && input.dataset.sliderDefault !== undefined) {
+                const now = Date.now();
+                if (lastTap && lastTap.index === finished.index && now - lastTap.time < 350) {
+                    lastTap = null;
+                    const def = parseFloat(input.dataset.sliderDefault);
+                    if (!isNaN(def) && readNumber(input, NaN) !== def) {
+                        input.value = parseFloat(Math.min(max, Math.max(min, def)).toFixed(decimals));
+                        input.dispatchEvent(new Event('input', { bubbles: true }));
+                    }
+                } else lastTap = { index: finished.index, time: now };
+            } else lastTap = null;
             // Commit: what the inline onchange handlers (which save the value) run on.
             inputs[finished.index].dispatchEvent(new Event('change', { bubbles: true }));
         };
@@ -208,6 +238,11 @@
         root.querySelectorAll('input[type="number"]').forEach(input => {
             if (input.dataset.cnSlider || !input.id) return;
             const col = input.closest('.col');
+            if (input.dataset.sliderLabel !== undefined && col) {
+                input.dataset.cnSlider = '1';
+                build([input], [col], input.dataset.sliderLabel, true);
+                return;
+            }
             // A ControlNet preprocessor slider (data-cn-label), relabelled per preprocessor.
             if (input.dataset.cnLabel !== undefined && col) {
                 input.dataset.cnSlider = '1';

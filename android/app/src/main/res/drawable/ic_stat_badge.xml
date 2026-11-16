@@ -1,0 +1,11 @@
+<!-- Status bar icon for notifications (Config > Experimental > Notification icon): an R cut out of a rounded square. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M7,1.5H17A5.5,5.5 0,0 1,22.5 7V17A5.5,5.5 0,0 1,17 22.5H7A5.5,5.5 0,0 1,1.5 17V7A5.5,5.5 0,0 1,7 1.5ZM7.26 18.2H10.52V14.24H11.65L13.76 18.2H17.3L14.85 13.72C16.13 13.11 16.9 11.94 16.9 10.27C16.9 7.73 15.11 6.2 12.44 6.2H7.26ZM10.52 11.71V8.81H11.66C12.81 8.81 13.5 9.25 13.5 10.27C13.5 11.3 12.81 11.71 11.66 11.71Z"/>
+</vector>

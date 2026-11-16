@@ -217,6 +217,12 @@ window.connect = async function(silent = false) {
 
     // Visual State 1: Connecting
     if (btn) {
+        // Connecting by itself while not linked: INITIALIZED, unlit, so success only lights it up.
+        if (silent && !isEngineConnected && !btn.classList.contains('active') && !btn.classList.contains('engine-pending')) {
+            btn.classList.add('engine-pending');
+            btn.innerHTML = `<i data-lucide="zap"></i> INITIALIZED`;
+            if (window.lucide) lucide.createIcons();
+        }
         btn.classList.remove('active'); 
         if (!silent) {
             btn.innerHTML = `<i data-lucide="cloud-lightning"></i> INITIALIZING...`;
@@ -258,7 +264,7 @@ window.connect = async function(silent = false) {
 
         // Visual State 2: Success
         if (btn) {
-            btn.classList.remove('connecting');
+            btn.classList.remove('connecting', 'engine-pending');
             btn.classList.add('active');
             btn.innerHTML = `<i data-lucide="zap"></i> INITIALIZED`;
             if(window.lucide) lucide.createIcons();
@@ -270,8 +276,10 @@ window.connect = async function(silent = false) {
         if(genBtn) genBtn.disabled = false;
 
         // fetchControlNetOptions() also runs on every successful connection (including re-taps of Initialize Engine), because the ControlNet lists were otherwise only populated once at boot and could stay empty if the server wasn't ready then. It also populates ADetailer's ControlNet model dropdown (populateAdetailerControlNetModels()), which depends on the same fetch.
+        window.ImageFormat?.refresh();
         await Promise.all([fetchModels(), fetchSamplers(), fetchSchedulers(), fetchVaes(), fetchUpscalers(), fetchAdetailerModels(), fetchControlNetOptions()]);
         fetchEmbeddingNames();
+        if (window.TagComplete) TagComplete.connected();
 
         // applyAllSavedDefaults() does not run here (it fought the live-state system). Sampler/scheduler are restored in fetchSamplers()/fetchSchedulers(); saved defaults apply only via Load Default.
 
@@ -284,10 +292,16 @@ window.connect = async function(silent = false) {
     } catch (e) {
         // A genuine failure means the connection is gone, so a later resume can retry (unlike a brief interruption).
         isEngineConnected = false;
+        window.ImageFormat?.note(null);
         // Visual State 3: Failure
         if (btn) {
             btn.classList.remove('connecting');
             btn.classList.remove('active');
+            if (btn.classList.contains('engine-pending')) {
+                btn.classList.remove('engine-pending');
+                btn.innerHTML = `<i data-lucide="zap-off"></i> INITIALIZE ENGINE`;
+                if (window.lucide) lucide.createIcons();
+            }
             
             if (!silent) {
                 btn.innerHTML = `<i data-lucide="x-circle"></i> FAILED`;
@@ -367,6 +381,21 @@ function keepSavedCheckpoint(mode, data) {
     }
 }
 
+// Before connecting, each tab shows its last checkpoint (dimmed) rather than a placeholder; populateCheckpointSelects()
+// replaces it with the server's list.
+function showCachedCheckpoints() {
+    ['xl', 'flux', 'inp', 'img2img', 'anima', 'krea'].forEach(mode => {
+        const el = document.getElementById(mode + '_modelSelect');
+        const saved = localStorage.getItem('bojroModel_' + mode);
+        if (!el || !saved || el.options.length !== 1) return;
+        el.innerHTML = '';
+        el.appendChild(new Option(saved, saved));
+        el.value = saved;
+        document.querySelector(`.model-picker-trigger[data-target="${mode}_modelSelect"]`)?.classList.add('model-cached');
+        if (typeof updateModelPickerTriggerText === 'function') updateModelPickerTriggerText(mode + '_modelSelect');
+    });
+}
+
 // Fills every tab's checkpoint dropdown; re-run when a checkpoint's type or Inpaint visibility changes.
 function populateCheckpointSelects(data) {
     // Helper to safely populate
@@ -392,6 +421,7 @@ function populateCheckpointSelects(data) {
     safePopulate('krea_modelSelect', buildGroupedModelOptions(data, 'krea', 'Krea Models'));
 
     ['xl', 'flux', 'inp', 'img2img', 'anima', 'krea'].forEach(mode => keepSavedCheckpoint(mode, data));
+    document.querySelectorAll('.model-picker-trigger.model-cached').forEach(b => b.classList.remove('model-cached'));
     // Setting .value fires no 'change', so refresh the trigger button text.
     if (typeof refreshAllModelPickerTriggers === 'function') refreshAllModelPickerTriggers();
     // Low Bits belongs to the checkpoint just restored.
@@ -585,6 +615,7 @@ async function fetchUpscalers() {
             data.forEach(u => el2.appendChild(new Option(u.name, u.name)));
             const saved2 = localStorage.getItem('bojro_upscale_upscaler_2');
             if (saved2 && Array.from(el2.options).some(o => o.value === saved2)) el2.value = saved2;
+            window.syncUpscaler2VisRow?.();
         }
 
         // Setting .value fires no 'change', so refresh the trigger buttons.
@@ -647,6 +678,7 @@ async function fetchAdetailerModels() {
                 if (saved && Array.from(el.options).some(o => o.value === saved)) el.value = saved;
                 updated++;
             });
+            if (typeof paintAdChipNames === 'function') paintAdChipNames();
         });
 
         console.log(`ADetailer model list: successfully fetched ${modelNamesNoNone.length} models from the live server via Gradio's /config, replacing the built-in list on ${updated} dropdowns.`);
@@ -739,15 +771,56 @@ async function loadSidecarConfig(loraName, loraPath) {
     };
 }
 
-window.unloadModel = async function(silent = false) {
-    if (!silent && !(await window.appConfirm("Unload current model?", { title: 'Unload Model', okText: 'UNLOAD' }))) return;
+// Adds the server's VRAM use (/sdapi/v1/memory) to the open Clear VRAM dialog.
+async function showServerVram() {
     try {
-        await fetch(`${HOST}/sdapi/v1/unload-checkpoint`, {
+        const ctl = new AbortController();
+        const timer = setTimeout(() => ctl.abort(), 3000);
+        const res = await fetch(`${HOST}/sdapi/v1/memory`, { headers: getHeaders(), signal: ctl.signal });
+        clearTimeout(timer);
+        const sys = (await res.json())?.cuda?.system;
+        const gb = b => b / 1073741824;
+        if (!sys || !(sys.total > 0)) return;
+        const used = gb(sys.total - sys.free), total = gb(sys.total);
+        const msg = document.getElementById('appConfirmMessage');
+        const open = !document.getElementById('appConfirmModal')?.classList.contains('hidden');
+        if (!open || document.getElementById('appConfirmTitle')?.textContent !== 'Clear VRAM?') return;
+        msg.textContent = `Unloads the checkpoint and other models.\n${used.toFixed(1)} of ${Math.round(total)} GB in use.`;
+    } catch (e) {}
+}
+
+// The bin beside GENERATE / UPSCALE. Asks first unless Confirm Clear VRAM is off.
+window.confirmUnloadModels = async function() {
+    if (localStorage.getItem('bojroConfirmClearVram') !== 'false') {
+        const pending = window.appConfirm('Unloads the checkpoint and other models.', { title: 'Clear VRAM?', okText: 'CLEAR', danger: true, checkbox: "Don't ask again" });
+        showServerVram();
+        const ok = await pending;
+        if (!ok) return;
+        if (window.appConfirmChecked()) {
+            localStorage.setItem('bojroConfirmClearVram', 'false');
+            const sw = document.getElementById('cfgConfirmClearVramSwitch');
+            if (sw) sw.checked = false;
+        }
+    }
+    unloadModel();
+};
+
+window.unloadModel = async function(silent = false) {
+    // Clearing VRAM... stays up until it's done (item 54).
+    const say = !silent && typeof Toast !== 'undefined', HOLD = 'Clearing VRAM...';
+    if (say) Toast.show({ text: HOLD, duration: 'hold' });
+    let ok = false;
+    try {
+        const res = await fetch(`${HOST}/sdapi/v1/unload-checkpoint`, {
             method: 'POST',
             headers: getHeaders()
         });
-        if (!silent && typeof Toast !== 'undefined') Toast.show({ text: 'VRAM cleared', duration: 'short' });
+        ok = res.ok;
     } catch (e) {}
+    if (say) {
+        Toast.dismiss(HOLD);
+        Toast.show({ text: ok ? 'VRAM cleared' : "Couldn't clear VRAM", duration: 'short' });
+    }
 }
 
 async function postOption(payload) {
@@ -895,6 +968,11 @@ window.generateLlmPrompt = async function() {
 // Populates both modes' Preprocessor/Model dropdowns from ControlNet's API (no-op if not installed). One shared mode list keeps the places below in step.
 const CONTROLNET_MODES = ['inp', 'img2img', 'xl', 'flux', 'qwen', 'anima', 'krea'];
 
+// A preprocessor list entry; Forge's "none" reads None, as in the other lists (the value stays "none").
+function preprocessorOption(name) {
+    return new Option(name === 'none' ? 'None' : name, name);
+}
+
 async function fetchControlNetOptions() {
     const controlNetHost = typeof HOST === 'string' ? HOST.trim() : '';
     if (!controlNetHost || controlNetHost.toLowerCase() === 'link first' || !isEngineConnected) return;
@@ -916,7 +994,7 @@ async function fetchControlNetOptions() {
             // Preprocessor "None" stays: it is a real choice (use the control image as given).
             moduleEls.forEach(sel => {
                 sel.innerHTML = '';
-                modData.module_list.forEach(name => sel.appendChild(new Option(name, name)));
+                modData.module_list.forEach(name => sel.appendChild(preprocessorOption(name)));
             });
             // Kept so Control Type's "All" can restore the full list (specific types replace the options).
             window.controlNetFullModuleList = modData.module_list;
@@ -989,7 +1067,7 @@ function populateAdetailerControlNetModels() {
                 // No prepended "none": Forge's module list already includes it. data-pin-first="none" pins it to the top of the picker.
                 const previousModuleValue = moduleSel.value;
                 moduleSel.innerHTML = '';
-                window.controlNetFullModuleList.forEach(name => moduleSel.appendChild(new Option(name, name)));
+                window.controlNetFullModuleList.forEach(name => moduleSel.appendChild(preprocessorOption(name)));
                 const savedModule = localStorage.getItem(`bojro_${mode}_adetailer_${n}_cn_module`);
                 if (savedModule && Array.from(moduleSel.options).some(o => o.value === savedModule)) {
                     moduleSel.value = savedModule;
@@ -1126,7 +1204,7 @@ window.applyControlType = function(mode, unit) {
     const restoreFull = () => {
         if (Array.isArray(window.controlNetFullModuleList)) {
             moduleSel.innerHTML = '';
-            window.controlNetFullModuleList.forEach(name => moduleSel.appendChild(new Option(name, name)));
+            window.controlNetFullModuleList.forEach(name => moduleSel.appendChild(preprocessorOption(name)));
         }
         if (Array.isArray(window.controlNetFullModelList)) {
             modelSel.innerHTML = '';
@@ -1140,7 +1218,7 @@ window.applyControlType = function(mode, unit) {
     } else {
         if (Array.isArray(typeData.module_list) && typeData.module_list.length > 0) {
             moduleSel.innerHTML = '';
-            typeData.module_list.forEach(name => moduleSel.appendChild(new Option(name, name)));
+            typeData.module_list.forEach(name => moduleSel.appendChild(preprocessorOption(name)));
             if (typeData.default_option && Array.from(moduleSel.options).some(o => o.value === typeData.default_option)) {
                 moduleSel.value = typeData.default_option;
             }
@@ -1201,7 +1279,9 @@ function applyControlNetImage(mode, unit, dataUrl) {
             thumb.style.cssText = 'display:block; max-width:100%; max-height:100cqw; margin:0 auto; border-radius:4px;';
             box.appendChild(thumb);
         }
-        thumb.src = dataUrl;
+        // Shown from a copy the box's size (portrait capped at a square); dataUrl itself is what's sent.
+        const boxW = Math.max(box.clientWidth, 0) || document.documentElement.clientWidth;
+        showWithScreenCopy(thumb, dataUrl, boxW, boxW);
         thumb.classList.remove('hidden');
     }
     // The trash icon (a badge on the thumbnail) is hidden, not disabled, while there is no thumbnail.
@@ -1217,7 +1297,8 @@ window.clearControlNetImage = function(mode, unit) {
     controlNetImages[mode][unit] = null;
     const label = document.getElementById(`${mode}_cn_${unit}_uploadLabel`);
     if (label) {
-        label.textContent = 'Tap to upload';
+        label.innerHTML = '<i data-lucide="image-plus" width="16" height="16"></i>UPLOAD IMAGE';
+        if (window.lucide) lucide.createIcons();
         label.classList.remove('hidden');
     }
     const thumb = document.getElementById(`${mode}_cn_${unit}_uploadThumb`);
@@ -1402,6 +1483,24 @@ function collectImg2imgPresetData() {
     };
 }
 
+// A preset's steps, CFG, sampler and schedule back in the fields (preset > LoRA > checkpoint).
+function restoreImg2imgPresetSampling(data) {
+    if (!data) return;
+    const put = (id, value, isSelect) => {
+        const el = document.getElementById(id);
+        if (!el || value === undefined || value === null) return;
+        if (isSelect && !Array.from(el.options).some(o => o.value === value)) return;
+        el.value = value;
+        if (isSelect && typeof updateModelPickerTriggerText === 'function') updateModelPickerTriggerText(id);
+    };
+    put('inp_steps', data.steps);
+    put('inp_cfg', data.cfg);
+    put('inp_sampler', data.sampler, true);
+    put('inp_scheduler', data.scheduler, true);
+    if (typeof updateNegPromptDimming === 'function') updateNegPromptDimming('inp');
+    if (typeof saveInpaintModeState === 'function') saveInpaintModeState('img2img');
+}
+
 // Select fields are set only if the option still exists (a preset may reference a missing checkpoint/module).
 function applyImg2imgPresetData(data) {
     if (!data) return;
@@ -1433,7 +1532,7 @@ function applyImg2imgPresetData(data) {
     setIfExists('inp_scheduler', data.scheduler);
     setVal('denoisingStrength', data.denoise);
     const dv = document.getElementById('denoiseVal');
-    if (dv && data.denoise !== undefined) dv.innerText = data.denoise;
+    if (dv && data.denoise !== undefined) dv.innerText = Number(data.denoise).toFixed(2);
     // Loads the preset's denoising value via setVal(), bypassing the thumb-only slider's drag handler, so resync the fake thumb.
     if (typeof syncThumbOnlySliderPosition === 'function') syncThumbOnlySliderPosition('denoisingStrength');
 
@@ -1470,7 +1569,8 @@ function applyImg2imgPresetData(data) {
         saveSelection('img2img_vae');
         saveSelection('img2img_te');
     }
-    applyPromptLoraOverrides('inp');
+    // Selecting its checkpoint applies the checkpoint's defaults and LoRA overrides; the preset's values win over both.
+    restoreImg2imgPresetSampling(data);
     if (typeof updateNegPromptDimming === 'function') updateNegPromptDimming('inp');
 }
 
@@ -1511,6 +1611,56 @@ window.clearActiveImg2imgPreset = function() {
     window.renderImg2imgPresetList();
 }
 
+// The preset the tab's settings match, if any (first A-Z): numbers as numbers, key order ignored, and an ADetailer pass
+// or ControlNet unit that's off compared by its switch only.
+function img2imgPresetKey(d) {
+    const canon = v => {
+        if (Array.isArray(v)) return v.map(canon);
+        if (v && typeof v === 'object') {
+            if (v.enable === false) return { enable: false };
+            const o = {};
+            Object.keys(v).sort().forEach(k => { if (k !== 'addedAt') o[k] = canon(v[k]); });
+            return o;
+        }
+        if (v === undefined || v === null) return '';
+        const t = String(v);
+        return t.trim() !== '' && !isNaN(Number(t)) && /^-?[\d.]+$/.test(t.trim()) ? Number(t) : t;
+    };
+    return JSON.stringify(canon(d));
+}
+function matchingImg2imgPreset(presets) {
+    const now = img2imgPresetKey(collectImg2imgPresetData());
+    return Object.keys(presets).sort((a, b) => a.localeCompare(b)).find(n => img2imgPresetKey(presets[n]) === now) || null;
+}
+
+// ---- img2img Presets (7.4-checkpoint24): a list like the Style Manager's (favorites, sort, edit) and an editor window. ----
+const PRESET_FAV_KEY = 'bojroPresetFavs';
+// The favorites view stays while the app runs (as Styles').
+let img2imgPresetFavOnly = false;
+function presetFavs() { try { const v = JSON.parse(localStorage.getItem(PRESET_FAV_KEY) || '[]'); return new Set(Array.isArray(v) ? v : []); } catch (e) { return new Set(); } }
+function savePresetFavs(set) { try { localStorage.setItem(PRESET_FAV_KEY, JSON.stringify([...set])); } catch (e) {} }
+window.toggleImg2imgPresetFav = function(name) {
+    const set = presetFavs();
+    if (set.has(name)) set.delete(name); else set.add(name);
+    savePresetFavs(set);
+    window.renderImg2imgPresetList();
+};
+window.toggleImg2imgPresetFavOnly = function() {
+    img2imgPresetFavOnly = !img2imgPresetFavOnly;
+    window.renderImg2imgPresetList();
+};
+function paintImg2imgPresetFavOnly() {
+    const b = document.getElementById('img2imgPresetFavOnly');
+    if (!b) return;
+    b.classList.toggle('on', img2imgPresetFavOnly);
+    b.setAttribute('aria-pressed', img2imgPresetFavOnly ? 'true' : 'false');
+    b.title = img2imgPresetFavOnly ? 'Show all' : 'Show favorites';
+    const svg = b.querySelector('svg');
+    if (svg) svg.setAttribute('fill', img2imgPresetFavOnly ? 'currentColor' : 'none');
+}
+// Clean checkpoint name (splitCheckpointDisplayName(), modelpicker.js) rather than the raw stored value.
+const presetCheckpointName = raw => (raw && typeof splitCheckpointDisplayName === 'function' ? splitCheckpointDisplayName(raw).primary : (raw || ''));
+
 window.renderImg2imgPresetList = function() {
     const presets = loadImg2imgPresets();
     const container = document.getElementById('img2imgPresetList');
@@ -1518,74 +1668,73 @@ window.renderImg2imgPresetList = function() {
     const query = searchQuery(rawQuery);
     const clearBtn = document.getElementById('img2imgPresetSearchClear');
     if (clearBtn) clearBtn.classList.toggle('hidden', !rawQuery);
+    paintImg2imgPresetFavOnly();
+    if (window.ListSort) ListSort.paint(document.getElementById('img2imgPresetSortBtn'), 'preset');
 
     const allNames = Object.keys(presets);
     if (allNames.length === 0) {
-        container.innerHTML = `<div style="text-align:center; color:var(--text-muted); font-size:11px; padding:15px;">No presets saved yet</div>`;
+        container.innerHTML = `<div class="empty-note" style="padding:15px;">No presets saved yet</div>`;
         return;
     }
-
-    const names = allNames
-        .filter(name => searchKey(name).includes(query))
-        .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+    // None loaded since the settings last changed (an opened image, a restart): light one the settings match.
+    if (!activeImg2imgPresetName) activeImg2imgPresetName = matchingImg2imgPreset(presets);
+    const favs = presetFavs();
+    let names = searchFilter(allNames, name => [name], query);
+    if (img2imgPresetFavOnly) names = names.filter(n => favs.has(n));
+    // A-Z, or the sort button's order (added: when saved; used: when loaded).
+    names.sort(window.ListSort
+        ? ListSort.compare('preset', { name: n => n, key: n => n.toLowerCase(), added: n => Number((presets[n] || {}).addedAt) || 0 })
+        : (a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
 
     if (names.length === 0) {
-        container.innerHTML = `<div style="text-align:center; color:var(--text-muted); font-size:11px; padding:15px;">No presets match your search</div>`;
+        container.innerHTML = `<div class="empty-note" style="padding:15px;">${img2imgPresetFavOnly && !rawQuery ? 'No favorite presets' : 'No presets match your search'}</div>`;
         return;
     }
 
     container.innerHTML = '';
     names.forEach(name => {
-        const isActive = name === activeImg2imgPresetName;
-        // Clean checkpoint name (splitCheckpointDisplayName(), modelpicker.js) rather than the raw stored value.
-        const rawModel = presets[name]?.model;
-        const modelPreview = rawModel && typeof splitCheckpointDisplayName === 'function'
-            ? splitCheckpointDisplayName(rawModel).primary
-            : (rawModel || '...');
-
-        // Same glass-box/style-card tile layout as the Style Manager (styles.js), without its active-style star.
+        const isActive = name === activeImg2imgPresetName, fav = favs.has(name);
+        // The checkpoint, then chips: denoise, steps, CFG, and ADetailer (xN) / ControlNet when on.
+        const p = presets[name] || {};
+        const onCount = list => (Array.isArray(list) ? list : []).filter(u => u && u.enable).length;
+        const ad = onCount(p.adetailer), cn = onCount(p.controlnet);
+        const chips = [p.denoise ? `DN ${p.denoise}` : '', p.steps ? `S ${p.steps}` : '', p.cfg ? `CFG ${p.cfg}` : ''].filter(Boolean)
+            .map(c => `<span class="pt-chip">${escapeHtmlAttr(c)}</span>`).join('')
+            + (ad ? `<span class="pt-chip on">AD${ad > 1 ? '×' + ad : ''}</span>` : '') + (cn ? `<span class="pt-chip on">CN${cn > 1 ? '×' + cn : ''}</span>` : '');
         const div = document.createElement('div');
-        div.className = 'glass-box style-card';
-        div.style.cssText = `margin-bottom:10px; padding:12px; transition: 0.3s; border: 1px solid ${isActive ? '#ffd700' : 'var(--border-color)'}; box-shadow: ${isActive ? '0 0 15px rgba(255, 215, 0, 0.3)' : 'none'};`;
+        div.className = `lora-item-row style-row preset-row${isActive ? ' active' : ''}`;
         div.innerHTML = `
-            <div class="row" style="justify-content:space-between; align-items:center;">
-                <div class="preset-select-target" style="flex:1; min-width:0; cursor:pointer;">
-                    <div style="font-weight:900; color:${isActive ? '#ffd700' : 'var(--accent-primary)'}; font-size:12px;">${escapeHtmlAttr(name.toUpperCase())}</div>
-                    <div style="font-size:10px; color:var(--text-muted); display:-webkit-box; -webkit-line-clamp:1; -webkit-box-orient:vertical; overflow:hidden;">
-                        ${escapeHtmlAttr(modelPreview)}
-                    </div>
-                </div>
-                <div class="row" style="width:auto; gap:10px;">
-                    <button class="preset-save-btn" style="background:none; border:none; color:var(--accent-primary); padding:4px;" title="Overwrite with current settings">
-                        <i data-lucide="save" size="14"></i>
-                    </button>
-                    <button class="preset-rename-btn" style="background:none; border:none; color:var(--text-muted); padding:4px;" title="Rename">
-                        <i data-lucide="pencil" size="14"></i>
-                    </button>
-                    <button class="preset-delete-btn" style="background:none; border:none; color:#f44336; padding:4px;" title="Delete">
-                        <i data-lucide="trash-2" size="14"></i>
-                    </button>
-                </div>
+            <div class="lora-item-info st-info">
+                <div class="lora-item-name st-name"><span class="st-main">${escapeHtmlAttr(name)}</span></div>
+                <div class="pt-model">${escapeHtmlAttr(presetCheckpointName(p.model) || 'No checkpoint')}</div>
+                <div class="pt-chips">${chips}</div>
+            </div>
+            <div class="lora-star-toggle-stack">
+                <button class="lora-btn-star st-fav preset-fav-btn${fav ? ' on' : ''}" title="Favorite" aria-label="Favorite" aria-pressed="${fav}"><i data-lucide="star" width="24" height="24" ${fav ? 'fill="currentColor"' : ''}></i></button>
+                <button class="lora-btn-action preset-edit-btn" title="Edit" aria-label="Edit"><i data-lucide="pencil" width="16" height="16"></i></button>
             </div>
         `;
         // Real closures rather than inline onclick strings (preset names with apostrophes).
-        div.querySelector('.preset-select-target').onclick = () => window.loadImg2imgPreset(name);
-        div.querySelector('.preset-save-btn').onclick = (event) => {
+        div.onclick = () => window.loadImg2imgPreset(name);
+        div.querySelector('.preset-fav-btn').onclick = (event) => {
             event.stopPropagation();
-            window.overwriteImg2imgPreset(name);
+            window.toggleImg2imgPresetFav(name);
         };
-        div.querySelector('.preset-rename-btn').onclick = (event) => {
+        div.querySelector('.preset-edit-btn').onclick = (event) => {
             event.stopPropagation();
-            window.renameImg2imgPreset(name);
-        };
-        div.querySelector('.preset-delete-btn').onclick = (event) => {
-            event.stopPropagation();
-            window.deleteImg2imgPreset(name);
+            window.openImg2imgPresetEditor(name);
         };
         container.appendChild(div);
     });
 
     if (window.lucide) lucide.createIcons();
+    fitImg2imgPresetListHeight();
+}
+// As many whole cards as fit on screen (ui.js).
+function fitImg2imgPresetListHeight() {
+    const list = document.getElementById('img2imgPresetList');
+    // One card fewer than fit, as the Style Manager.
+    if (list && typeof fitListToWholeRows === 'function') fitListToWholeRows(list, list.querySelectorAll(':scope > .preset-row'), 1, 0, 1);
 }
 
 window.clearImg2imgPresetSearch = function() {
@@ -1595,28 +1744,20 @@ window.clearImg2imgPresetSearch = function() {
     window.renderImg2imgPresetList();
 }
 
-window.openImg2imgPresetSaveRow = function() {
-    document.getElementById('img2imgPresetRenameRow').classList.add('hidden'); // mutually exclusive
-    document.getElementById('img2imgPresetSaveRow').classList.remove('hidden');
-    document.getElementById('img2imgPresetNewName').focus();
-}
-
-window.cancelSaveImg2imgPreset = function() {
-    document.getElementById('img2imgPresetNewName').value = '';
-    document.getElementById('img2imgPresetSaveRow').classList.add('hidden');
-}
-
 window.openImg2imgPresetModal = function() {
+    // The search is kept from the last time this session (the app starts with it empty).
+    const searchEl = document.getElementById('img2imgPresetSearch');
+    if (searchEl) searchEl.value = lastImg2imgPresetSearch;
     window.renderImg2imgPresetList();
-    window.cancelRenameImg2imgPreset();
-    window.cancelSaveImg2imgPreset();
     document.getElementById('img2imgPresetModal').classList.remove('hidden');
     if (typeof lockBodyScroll === 'function') lockBodyScroll();
+    fitImg2imgPresetListHeight();
 }
 
+let lastImg2imgPresetSearch = '';
 window.closeImg2imgPresetModal = function() {
-    window.cancelRenameImg2imgPreset();
-    window.cancelSaveImg2imgPreset();
+    lastImg2imgPresetSearch = document.getElementById('img2imgPresetSearch')?.value || '';
+    window.closeImg2imgPresetEditor();
     document.getElementById('img2imgPresetModal').classList.add('hidden');
     if (typeof unlockBodyScroll === 'function') unlockBodyScroll();
 }
@@ -1648,34 +1789,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 });
 
-window.saveCurrentAsImg2imgPreset = function() {
-    const nameInput = document.getElementById('img2imgPresetNewName');
-    const name = nameInput.value.trim();
-    if (!name) {
-        if (Toast) Toast.show({ text: 'Enter a preset name first', duration: 'short' });
-        return;
-    }
-    const presets = loadImg2imgPresets();
-    const isOverwrite = presets.hasOwnProperty(name);
-    presets[name] = collectImg2imgPresetData();
-    saveImg2imgPresetsToStorage(presets);
-    // As overwriteImg2imgPreset(): overwriting an existing preset must also refresh the per-mode snapshot restoreInpaintModeState() reads.
-    if (typeof saveInpaintModeState === 'function') saveInpaintModeState('img2img');
-    if (typeof saveAdetailer === 'function') saveAdetailer('img2img');
-    if (typeof saveControlNet === 'function') saveControlNet('img2img');
-    if (typeof saveSelection === 'function') {
-        saveSelection('img2img');
-        saveSelection('img2img_vae');
-        saveSelection('img2img_te');
-    }
-    nameInput.value = '';
-    document.getElementById('img2imgPresetSaveRow').classList.add('hidden');
-    // The just-saved preset matches the current settings, so mark it active.
-    activeImg2imgPresetName = name;
-    window.renderImg2imgPresetList();
-    if (Toast) Toast.show({ text: isOverwrite ? `Updated "${name}"` : `Saved "${name}"`, duration: 'short' });
-}
-
 window.loadImg2imgPreset = function(name) {
     const presets = loadImg2imgPresets();
     if (!presets[name]) return;
@@ -1684,71 +1797,146 @@ window.loadImg2imgPreset = function(name) {
     if (typeof refreshAllModelPickerTriggers === 'function') refreshAllModelPickerTriggers();
     // Tapping a preset tile enables it in place (like the Style Manager) rather than closing the modal.
     activeImg2imgPresetName = name;
+    // For the sort button's RECENTLY USED and MOST USED.
+    if (window.ListSort && ListSort.used) ListSort.used('preset', name.toLowerCase());
     window.renderImg2imgPresetList();
     if (Toast) Toast.show({ text: `Loaded "${name}"`, duration: 'short' });
 }
 
-window.overwriteImg2imgPreset = async function(name) {
-    if (!(await window.appConfirm(`Overwrite "${name}" with your current settings?`, { title: 'Overwrite Preset', okText: 'OVERWRITE' }))) return;
+// ---- the editor: a new preset is filled from the tab; an existing one's steps, CFG, denoise, prompt and negative can be
+// changed here, and the rest is shown (USE CURRENT SETTINGS replaces it all). ----
+let presetEd = null; // { orig: name or null (new), data, open: { ad, cn } }
+const presetEdEl = id => document.getElementById(id);
+window.openImg2imgPresetEditor = function(name) {
     const presets = loadImg2imgPresets();
-    presets[name] = collectImg2imgPresetData();
-    saveImg2imgPresetsToStorage(presets);
-    // restoreInpaintModeState() reads a per-mode snapshot that was refreshed only on loading a preset, so refresh it on overwriting too.
-    if (typeof saveInpaintModeState === 'function') saveInpaintModeState('img2img');
-    if (typeof saveAdetailer === 'function') saveAdetailer('img2img');
-    if (typeof saveControlNet === 'function') saveControlNet('img2img');
-    if (typeof saveSelection === 'function') {
-        saveSelection('img2img');
-        saveSelection('img2img_vae');
-        saveSelection('img2img_te');
-    }
-    activeImg2imgPresetName = name;
-    window.renderImg2imgPresetList();
-    if (Toast) Toast.show({ text: `Updated "${name}"`, duration: 'short' });
+    if (name && !presets[name]) return;
+    presetEd = { orig: name || null, data: JSON.parse(JSON.stringify(name ? presets[name] : collectImg2imgPresetData())), open: {} };
+    presetEdEl('img2imgPresetEdTitle').textContent = name ? 'Edit Preset' : 'New Preset';
+    presetEdEl('img2imgPresetEdDelete').classList.toggle('hidden', !name);
+    presetEdEl('img2imgPresetEdName').value = name || '';
+    fillImg2imgPresetEditor();
+    presetEdEl('img2imgPresetEditor').classList.remove('hidden');
+    if (window.lucide) lucide.createIcons();
+    if (!name) setTimeout(() => presetEdEl('img2imgPresetEdName').focus(), 50);
+};
+window.closeImg2imgPresetEditor = function() {
+    presetEd = null;
+    presetEdEl('img2imgPresetEditor')?.classList.add('hidden');
+};
+function fillImg2imgPresetEditor() {
+    const d = presetEd.data, put = (id, v) => { presetEdEl(id).value = v === undefined || v === null ? '' : String(v); };
+    put('img2imgPresetEdSteps', d.steps);
+    put('img2imgPresetEdCfg', d.cfg);
+    put('img2imgPresetEdDenoise', d.denoise);
+    put('img2imgPresetEdPrompt', d.prompt);
+    put('img2imgPresetEdNeg', d.negative);
+    ['img2imgPresetEdPrompt', 'img2imgPresetEdNeg'].forEach(id => presetEdEl(id).dispatchEvent(new Event('input', { bubbles: true })));
+    paintImg2imgPresetSummary();
 }
-
-let renameTargetPreset = null;
-
-window.renameImg2imgPreset = function(oldName) {
-    renameTargetPreset = oldName;
-    document.getElementById('img2imgPresetSaveRow').classList.add('hidden'); // mutually exclusive
-    document.getElementById('img2imgPresetRenameInput').value = oldName;
-    document.getElementById('img2imgPresetRenameRow').classList.remove('hidden');
-    document.getElementById('img2imgPresetRenameInput').focus();
+// What else the preset holds. Several ADetailer passes or ControlNet units: the first, "+N", and a row that opens.
+function paintImg2imgPresetSummary() {
+    const d = presetEd.data, esc = escapeHtmlAttr;
+    const CHEV = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>';
+    const row = (k, v, dim) => `<div class="pe-row"><span class="pe-k">${k}</span><span class="pe-v${dim ? ' dim' : ''}">${esc(v)}</span></div>`;
+    const multi = (key, label, units, head, line) => {
+        if (!units.length) return row(label, 'Off', true);
+        if (units.length === 1) return row(label, head(units[0]));
+        const open = !!presetEd.open[key];
+        return `<div class="pe-row pe-multi${open ? ' open' : ''}" data-k="${key}" role="button" aria-expanded="${open}"><span class="pe-k">${label}</span><span class="pe-v">${esc(head(units[0]))} <span class="pe-more">+${units.length - 1}</span>${CHEV}</span></div>`
+            + (open ? `<div class="pe-units">${units.map((u, i) => `<div><b>${i + 1}</b> ${esc(head(u))} <span class="dim">${esc(line(u))}</span></div>`).join('')}</div>` : '');
+    };
+    const on = list => (Array.isArray(list) ? list : []).filter(u => u && u.enable);
+    const bare = m => String(m || '').replace(/\s*\[[0-9a-f]{6,}\]\s*$/i, '').replace(/\.(pt|pth|safetensors|ckpt|bin|onnx)$/i, '');
+    const parts = (...xs) => xs.filter(x => x !== undefined && x !== null && x !== '').join(' • ');
+    presetEdEl('img2imgPresetEdSummary').innerHTML =
+        row('Checkpoint', presetCheckpointName(d.model) || 'None', !d.model)
+        + row('VAE • Text encoder', parts(d.vae || 'Automatic', d.te || 'none'), !d.vae && !d.te)
+        + row('Sampler • Schedule', parts(d.sampler || 'Default', d.scheduler || 'Automatic'))
+        + multi('ad', 'ADetailer', on(d.adetailer), u => bare(u.model) || '?', u => ['', u.confidence ? `conf ${u.confidence}` : '', u.denoise ? `denoise ${u.denoise}` : ''].filter((x, i) => i === 0 || x).join(' • '))
+        + multi('cn', 'ControlNet', on(d.controlnet), u => parts(u.module, bare(u.model)) || '?', u => (u.weight ? ` • weight ${u.weight}` : ''));
+    presetEdEl('img2imgPresetEdSummary').querySelectorAll('.pe-multi').forEach(r => {
+        r.onclick = () => { presetEd.open[r.dataset.k] = !presetEd.open[r.dataset.k]; paintImg2imgPresetSummary(); };
+    });
 }
-
-window.cancelRenameImg2imgPreset = function() {
-    renameTargetPreset = null;
-    document.getElementById('img2imgPresetRenameRow').classList.add('hidden');
+window.takeImg2imgPresetFromTab = function() {
+    if (!presetEd) return;
+    const added = presetEd.data.addedAt;
+    presetEd.data = collectImg2imgPresetData();
+    if (added) presetEd.data.addedAt = added;
+    fillImg2imgPresetEditor();
+    if (Toast) Toast.show({ text: "Took the tab's settings", duration: 'short' });
+};
+// Number boxes fix themselves when changed: steps a whole number from 1, CFG from 0, denoise 0 to 1; empty or not a
+// number keeps the old.
+function presetEdNumber(id, old, fix) {
+    const raw = presetEdEl(id).value.trim(), n = Number(raw);
+    // Unchanged: as it was (the tab's "7.0" stays "7.0").
+    if (old !== undefined && old !== null && raw === String(old)) return old;
+    return raw !== '' && Number.isFinite(n) ? String(fix(n)) : (old === undefined ? old : String(old));
 }
-
-window.confirmRenameImg2imgPreset = function() {
-    const newName = document.getElementById('img2imgPresetRenameInput').value.trim();
-    if (!renameTargetPreset || !newName || newName === renameTargetPreset) {
-        window.cancelRenameImg2imgPreset();
+window.saveImg2imgPresetEditor = async function() {
+    if (!presetEd) return;
+    const name = presetEdEl('img2imgPresetEdName').value.trim();
+    if (!name) {
+        if (Toast) Toast.show({ text: 'Enter a preset name first', duration: 'short' });
         return;
     }
-    const presets = loadImg2imgPresets();
-    if (!presets[renameTargetPreset]) {
-        window.cancelRenameImg2imgPreset();
-        return;
+    const presets = loadImg2imgPresets(), orig = presetEd.orig;
+    if (name !== orig && presets[name] && !(await window.appConfirm(`A preset called "${name}" is already saved.`, { title: 'Replace Preset?', okText: 'REPLACE', danger: true }))) return;
+    if (!presetEd) return;
+    const d = presetEd.data;
+    d.steps = presetEdNumber('img2imgPresetEdSteps', d.steps, n => Math.max(1, Math.round(n)));
+    d.cfg = presetEdNumber('img2imgPresetEdCfg', d.cfg, n => Math.max(0, Math.round(n * 10) / 10));
+    d.denoise = presetEdNumber('img2imgPresetEdDenoise', d.denoise, n => Math.min(1, Math.max(0, Math.round(n * 100) / 100)));
+    d.prompt = presetEdEl('img2imgPresetEdPrompt').value;
+    d.negative = presetEdEl('img2imgPresetEdNeg').value;
+    if (!d.addedAt) d.addedAt = Date.now();
+    if (orig && orig !== name) {
+        delete presets[orig];
+        const favs = presetFavs();
+        if (favs.delete(orig)) { favs.add(name); savePresetFavs(favs); }
+        if (activeImg2imgPresetName === orig) activeImg2imgPresetName = name;
     }
-    presets[newName] = presets[renameTargetPreset];
-    delete presets[renameTargetPreset];
+    presets[name] = d;
     saveImg2imgPresetsToStorage(presets);
-    if (activeImg2imgPresetName === renameTargetPreset) activeImg2imgPresetName = newName;
-    window.cancelRenameImg2imgPreset();
+    // Active when it matches the tab's settings (as saving the current settings always made it).
+    const { addedAt, ...rest } = d;
+    if (JSON.stringify(rest) === JSON.stringify(collectImg2imgPresetData())) {
+        activeImg2imgPresetName = name;
+        // restoreInpaintModeState() reads a per-mode snapshot: refresh it, then the fields saving the selection re-applies.
+        if (typeof saveInpaintModeState === 'function') saveInpaintModeState('img2img');
+        if (typeof saveAdetailer === 'function') saveAdetailer('img2img');
+        if (typeof saveControlNet === 'function') saveControlNet('img2img');
+        if (typeof saveSelection === 'function') {
+            saveSelection('img2img');
+            saveSelection('img2img_vae');
+            saveSelection('img2img_te');
+        }
+        restoreImg2imgPresetSampling(d);
+    } else if (activeImg2imgPresetName === name) activeImg2imgPresetName = null;
+    window.closeImg2imgPresetEditor();
     window.renderImg2imgPresetList();
-}
+    if (Toast) Toast.show({ text: orig ? `Updated "${name}"` : `Saved "${name}"`, duration: 'short' });
+};
+window.deleteImg2imgPresetFromEditor = async function() {
+    if (!presetEd || !presetEd.orig) return;
+    const name = presetEd.orig;
+    if (!(await window.deleteImg2imgPreset(name))) return;
+    window.closeImg2imgPresetEditor();
+};
 
+// After asking; true when deleted (its favorite goes too).
 window.deleteImg2imgPreset = async function(name) {
-    if (!(await window.appConfirm(`Delete preset "${name}"?`, { title: 'Delete Preset', okText: 'DELETE', danger: true }))) return;
+    if (!(await window.appConfirm(`Delete preset "${name}"?`, { title: 'Delete Preset', okText: 'DELETE', danger: true }))) return false;
     const presets = loadImg2imgPresets();
     delete presets[name];
     saveImg2imgPresetsToStorage(presets);
+    const favs = presetFavs();
+    if (favs.delete(name)) savePresetFavs(favs);
     if (activeImg2imgPresetName === name) activeImg2imgPresetName = null;
     window.renderImg2imgPresetList();
     if (Toast) Toast.show({ text: `Deleted "${name}"`, duration: 'short' });
+    return true;
 }
 
 window.exportImg2imgPresets = async function() {
@@ -1757,8 +1945,18 @@ window.exportImg2imgPresets = async function() {
         if (Toast) Toast.show({ text: 'No presets to export', duration: 'short' });
         return;
     }
-    const json = JSON.stringify(presets, null, 2);
-    const fileName = `img2img-presets-backup-${Date.now()}.json`;
+    // Labelled like a settings backup (backupAppSettings(), cfg.js), so import can tell it's one of ours.
+    const json = JSON.stringify({
+        app: 'Resolver',
+        type: 'img2img-presets',
+        appVersion: typeof APP_VERSION !== 'undefined' ? APP_VERSION : undefined,
+        exportedAt: new Date().toISOString(),
+        presets,
+        ...(localStorage.getItem(PRESET_FAV_KEY) ? { extras: { [PRESET_FAV_KEY]: localStorage.getItem(PRESET_FAV_KEY) } } : {})
+    }, null, 2);
+    // resolver-presets-YYYYMMDDHHMMSS.json, stamped as settings backups are (cfg.js).
+    const iso = new Date().toISOString();
+    const fileName = `resolver-presets-${iso.slice(0, 10).replace(/-/g, '')}${iso.slice(11, 19).replace(/:/g, '')}.json`;
 
     try {
         const isNative = window.Capacitor && window.Capacitor.isNative;
@@ -1785,28 +1983,27 @@ window.exportImg2imgPresets = async function() {
     }
 }
 
-window.handleImg2imgPresetImport = function(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = async (evt) => {
-        try {
-            const imported = JSON.parse(evt.target.result);
-            if (typeof imported !== 'object' || Array.isArray(imported)) throw new Error("Not a valid presets file");
-
-            const existing = loadImg2imgPresets();
-            const merged = { ...existing, ...imported };
-            saveImg2imgPresetsToStorage(merged);
-            window.renderImg2imgPresetList();
-
-            const count = Object.keys(imported).length;
-            if (Toast) Toast.show({ text: `Imported ${count} preset${count === 1 ? '' : 's'}`, duration: 'short' });
-        } catch (e) {
-            await window.appAlert("Import failed: this doesn't look like a valid presets file.", { title: 'Import Failed', danger: true });
-        }
-    };
-    reader.readAsText(file);
-    event.target.value = '';
+// The presets in an exported file, or null: the labelled format, or an older unlabelled one whose entries all look
+// like presets (collectImg2imgPresetData()). Used by Restore (backup.js).
+function img2imgPresetsFromFile(text) {
+    let data;
+    try { data = JSON.parse(text); } catch (e) { return null; }
+    const isObj = v => v && typeof v === 'object' && !Array.isArray(v);
+    const PRESET_FIELDS = ['model', 'vae', 'te', 'prompt', 'negative', 'steps', 'cfg', 'sampler', 'scheduler', 'denoise'];
+    const looksLikePreset = p => isObj(p)
+        && PRESET_FIELDS.some(k => k in p)
+        && PRESET_FIELDS.every(k => !(k in p) || p[k] === null || ['string', 'number'].includes(typeof p[k]))
+        && ['adetailer', 'controlnet'].every(k => !(k in p) || Array.isArray(p[k]));
+    let presets;
+    if (isObj(data) && data.app === 'Resolver') {
+        if (data.type !== 'img2img-presets') return null; // e.g. a settings backup
+        presets = data.presets;
+    } else {
+        presets = data;
+    }
+    if (!isObj(presets)) return null;
+    const entries = Object.values(presets);
+    return entries.length && entries.every(looksLikePreset) ? presets : null;
 }
 
 // BOJRO DEV POWER (PC Server companion app: wake/kill signals)

@@ -1,15 +1,16 @@
 // Upload history ("Recent"): the last MAX_ENTRIES images uploaded to the Analyzer, and separately to Crop & Edit,
 // each kept on the device in its own IndexedDB database so one can be reopened later. Each entry keeps the
 // original file plus a thumbnail. Storage failures are ignored so uploading an image never depends on it.
-// Config > Interface > Show Upload History hides a history's RECENT buttons and stops it saving.
+// Recent Uploads off: no RECENT buttons and nothing saved.
 (function () {
     'use strict';
 
     const STORE = 'entries';
-    const MAX_ENTRIES = 20;
+    const MAX_ENTRIES = 24;
     const THUMB_EDGE = 160;
 
-    // cfg: { dbName, enabledKey, ids: { modal, grid, title, clearBtn, buttons }, emptyText, clearText, open(blob), onCleared() }
+    // cfg: { dbName, enabledKey, ids: { modal, grid, title, clearBtn, buttons }, emptyText, clearText, open(blob, shown), onCleared() }
+    // open() calls shown() once the image is on screen (or failed).
     function makeUploadHistory(cfg) {
         const DB_NAME = cfg.dbName;
         const enabled = () => localStorage.getItem(cfg.enabledKey) !== 'false';
@@ -188,7 +189,7 @@
             const entries = await list();
             grid.textContent = '';
             // Kept short so the title fits on one line at phone width.
-            title.textContent = entries.length ? `Recent (${entries.length})` : 'Recent';
+            title.textContent = 'Recent';
             clearBtn.classList.toggle('hidden', entries.length === 0);
 
             if (!entries.length) {
@@ -229,6 +230,14 @@
         async function openSheet() {
             await renderGrid();
             document.getElementById(cfg.ids.modal).classList.remove('hidden');
+            // At the top: a hidden list keeps where it was last scrolled.
+            document.getElementById(cfg.ids.grid).scrollTop = 0;
+            fit();
+        }
+        // Four whole rows of 3 at most, fewer on a short screen (ui.js).
+        function fit() {
+            const grid = document.getElementById(cfg.ids.grid);
+            if (grid && typeof fitListToWholeRows === 'function') fitListToWholeRows(grid, grid.querySelectorAll('.ana-history-tile'), 3, 12);
         }
 
         function closeSheet() {
@@ -242,17 +251,20 @@
                 await renderGrid();
                 return;
             }
-            closeSheet();
-            window.scrollTo({ top: 0, behavior: 'instant' });
-            cfg.open(blob); // exactly as a fresh upload (and re-saves it, which brings it to the front)
+            // As a fresh upload (re-saving brings it to the front). The window closes once the image is shown.
+            let done = false;
+            cfg.open(blob, () => {
+                if (done) return;
+                done = true;
+                closeSheet();
+                window.scrollTo({ top: 0, behavior: 'instant' });
+            });
         }
 
         async function clearAll() {
             const entries = await list();
             if (!entries.length) return;
-            const ok = await window.appConfirm(`Remove all ${entries.length} ${cfg.clearText} from this device?`, { title: 'Clear history', okText: 'CLEAR' });
-            if (!ok) return;
-            // Close the sheet in the same frame the dialog closes, before the database clear finishes.
+            // Closed straight away, before the database clear finishes.
             closeSheet();
             if (cfg.onCleared) cfg.onCleared();
             if (typeof Toast !== 'undefined' && Toast) Toast.show({ text: 'Cleared', duration: 'short' });
@@ -267,7 +279,7 @@
         }
         applyVisibility();
 
-        // Clearing from outside the sheet (Show Upload History switched off) runs onCleared too.
+        // Clearing from outside the sheet runs onCleared too.
         const clearHistory = async () => { showEmptyState(); await clear(); if (cfg.onCleared) cfg.onCleared(); };
         return { save, list, get, remove, clear: clearHistory, describeAge, MAX_ENTRIES, openSheet, closeSheet, openEntry, clearAll, applyVisibility };
     }
@@ -276,9 +288,9 @@
         dbName: 'bojro_analyzer_history',
         enabledKey: 'bojroAnalyzerHistory',
         ids: { modal: 'anaHistoryModal', grid: 'anaHistoryGrid', title: 'anaHistoryTitle', clearBtn: 'anaHistoryClearBtn', buttons: ['anaHistoryBtn', 'anaHistoryBtnEmpty'] },
-        emptyText: 'Images you analyze are kept here.',
+        emptyText: 'Empty',
         clearText: 'recent analyses',
-        open: blob => processImageForAnalysis(blob),
+        open: (blob, shown) => processImageForAnalysis(blob, shown).catch(() => {}).finally(shown),
         // The image in the Analyzer was in the history too, so it goes with it.
         onCleared: () => {
             if (!document.getElementById('anaPostUploadSection')?.classList.contains('hidden') && typeof clearAnalyzedImage === 'function') clearAnalyzedImage();
@@ -293,10 +305,10 @@
         dbName: 'bojro_edit_history',
         enabledKey: 'bojroEditHistory',
         ids: { modal: 'editHistoryModal', grid: 'editHistoryGrid', title: 'editHistoryTitle', clearBtn: 'editHistoryClearBtn', buttons: ['editHistoryBtnEmpty'] },
-        emptyText: 'Images you upload to Crop & Edit are kept here.',
+        emptyText: 'Empty',
         clearText: 'recent uploads',
         // As a fresh upload: saved again (to the front), then opened.
-        open: blob => { EditHistory.save(blob); openEditorFromBlob(blob); }
+        open: (blob, shown) => { EditHistory.save(blob); openEditorFromBlob(blob, shown); }
     });
     window.openEditHistory = EditHistory.openSheet;
     window.closeEditHistory = EditHistory.closeSheet;

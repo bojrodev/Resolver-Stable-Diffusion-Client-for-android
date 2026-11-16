@@ -1,9 +1,11 @@
-// Debug log (Config > Experimental > Enable Debug Log). Records job, network and background events to help
+// Debug log (Config > Diagnostics > Debug Log). Records job, network and background events to help
 // diagnose problems. V/H = app in view/hidden. Kept in memory only, so it starts empty each time the app opens.
 (function () {
     const ENABLED_KEY = 'bojroDebugLogEnabled', MAX = 1500;
     let lines = [];
     const enabled = () => localStorage.getItem(ENABLED_KEY) === 'true';
+    // Left over from earlier test builds, which stored the log.
+    try { localStorage.removeItem('bojroDebugLog'); } catch (e) { }
     const pad = (n, w = 2) => String(n).padStart(w, '0');
     function stamp() {
         const d = new Date();
@@ -60,6 +62,7 @@
         const sw = document.getElementById('cfgDebugLogSwitch');
         if (sw) sw.checked = enabled();
         document.getElementById('cfgDebugLogBtn')?.classList.toggle('hidden', !enabled());
+        window.syncCfgToolsRow?.();
     }
     // Switching it off also clears the log.
     window.toggleDebugLog = function () {

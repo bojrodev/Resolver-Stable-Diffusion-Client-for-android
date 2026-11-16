@@ -43,11 +43,12 @@ async function checkForAppUpdate(silent = false) {
             Toast.show({text: 'Checking for updates...', duration: 'short'});
         }
 
-        // Update source: the upstream project's repo (checked on launch and from CHECK FOR UPDATES).
+        // Update source: v2ersion.json on the dev branch (checked on launch and from CHECK FOR UPDATES).
         const UPDATE_URL = 'https://raw.githubusercontent.com/bojrodev/Resolver-Stable-Diffusion-Client-for-android/dev/v2ersion.json';
-        
+
         // IMPORTANT: Update this number manually when you release a new version
-        const currentVersion = '2.9';
+        // (and versionCode / versionName in android/app/build.gradle for an APK release).
+        const currentVersion = '3.0';
         // ---------------------
 
         const response = await fetch(UPDATE_URL + '?t=' + new Date().getTime());

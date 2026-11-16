@@ -18,9 +18,21 @@ try {
     console.error("Immediate prompt restore failed:", e);
 } finally {
     document.body.classList.remove('prompts-loading');
-    // Icons and global UI state are ready, so everything can be revealed.
-    document.body.classList.remove('app-loading');
 }
+
+// The app is shown in one go once boot has applied the saved settings (end of window.onload), or after 3 seconds.
+// Android's splash screen stays up until then (ResolverBootPlugin), so the first frame is the finished app.
+function revealApp() {
+    if (!document.body.classList.contains('app-loading')) return;
+    // Without transitions while it appears: controls with "transition: all" would fade their visibility in.
+    document.body.classList.add('app-revealing');
+    document.body.classList.remove('app-loading');
+    void document.body.offsetWidth;
+    setTimeout(() => document.body.classList.remove('app-revealing'), 0);
+    try { Promise.resolve(window.Capacitor?.Plugins?.ResolverBoot?.ready?.()).catch(() => {}); } catch (e) {}
+    if (typeof paintNativeBg === 'function') paintNativeBg();
+}
+setTimeout(revealApp, 3000);
 
 // Restore the Inpaint tab's last-used mode (Inpaint/img2img/Upscale) early, before an early Crop & Edit can use the wrong one.
 try {
@@ -113,7 +125,6 @@ window.onload = function() {
             if (typeof loadGalleryCacheLimitUI === 'function') loadGalleryCacheLimitUI();
             if (typeof loadGenerationPollingRateUI === 'function') loadGenerationPollingRateUI();
             if (typeof loadInpaintColorCorrectionUI === 'function') loadInpaintColorCorrectionUI();
-            if (typeof reorganizeGenRowLayout === 'function') reorganizeGenRowLayout();
             if (typeof updateInpPreviewToggleVisibility === 'function') updateInpPreviewToggleVisibility();
             if (typeof initLivePreviewNetworkListener === 'function') initLivePreviewNetworkListener();
             if (typeof refreshLivePreviewToggleInteractivity === 'function') refreshLivePreviewToggleInteractivity();
@@ -123,12 +134,22 @@ window.onload = function() {
         }
 
         // Battery Optimization Check
+        // Only when Resolver isn't exempt already (item 75: after a config reset it usually is).
         if (!localStorage.getItem('bojroBatteryOpt')) {
-            const batteryModal = document.getElementById('batteryModal');
-            if (batteryModal) {
-                batteryModal.classList.remove('hidden');
-                console.log("Battery Modal Triggered");
-            }
+            const show = () => {
+                const batteryModal = document.getElementById('batteryModal');
+                if (batteryModal) {
+                    batteryModal.classList.remove('hidden');
+                    console.log("Battery Modal Triggered");
+                }
+            };
+            const device = window.Capacitor?.Plugins?.ResolverDevice;
+            if (device && device.batteryOptStatus) {
+                device.batteryOptStatus().then(r => {
+                    if (r && r.exempt) localStorage.setItem('bojroBatteryOpt', 'true');
+                    else show();
+                }).catch(show);
+            } else show();
         }
 
         // 2. Initialize Database
@@ -152,12 +173,21 @@ window.onload = function() {
             }, 500);
         }
         
+        // Each tab's last checkpoint, until the server's list arrives (network.js).
+        if (typeof showCachedCheckpoints === 'function') showCachedCheckpoints();
+
         // 5. Load Saved Settings & State
         // ControlNet Weight/Guidance sliders (rangeslider.js): built around the number inputs before any values are restored into them.
         if (typeof upgradeControlNetSliders === 'function') upgradeControlNetSliders();
         if (typeof injectConfigModal === 'function') injectConfigModal();
         // initModelPickers() ran before this modal's Sampler/Schedule triggers existed and is incremental, so run it again for them.
         if (typeof initModelPickers === 'function') initModelPickers();
+        // MORE SETTINGS cards on the generation tabs (moresettings.js), before the number boxes are set up.
+        if (window.MoreSettings) window.MoreSettings.start();
+        if (window.ForgeCouple) window.ForgeCouple.start();
+        if (window.Scene) window.Scene.start();
+        // Number boxes that put right what's typed (numberboxes.js), once the slider boxes above are marked.
+        if (window.NumberBoxes) window.NumberBoxes.start();
         if (typeof loadHostIp === 'function') loadHostIp();
         if (typeof loadQueueState === 'function') loadQueueState();
         // The app closed mid-job: stop Forge's job if that's turned on (jobabort.js).
@@ -170,7 +200,15 @@ window.onload = function() {
         try {
             const savedLoraConfigs = localStorage.getItem('bojroLoraConfigs');
             if (savedLoraConfigs) Object.assign(loraConfigs, JSON.parse(savedLoraConfigs));
+            // Slider ranges: 0.5 to 1.5 by default now; ones saved at the old -5 to 5 are moved over, once.
+            if (!localStorage.getItem('bojroSliderRange15')) {
+                Object.values(loraConfigs).forEach(c => { if (c && parseFloat(c.sliderMin) === -5 && parseFloat(c.sliderMax) === 5) { c.sliderMin = 0.5; c.sliderMax = 1.5; } });
+                localStorage.setItem('bojroLoraConfigs', JSON.stringify(loraConfigs));
+                localStorage.setItem('bojroSliderRange15', '1');
+            }
         } catch (e) {}
+        // Sliders for LoRAs already in the prompt boxes, now their settings are known (lorasliders.js).
+        if (window.LoraSliders) window.LoraSliders.refreshAll();
 
         // The Inpaint tab's mode is restored earlier; initControlNet() needs a server connection.
         if (typeof initControlNet === 'function') initControlNet();
@@ -233,18 +271,22 @@ window.onload = function() {
         // =========================================================================
         // 13. SPA NAVIGATION OVERRIDE (CRITICAL FOR SEAMLESS COMFYUI)
         // =========================================================================
-        // Dock-item taps: dockPointerDown() calls switchTab() on pointerdown instead of waiting ~130ms for the click. dockClick() stays on onclick for keyboard/assistive use and ignores a click arriving within 400ms of a pointerdown already handled.
-        window.__dockPointerHandledAt = {};
-        window.dockPointerDown = function(view) {
-            window.__dockPointerHandledAt[view] = Date.now();
-            window.switchTab(view);
-        };
+        // The dock (DockGlide below): tap an item, or put a finger down and slide along the dock; the item under the finger
+        // lights up (a tick of haptics each time it changes) and the tab switches as the finger lifts, with a confirm
+        // haptic. Lifting well above the dock cancels, so a system swipe up from the bottom edge changes nothing.
+        // dockClick() stays for keyboard use and ignores the click that follows a handled touch.
+        window.__dockHandledAt = 0;
+        document.addEventListener('touchmove', e => {
+            if (e.cancelable && e.target.closest && e.target.closest('.dock-wrapper')) e.preventDefault();
+        }, { passive: false });
         window.dockClick = function(view) {
-            const last = window.__dockPointerHandledAt[view];
-            if (last && (Date.now() - last) < 400) return;
+            if (Date.now() - window.__dockHandledAt < 400) return;
             window.switchTab(view);
         };
 
+        // Tabs that keep their scroll position; History starts at the top once per launch.
+        const TAB_SCROLL_KEPT = ['gen', 'inp', 'gal', 'cfg'];
+        const tabScrollY = {};
         window.switchTab = function(view) {
             // "Configuration Saved" fires when CFG is left for another tab (checked before views are hidden).
             const cfgViewEl = document.getElementById('view-cfg');
@@ -259,6 +301,10 @@ window.onload = function() {
 
             // List of all valid view IDs
             const views = ['gen', 'inp', 'que', 'gal', 'ana', 'cfg', 'comfy'];
+            // Each tab keeps its scroll position (the page is one scroll shared by every tab).
+            const leaving = views.find(v => { const el = document.getElementById('view-' + v); return el && !el.classList.contains('hidden'); });
+            if (leaving && leaving !== view && TAB_SCROLL_KEPT.includes(leaving)) tabScrollY[leaving] = window.scrollY;
+            if (leaving === 'gal' && view !== 'gal' && typeof isSelectionMode !== 'undefined' && isSelectionMode && typeof toggleGallerySelectionMode === 'function') toggleGallerySelectionMode();
             
             // 1. Hide all views and deactivate all dock items
             views.forEach(v => {
@@ -275,11 +321,18 @@ window.onload = function() {
             
             const targetDock = document.getElementById('dock-' + view);
             if (targetDock) targetDock.classList.add('active');
+            if (leaving !== view && view === 'gal' && tabScrollY.gal == null) window.scrollTo({ top: 0, behavior: 'instant' });
+            if (leaving !== view && TAB_SCROLL_KEPT.includes(view) && tabScrollY[view] != null) {
+                const want = tabScrollY[view];
+                window.scrollTo({ top: want, behavior: 'instant' });
+                // Again once laid out, unless something else has scrolled since (e.g. a notification tap).
+                const at = window.scrollY;
+                requestAnimationFrame(() => { if (window.scrollY === at && at !== want) window.scrollTo({ top: want, behavior: 'instant' }); });
+            }
 
             // --- RESTORED MISSING LOGIC START ---
             if (view === 'gen') {
                 currentTask = 'txt';
-                if (typeof reorganizeGenRowLayout === 'function') reorganizeGenRowLayout();
             }
             if (view === 'inp') {
                 currentTask = 'inp';
@@ -296,7 +349,11 @@ window.onload = function() {
 
             // 3. Trigger specific view logic
             if (view === 'cfg') loadConnectionConfig();
-            if (view === 'gal' && typeof loadGallery === 'function') loadGallery();
+            // Again once the grid is drawn: before that the page may be too short to get there.
+            const galY = leaving !== view ? tabScrollY.gal : null;
+            if (view === 'gal' && typeof loadGallery === 'function') loadGallery(galY ? () => window.scrollTo({ top: galY, behavior: 'instant' }) : undefined);
+            // Shown again: the page controls' place is measured on screen.
+            if (view === 'gal' && typeof placeGalleryControls === 'function') placeGalleryControls();
             
             // 4. Auto-Connect ComfyUI if opened and not connected
             if (view === 'comfy' && typeof connectToComfy === 'function') {
@@ -319,7 +376,9 @@ window.onload = function() {
         // =========================================================================
         if (!window.Neo) window.Neo = {};
         
-        window.Neo.appInjectConfig = async function(alias, name, textArea) {
+        // variant (LoRA variants, loravariants.js): { id, weight, trigger, negative } used instead of the LoRA's own; its
+        // negative is added after the LoRA's.
+        window.Neo.appInjectConfig = async function(alias, name, textArea, variant = null) {
             const loraEntry = window.LoraManager && window.LoraManager.allLoras 
                 ? window.LoraManager.allLoras.find(l => l.name === name) 
                 : null;
@@ -331,18 +390,30 @@ window.onload = function() {
                 config = await loadSidecarConfig(name, loraEntry.path);
             }
 
-            const weight = config ? config.weight : 1.0;
+            const hasVariantWeight = variant && variant.id && variant.weight !== undefined && variant.weight !== null && variant.weight !== '';
+            const weight = hasVariantWeight ? variant.weight : (config ? config.weight : 1.0);
+            const triggerSource = variant && variant.id ? variant.trigger : (config && config.trigger);
             // Trigger text may use line breaks to separate "pick one" groups; keep them, tidy other whitespace.
-            const rawTrigger = config && config.trigger
-                ? String(config.trigger).split('\n').map(line => line.trim().replace(/[ \t]+/g, ' ')).filter(line => line.length > 0).join('\n')
+            const rawTrigger = triggerSource
+                ? String(triggerSource).split('\n').map(line => line.trim().replace(/[ \t]+/g, ' ')).filter(line => line.length > 0).join('\n')
                 : "";
             // Trigger words already in the box (in any weight or case) aren't added again.
             // Removed segment by segment, so the trigger's own line breaks stay.
-            const presentTags = boxTagSet(textArea);
+            // With Forge Couple on, they go to the region box last tapped instead (forgecouple.js).
+            // Tool, Artstyle, Background and Slider LoRAs are for the whole image: always the background (prompt box).
+            const wholeImage = !!(config && ['tool', 'artstyle', 'background', 'slider'].includes(config.type));
+            const triggerBox = (!wholeImage && window.ForgeCouple && window.ForgeCouple.triggerBox(textArea.id.replace(/_prompt$/, ''))) || textArea;
+            const presentTags = boxTagSet(triggerBox);
             const formattedTrigger = window.formatInsertedTags ? window.formatInsertedTags(rawTrigger, textArea.id.replace(/_prompt$/, '')) : rawTrigger;
             const triggerText = removeTagsFromText(formattedTrigger, new Set(parseTagList(formattedTrigger).map(normaliseTag).filter(n => presentTags.has(n))));
             const addedTriggers = parseTagList(triggerText);
-            const trigger = triggerText ? ` ${triggerText}` : "";
+            // Its trigger words missing from every box: other LoRAs listing them lost them (they were deleted).
+            if (window.LoraManager && !textArea.value.includes(`<lora:${alias}:`)) {
+                const everywhere = new Set([...presentTags, ...boxTagSet(textArea), ...(window.ForgeCouple ? window.ForgeCouple.regionTags(textArea.id.replace(/_prompt$/, '')) : [])]);
+                const missing = [...new Set(withFormattedPieces(parseTagList(formattedTrigger)).map(normaliseTag))].filter(n => !everywhere.has(n));
+                window.LoraManager.releaseMissing(textArea.id.replace(/_prompt$/, ''), alias, missing, textArea.value);
+            }
+            const trigger = triggerText && triggerBox === textArea ? ` ${triggerText}` : "";
             const loraTag = `<lora:${alias}:${weight}>${trigger}`;
 
             if (!textArea.value.includes(`<lora:${alias}:`)) {
@@ -356,13 +427,14 @@ window.onload = function() {
                 textArea.value = trimmed + insertion;
                 // End the box with ", " (withTrailingComma(), utils.js). Applied after `insertion` is fixed, so the tracked string stays separator + tag for toggle().
                 textArea.value = withTrailingComma(textArea.value);
+                if (triggerText && triggerBox !== textArea) window.ForgeCouple.addTo(triggerBox, triggerText);
 
                 // Remember exactly what was inserted (persisted) so toggle() can remove precisely that; trigger is kept for word-by-word fallback.
                 const mode = textArea.id.replace(/_prompt$/, '');
                 if (window.LoraManager) {
                     if (!window.LoraManager.appliedInsertions[mode]) window.LoraManager.appliedInsertions[mode] = {};
-                    // inserted: the trigger words it added, which are the ones removed with it (toggle()).
-                    window.LoraManager.appliedInsertions[mode][alias] = { insertion, trigger: rawTrigger, inserted: addedTriggers };
+                    // inserted: the trigger words it added, which are the ones removed with it (toggle()). variant: which one (null: the default).
+                    window.LoraManager.appliedInsertions[mode][alias] = { insertion, trigger: rawTrigger, inserted: addedTriggers, variant: variant && variant.id ? variant.id : null };
                     window.LoraManager.saveInsertions(mode);
                 }
 
@@ -370,8 +442,9 @@ window.onload = function() {
                 if (typeof savePrompt === 'function') savePrompt(mode);
 
                 // This LoRA's "Additional Negative Prompts" override is appended to the Negative box and removed by LoraManager.toggle(). Only when the LoRA is actually being added.
-                if (window.LoraManager && config && config.additionalNegative) {
-                    window.LoraManager.applyAdditionalNegative(mode, alias, config.additionalNegative);
+                const additionalNegative = [config && config.additionalNegative, variant && variant.id && variant.negative].filter(Boolean).join(', ');
+                if (window.LoraManager && additionalNegative) {
+                    window.LoraManager.applyAdditionalNegative(mode, alias, additionalNegative);
                 }
 
                 // Apply this LoRA's Sampler/Schedule/Steps/CFG overrides to the current tab when it is added. Each is applied only if the LoRA set a non-empty value.
@@ -413,6 +486,17 @@ window.onload = function() {
             }
         };
 
+        // Back on Config at the Restore or Reset button that reloaded the app (backup.js, cfg.js).
+        let returnTo = null;
+        try { returnTo = sessionStorage.getItem('bojroReturnTo'); sessionStorage.removeItem('bojroReturnTo'); } catch (e) {}
+        const returnEl = returnTo && document.querySelector(returnTo);
+        if (returnEl) {
+            switchTab('cfg');
+            const section = returnEl.closest('.cfg-accordion-content');
+            if (section && section.classList.contains('hidden')) section.previousElementSibling?.click();
+            requestAnimationFrame(() => returnEl.scrollIntoView({ block: 'center', behavior: 'instant' }));
+        }
+
         // --- 15. HANDLE HASH NAVIGATION (Fallback) ---
         const hash = window.location.hash.replace('#', '');
         if (hash && ['gen','inp','que','gal','ana','cfg','comfy'].includes(hash)) {
@@ -439,8 +523,10 @@ window.onload = function() {
         }, 3000); // Waits 3 seconds after boot
 
         console.log("App Initialized Successfully");
+        revealApp();
     } catch (e) {
         console.error("Initialization Error:", e);
+        revealApp();
         // Falls back to native alert() because the boot sequence's catch-all may run when appAlert()'s script didn't load.
         if (typeof window.appAlert === 'function') {
             window.appAlert("App Init Failed: " + e.message, { title: 'Initialization Failed', danger: true });
@@ -548,16 +634,21 @@ document.addEventListener('touchstart', () => {
 // Hardware back (or the back gesture) closes the topmost open window or selector the same way its own close button does, and only exits the app when nothing is open.
 const BACK_CLOSERS = {
     appConfirmModal: () => window.__appConfirmResolve(false),
+    wiPwModal: () => document.getElementById('wiPwCancel')?.click(),
     noticeBoardModal: () => document.getElementById('noticeBoardDismiss')?.click(),
     batteryModal: () => window.skipBatteryPerm && window.skipBatteryPerm(),
     'saac-img-modal': () => window.SaacManager.closeImage(),
     lpFullscreen: () => window.closeLivePreviewFullscreen(),
     autoDeleteModal: () => window.answerAutoDelete(false),
+    thumbMenu: () => window.LoraVariants.closeThumbMenu(),
+    // A nested wildcard: back a level; else closed, as CANCEL.
+    wcEditorModal: () => window.Wildcards.closeX({ isTrusted: false }),
 };
 
 // Tapping outside these windows closes them, as their × does. The tap must start and end outside, so a drag that ends
 // there (the scroll bar, selecting text) doesn't. The Auto-Delete Warning deliberately has no such close.
 const BACKDROP_CLOSERS = {
+    checkpointManagerModal: () => window.closeCheckpointManager(),
     img2imgPresetModal: () => window.closeImg2imgPresetModal(),
     loraModal: () => window.closeLoraModal(),
     saacModal: () => window.SaacManager.close(),
@@ -565,6 +656,12 @@ const BACKDROP_CLOSERS = {
     dataUsageModal: () => window.closeDataUsageHistory(),
     debugLogModal: () => window.closeDebugLog(),
 };
+// Other windows close as back closes them (closeOverlay()); not Crop & Edit, the viewers or the Auto-Delete Warning.
+const BACKDROP_SKIP = ['editorModal', 'fullScreenModal', 'lpFullscreen', 'autoDeleteModal'];
+document.querySelectorAll('.modal').forEach(el => {
+    if (!el.id || BACKDROP_SKIP.includes(el.id) || BACKDROP_CLOSERS[el.id]) return;
+    BACKDROP_CLOSERS[el.id] = () => window.closeOverlay(el);
+});
 Object.entries(BACKDROP_CLOSERS).forEach(([id, close]) => {
     const el = document.getElementById(id);
     if (!el) return;
@@ -613,6 +710,39 @@ Object.entries(BACKDROP_CLOSERS).forEach(([id, close]) => {
     }, true);
 })();
 
+// After a swipe in a full-screen viewer, the WebView's invisible fling swallows the next tap for up to a second.
+// A tap on a viewer's control that gets no click is clicked here. Not elsewhere, where a tap should only stop a scroll.
+;(function () {
+    const VIEWERS = '#fullScreenModal, #lpFullscreen, #saac-img-modal';
+    const TAPPABLE = 'button, [onclick]';
+    const HOLD_MS = 400, SLOP = 12;
+    let tap = null;
+    document.addEventListener('pointerdown', e => {
+        tap = null;
+        if (e.pointerType !== 'touch' || !e.isPrimary || !e.target.closest) return;
+        const viewer = e.target.closest(VIEWERS);
+        const el = viewer && e.target.closest(TAPPABLE);
+        if (!el || !viewer.contains(el) || el.disabled) return;
+        tap = { el, target: e.target, x: e.clientX, y: e.clientY, t: performance.now(), clicked: false };
+    }, true);
+    document.addEventListener('pointermove', e => {
+        if (tap && Math.hypot(e.clientX - tap.x, e.clientY - tap.y) > SLOP) tap = null;
+    }, true);
+    document.addEventListener('pointercancel', () => { tap = null; }, true);
+    document.addEventListener('click', () => { if (tap) tap.clicked = true; }, true);
+    document.addEventListener('pointerup', e => {
+        const t = tap;
+        if (!t || !e.isPrimary || performance.now() - t.t >= HOLD_MS) return;
+        const under = document.elementFromPoint(e.clientX, e.clientY);
+        if (!under || !t.el.contains(under)) { tap = null; return; }
+        setTimeout(() => {
+            if (tap === t) tap = null;
+            if (t.clicked || !t.target.isConnected || t.el.disabled) return;
+            t.target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window, clientX: e.clientX, clientY: e.clientY }));
+        }, 80);
+    }, true);
+})();
+
 function topmostOverlay() {
     const open = [...document.querySelectorAll('.modal:not(.hidden), #saac-img-modal.active')]
         .filter(el => el.getClientRects().length && getComputedStyle(el).display !== 'none');
@@ -625,11 +755,15 @@ function topmostOverlay() {
 window.closeTopmostOverlay = function() {
     const el = topmostOverlay();
     if (!el) return typeof window.closeAnaStickyMenu === 'function' && window.closeAnaStickyMenu();
+    return window.closeOverlay(el);
+};
+// Closes one window as its own close / cancel would.
+window.closeOverlay = function(el) {
     if (BACK_CLOSERS[el.id]) {
         BACK_CLOSERS[el.id]();
         return true;
     }
-    const btn = el.querySelector('.close-btn, .saac-close-btn')
+    const btn = el.querySelector('.close-btn')
         || [...el.querySelectorAll('button[onclick]')].find(b => /close|classList\.add\('hidden'\)/i.test(b.getAttribute('onclick')));
     if (btn) btn.click();
     else el.classList.add('hidden');
@@ -650,6 +784,12 @@ function blurFocusedTextEntry() {
 }
 window.handleBackPress = function() {
     if (window.closeTopmostOverlay() || blurFocusedTextEntry()) {
+        exitArmedUntil = 0;
+        return 'handled';
+    }
+    // History's selection mode.
+    if (typeof isSelectionMode !== 'undefined' && isSelectionMode && typeof toggleGallerySelectionMode === 'function') {
+        toggleGallerySelectionMode();
         exitArmedUntil = 0;
         return 'handled';
     }

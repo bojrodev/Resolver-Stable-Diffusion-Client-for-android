@@ -4,7 +4,7 @@
 
 // Running jobs' local cancel switches, so ABORT works on a stalled connection.
 const activeJobs = new Set();
-// Debug log (Config > Experimental); does nothing while it's off.
+// Debug log (Config > Diagnostics); does nothing while it's off.
 const dlog = (m) => { if (window.dbg) window.dbg(m); };
 // Debug log: process and network state, and the same server request made natively and from the WebView.
 let diagLast = 0;
@@ -496,6 +496,16 @@ function controlNetMissingRequiredImage(cnScripts) {
 function buildJobFromUI() {
     const job = buildJobFromUIRaw();
     if (job) job.gridMaxEdge = batchGridMaxEdge();
+    if (job && window.MoreSettings) window.MoreSettings.apply(job);
+    if (job && typeof applyCheckpointClipSkip === 'function') applyCheckpointClipSkip(job);
+    if (job && window.ForgeCouple && !window.ForgeCouple.apply(job)) return null;
+    if (job && window.Scene) Scene.mark(job);
+    // The prompt as typed (style:: put in later), kept with each image for Reroll (wcreroll.js).
+    if (job && job.payload) job.typedPrompt = job.payload.prompt;
+    // The styles picked, for MOST USED / RECENTLY USED (item 85).
+    if (job && window.StyleManager) { const sel = StyleManager.getSelectedStylesForMode(currentTask === 'inp' ? 'inp' : currentMode); if (sel.size) job.styleNames = [...sel]; }
+    if (job && window.WcReroll) WcReroll.mark(job);
+    if (job && window.PromptHistory) PromptHistory.record(currentTask === 'inp' ? 'inp' : currentMode, job);
     return job;
 }
 
@@ -911,8 +921,10 @@ function openJobTarget(kind) {
     const inp = t.tab === 'inp';
     requestAnimationFrame(() => {
         if (kind === 'complete') {
-            // The batch's first image is the one directly under the button.
-            scrollToForTap(document.getElementById(inp ? 'inpGallery' : 'gallery')?.firstElementChild, 'centre');
+            // The newest image (a batch's last; not its grid) opens in the viewer, centred under it for when it closes.
+            const img = document.querySelector(`#${inp ? 'inpGallery' : 'gallery'} .gen-result:not([data-grid])`);
+            scrollToForTap(img, 'centre');
+            if (img) img.click();
             return;
         }
         const preview = document.getElementById(inp ? 'inpLivePreviewImg' : 'livePreviewImg');
@@ -950,6 +962,23 @@ async function dropJobWhenIdle(job) {
     }
 }
 
+// SKIP: shown while the running job has more images to come ({ job, iter, total }, runJob()). The skipped image is
+// left out of the results.
+let skipState = null;
+function paintSkip() {
+    const show = !!(skipState && skipState.total > 1 && skipState.iter < skipState.total);
+    ['skipGenBtn', 'skipInpGenBtn', 'skipQueueBtn'].forEach(id => document.getElementById(id)?.classList.toggle('hidden', !show));
+}
+window.skipCurrentImage = async function() {
+    if (!skipState || skipState.iter >= skipState.total) return;
+    skipState.job.skippedIters.add(skipState.split ? 1 : skipState.iter);
+    skipState.job.skipAdvance = skipState.split ? 1 : skipState.iter;
+    dlog(`SKIP pressed (image ${skipState.iter} of ${skipState.total})`);
+    if (typeof Toast !== 'undefined' && Toast) Toast.show({ text: 'Skipped', duration: 'short' });
+    try { await fetch(`${HOST}/sdapi/v1/skip`, { method: 'POST', headers: getHeaders() }); } catch (e) {}
+};
+
+let lastAbortToastAt = 0;
 window.interruptGeneration = async function() {
     dlog(`ABORT pressed (${activeJobs.size} job(s) running)`);
     activeJobs.forEach(job => {
@@ -964,7 +993,9 @@ window.interruptGeneration = async function() {
             dropJobWhenIdle(job);
         }
     });
-    if (typeof Toast !== 'undefined' && Toast) Toast.show({ text: 'Aborted', duration: 'short' });
+    // Once: a second press (dropping the job) doesn't repeat it.
+    if (typeof Toast !== 'undefined' && Toast && Date.now() - lastAbortToastAt > 3000) Toast.show({ text: 'Aborted', duration: 'short' });
+    lastAbortToastAt = Date.now();
     await sendInterrupt();
     // Nothing running here (Forge's own job was stopped): ABORT goes back to disabled.
     if (!activeJobs.size && !isQueueRunning && !isSingleJobRunning) ['abortGenBtn', 'abortInpGenBtn', 'abortQueueBtn'].forEach(id => setAbortButtonState(id, false));
@@ -975,17 +1006,7 @@ function setAbortButtonState(btnId, isRunning) {
     const btn = document.getElementById(btnId);
     if (!btn) return;
     btn.disabled = !isRunning;
-    if (isRunning) {
-        btn.style.color = '#f44336';
-        btn.style.borderColor = 'rgba(244, 67, 54, 0.4)';
-        btn.style.background = 'rgba(244, 67, 54, 0.08)';
-        btn.style.opacity = '1';
-    } else {
-        btn.style.color = 'var(--text-muted)';
-        btn.style.borderColor = 'var(--border-color)';
-        btn.style.background = 'transparent';
-        btn.style.opacity = '0.5';
-    }
+    btn.classList.toggle('running', isRunning);
 }
 
 // Items always go into QUEUE first, never straight into ACTIVE, so more can be added while a batch runs. Completed jobs keep only prompt/negative/mode: base64 images would exceed localStorage's quota.
@@ -1043,13 +1064,25 @@ window.addToQueue = function() {
     job.id = Date.now().toString();
     job.timestamp = new Date().toLocaleString();
 
+    // All combinations with more than a run makes: all of them as jobs, or just this one (wildcards.js).
+    const pushJobs = async () => {
+        const ask = await Wildcards.comboAsk(job, true);
+        if (!ask) return false;
+        const jobs = ask === 'now' ? [job] : Wildcards.comboJobsOf(job, ask);
+        queueState.next.push(...jobs);
+        if (jobs.length > 1 && typeof Toast !== 'undefined') Toast.show({ text: `Queued ${jobs.length} jobs`, duration: 'short' });
+        return true;
+    };
+    const added = () => {
+        saveQueueState();
+        renderQueueAll();
+        const badge = document.getElementById('queueBadge');
+        badge.style.transform = "scale(1.5)";
+        setTimeout(() => badge.style.transform = "scale(1)", 200);
+    };
+    if (job.combos && window.Wildcards && Wildcards.comboAsk) { pushJobs().then(ok => { if (ok) added(); }); return; }
     queueState.next.push(job);
-    saveQueueState();
-    renderQueueAll();
-
-    const badge = document.getElementById('queueBadge');
-    badge.style.transform = "scale(1.5)";
-    setTimeout(() => badge.style.transform = "scale(1)", 200);
+    added();
 }
 
 // Escapes text before interpolating it into innerHTML: job.desc is a raw prompt slice that contains literal <lora:...> tags.
@@ -1064,6 +1097,52 @@ function escapeHtmlAttr(text) {
     return escapeHtml(text).replace(/'/g, '&#39;').replace(/"/g, '&quot;');
 }
 
+// Escaped name with each short outermost (...) / [...] in a .name-group, so it wraps whole.
+function nameHtmlKeepBrackets(text) {
+    const s = String(text == null ? '' : text);
+    let out = '', depth = 0, start = 0;
+    for (let i = 0; i < s.length; i++) {
+        const c = s[i];
+        if (c === '(' || c === '[') {
+            if (depth++ === 0) { out += escapeHtmlAttr(s.slice(start, i)); start = i; }
+        } else if ((c === ')' || c === ']') && depth > 0 && --depth === 0) {
+            const part = escapeHtmlAttr(s.slice(start, i + 1));
+            out += i + 1 - start <= 20 ? `<span class="name-group">${part}</span>` : part;
+            start = i + 1;
+        }
+    }
+    return out + escapeHtmlAttr(s.slice(start));
+}
+// A LoRA list name as [name, [lines under it]]: a trailing "(...)" (and any " - ..." after it), or else what follows
+// the first " - ", goes on lines under the name, in the order written; further " - "s there show as " • ".
+function splitLoraName(text) {
+    const s = String(text == null ? '' : text).trim();
+    const dots = t => t.trim().replace(/\s+-\s+/g, ' • ');
+    let m = /^(.*\S)\s*\(([^()]*)\)\s*(?:-\s*(.+))?$/.exec(s);
+    if (m && m[2].trim()) {
+        // "Name - Outfit (Series)": the outfit, then the series.
+        const h = /^(.*?\S)\s+-\s+(.+)$/.exec(m[1]);
+        return h ? [h[1], [dots(h[2]), m[2].trim()].concat(m[3] ? [dots(m[3])] : [])]
+            : [m[1], [m[2].trim()].concat(m[3] ? [dots(m[3])] : [])];
+    }
+    m = /^(.*?\S)\s+-\s+(.+)$/.exec(s);
+    return m ? [m[1], [dots(m[2])]] : [s, []];
+}
+// A LoRA or variant name for "ACTIVE • …": what follows a " - " dropped, any "(...)" in it kept.
+function loraActiveName(text) {
+    const s = String(text == null ? '' : text).trim();
+    const m = /^(.*?\S)\s*(?:\s-\s*|-\s)(.*)$/.exec(s);
+    if (!m) return s;
+    const kept = (m[2].match(/\([^()]*\)/g) || []).filter(b => !m[1].includes(b));
+    return [m[1], ...kept].join(' ');
+}
+// A LoRA list row's name (lora-item-name): the name, and the lines under it (joined on one if there's no room,
+// LoraManager.fitNameLines()).
+function loraNameHtml(text) {
+    const [name, lines] = splitLoraName(text);
+    return nameHtmlKeepBrackets(name) + lines.map(l => `<span class="lora-item-sub">${escapeHtmlAttr(l)}</span>`).join('');
+}
+
 window.renderQueueAll = function() {
     renderList('ongoing', queueState.ongoing);
     renderList('next', queueState.next);
@@ -1071,40 +1150,9 @@ window.renderQueueAll = function() {
     updateQueueBadge();
 }
 
+// The Queue tab's cards (queueui.js, item 79).
 window.renderList = function(type, listData) {
-    const container = document.getElementById(`list-${type}`);
-    container.innerHTML = "";
-    if (listData.length === 0) {
-        container.innerHTML = `<div style="text-align:center;color:var(--text-muted);font-size:11px;padding:10px;">Empty</div>`;
-        return;
-    }
-
-    listData.forEach((job, index) => {
-        const item = document.createElement('div');
-        item.className = 'q-card';
-        if (type !== 'completed') {
-            item.draggable = true;
-            item.ondragstart = (e) => dragStart(e, type, index);
-        }
-        let deleteBtn = `<button onclick="removeJob('${type}', ${index})" class="btn-icon" style="width:32px;height:32px;margin-left:6px;color:#f44336;border:none;"><i data-lucide="x" size="18"></i></button>`;
-        const viewBtn = type === 'completed' ? `<button onclick="viewCompletedPrompt(${index})" class="btn-icon" style="width:32px;height:32px;color:#ff9800;border:none;" title="View full prompt"><i data-lucide="file-text" size="18"></i></button>` : "";
-        const handle = type !== 'completed' ? `<div class="q-handle"><i data-lucide="grip-vertical" size="14"></i></div>` : "";
-        item.innerHTML = `${handle}<div class="q-details"><div style="font-weight:bold; font-size:11px; color:var(--text-main);">${job.mode.toUpperCase()}</div><div class="q-meta">${escapeHtml(job.desc)}</div></div>${viewBtn}${deleteBtn}`;
-        container.appendChild(item);
-    });
-    lucide.createIcons();
-}
-
-// Shows the full positive/negative prompt of a completed queue item, with copy buttons.
-window.viewCompletedPrompt = function(index) {
-    const job = queueState.completed[index];
-    if (!job) return;
-    const positive = job.payload?.prompt || "";
-    const negative = job.payload?.negative_prompt || "";
-
-    document.getElementById('promptViewPositive').value = positive;
-    document.getElementById('promptViewNegative').value = negative;
-    document.getElementById('promptViewModal').classList.remove('hidden');
+    if (window.QueueUI) QueueUI.renderList(type, listData);
 }
 
 // Android 13+ shows its own "Copied to clipboard" toast, so the app's toast is suppressed there (detected via navigator.userAgent).
@@ -1150,41 +1198,61 @@ window.removeJob = function(type, index) {
     renderQueueAll();
 }
 
-window.clearQueueSection = async function(type) {
-    if (await window.appConfirm(`Clear all ${type.toUpperCase()} items?`, { title: 'Clear Queue', okText: 'CLEAR', danger: true })) {
-        queueState[type] = [];
-        saveQueueState();
-        renderQueueAll();
-    }
+window.clearQueueSection = function(type) {
+    queueState[type] = [];
+    saveQueueState();
+    renderQueueAll();
 }
 
-// Drag & Drop
-let draggedItem = null;
-window.dragStart = function(e, type, index) {
-    draggedItem = {
-        type,
-        index
+// Which kind of job is running: 'gen' (the main tabs), 'inp' (Inpaint / img2img), 'up' (Upscale), 'queue' (START BATCH).
+let singleJobGroup = null;
+let isUpscaleRunning = false;
+// Buttons a running job is showing its progress on (runJob()).
+const runJobButtons = new Set();
+// START BATCH sits beside CLEAR at its label's width, which it keeps while reading BUSY.
+function naturalButtonWidth(b) {
+    const c = b.cloneNode(true);
+    c.removeAttribute('id');
+    c.style.cssText += ';position:absolute;visibility:hidden;left:-9999px;top:0;width:auto';
+    document.body.appendChild(c);
+    const w = c.getBoundingClientRect().width;
+    c.remove();
+    return w;
+}
+// Other buttons that would start a job dim and read BUSY while one runs.
+// A button a running job is using for its own progress is left to it.
+function refreshBusyButtons() {
+    const running = new Set();
+    if (isQueueRunning) running.add('queue');
+    if (isSingleJobRunning && singleJobGroup) running.add(singleJobGroup);
+    if (isUpscaleRunning) running.add('up');
+    const busyFor = {
+        genBtn: running.has('inp') || running.has('up'),
+        inpGenBtn: running.has('gen') || running.has('up') || running.has('queue'),
+        upscaleBtn: running.has('gen') || running.has('inp') || running.has('queue'),
+        startQueueBtn: running.has('gen') || running.has('inp') || running.has('up'),
     };
-    e.dataTransfer.effectAllowed = 'move';
-    e.target.classList.add('dragging');
+    Object.entries(busyFor).forEach(([id, busy]) => {
+        const b = document.getElementById(id);
+        if (!b) return;
+        if (runJobButtons.has(id)) busy = false;
+        // textContent: innerText is "" while the app is hidden behind a viewer.
+        if (busy && !b.classList.contains('gen-busy')) {
+            b.dataset.busyLabel = b.textContent;
+            if (id === 'startQueueBtn') b.style.minWidth = naturalButtonWidth(b) + 'px';
+            b.classList.add('gen-busy');
+            b.disabled = true;
+            b.textContent = 'BUSY';
+        } else if (!busy && b.classList.contains('gen-busy')) {
+            b.classList.remove('gen-busy');
+            b.style.minWidth = '';
+            b.disabled = false;
+            // Put back unless something relabelled it meanwhile.
+            if (b.textContent === 'BUSY') b.textContent = b.dataset.busyLabel || 'GENERATE';
+        }
+    });
 }
-window.allowDrop = function(e) {
-    e.preventDefault();
-    e.currentTarget.classList.add('drag-over');
-}
-window.drop = function(e, targetType) {
-    e.preventDefault();
-    e.currentTarget.classList.remove('drag-over');
-    if (!draggedItem) return;
-    if (draggedItem.type !== targetType) {
-        const item = queueState[draggedItem.type].splice(draggedItem.index, 1)[0];
-        queueState[targetType].push(item);
-        saveQueueState();
-        renderQueueAll();
-    }
-    document.querySelectorAll('.dragging').forEach(d => d.classList.remove('dragging'));
-    draggedItem = null;
-}
+window.refreshBusyButtons = refreshBusyButtons;
 
 // True while a generation, queue or upscale is running (Forge would hold a second request until it finished).
 function jobAlreadyRunning() {
@@ -1196,14 +1264,19 @@ function jobAlreadyRunning() {
 // Forge runs one job at a time, so one it's still running would hold a new one back: says so and enables ABORT to stop it.
 // An unreachable server counts as free (the job's own errors cover that).
 async function forgeBusyWithOtherJob() {
+    // Free now: an earlier "busy" toast no longer applies.
+    const free = () => {
+        if (typeof Toast !== 'undefined' && Toast && Toast.dismiss) Toast.dismiss('Forge is busy with another job');
+        return false;
+    };
     try {
         const { data } = await timedFetch(`${HOST}/sdapi/v1/progress?skip_current_image=true`, { headers: getHeaders() }, 3000, null, true);
-        if (!data || !data.state || !data.state.job) return false;
+        if (!data || !data.state || !data.state.job) return free();
     } catch (e) {
-        return false;
+        return free();
     }
     ['abortGenBtn', 'abortInpGenBtn', 'abortQueueBtn'].forEach(id => setAbortButtonState(id, true));
-    if (typeof Toast !== 'undefined' && Toast) Toast.show({ text: 'Forge is busy with another job. Tap ABORT to stop it', duration: 'long' });
+    if (typeof Toast !== 'undefined' && Toast) Toast.show({ text: 'Forge is busy with another job', duration: 'long' });
     return true;
 }
 
@@ -1213,6 +1286,8 @@ function jobGalleryImageCount(job) {
     return n + (job.gridMaxEdge > 0 && n > 1 ? 1 : 0);
 }
 
+// The queue job whose first image becomes its card's thumbnail (item 79).
+let queueThumbJob = null;
 window.processQueue = async function() {
     if (jobAlreadyRunning() || await forgeBusyWithOtherJob()) return;
     if (queueState.next.length === 0) {
@@ -1242,6 +1317,7 @@ window.processQueue = async function() {
     renderQueueAll();
 
     isQueueRunning = true;
+    refreshBusyButtons();
     lastJobTarget = { tab: 'que' };
     if (window.JobAbort) JobAbort.started();
     let connectionLost = false;
@@ -1272,7 +1348,7 @@ window.processQueue = async function() {
         // --- 3. UI Setup ---
         document.getElementById('queueProgressBox').classList.remove('hidden');
         // Reset the queue's progress text so it doesn't show the previous run's last value (e.g. "Step 220 / 220") until the first poll.
-        document.getElementById('queueProgressText').innerText = `Step 0 / ${totalBatchSteps}`;
+        document.getElementById('queueProgressText').innerText = `0 / ${totalBatchSteps} Steps`;
         btn.innerText = "RUNNING...";
         btn.disabled = true;
         setAbortButtonState('abortQueueBtn', true);
@@ -1285,9 +1361,25 @@ window.processQueue = async function() {
         runDiag('queue start');
         while (queueState.ongoing.length > 0) {
             const job = queueState.ongoing[0];
+            // Its card's progress line and thumbnail (queueui.js).
+            if (window.QueueUI) QueueUI.jobStart();
+            queueThumbJob = job;
+            renderList('ongoing', queueState.ongoing);
+            ListSort.recordJob(job);
             try {
                 dlog(`queue job start (${queueState.ongoing.length} left)`);
-                await runJob(job, true);
+                // style::NAME first too, so a style's own wildcards are picked (runJob() fills in ones a wildcard picks).
+                if (window.StyleManager && StyleManager.expandTokens) StyleManager.expandTokens(job.payload);
+                if (window.RandomTokens) { await RandomTokens.ready(job); RandomTokens.rollSeed(job); }
+                let k = 0;
+                for (const part of (window.Scene ? await Scene.parts(job, null) : window.Wildcards ? Wildcards.parts(job) : [job])) {
+                    if (window.RandomTokens) RandomTokens.running(k);
+                    try { await runJob(part, true); } catch (e) { if (window.RandomTokens && (isAborting || e.name === 'AbortError')) RandomTokens.rollback(k); if ((isAborting || e.name === 'AbortError') && window.Wildcards && Wildcards.comboAbort) Wildcards.comboAbort(part); throw e; }
+                    // ABORT: order:: picks (and All combinations) from this image on are given again next time.
+                    if (isAborting) { if (window.RandomTokens) RandomTokens.rollback(k); if (window.Wildcards && Wildcards.comboAbort) Wildcards.comboAbort(part); break; }
+                    k++;
+                }
+                if (window.RandomTokens) RandomTokens.running(null);
 
                 // If aborted while this job ran, don't record it as completed (abortQueue() already cleared the array).
                 if (isAborting) { usageStatus = 'aborted'; break; }
@@ -1314,7 +1406,7 @@ window.processQueue = async function() {
                 connectionLost = !!e.connectionLost;
                 dlog('queue job failed: ' + e.message);
                 console.error(e);
-                updateBatchNotification("Batch Paused", true, "Error occurred");
+                updateBatchNotification("Batch paused: error", true, "");
                 await window.appAlert("Batch paused: " + e.message);
                 break; // Stop loop on error
             }
@@ -1325,11 +1417,12 @@ window.processQueue = async function() {
         // Recorded now, not after the popups below are dismissed.
         if (usage) { DataUsage.end(usage, usageStatus); usage = null; }
         if (typeof sendCompletionNotification === 'function') {
-            // Clears the progress notification first; the popup below waits for the app to be opened.
+            // Clears the progress notification first.
             await stopProgressService();
             await sendCompletionNotification("Images ready");
         }
-        if (queueState.ongoing.length === 0) await window.appAlert("Batch Complete!");
+        // In the background the notification says it.
+        if (usageStatus === 'ok' && queueState.ongoing.length === 0 && !document.hidden && typeof Toast !== 'undefined' && Toast) Toast.show({ text: 'Queue complete', duration: 'short' });
     } finally {
         // --- 5+6. Cleanup + STOP PROTECTION ---
         // In finally, so a throw above can't leave the queue state, button and wake lock stuck.
@@ -1341,6 +1434,7 @@ window.processQueue = async function() {
             btn.innerText = oldText;
             btn.disabled = false;
         }
+        refreshBusyButtons();
         setAbortButtonState('abortQueueBtn', false);
         const progressBox = document.getElementById('queueProgressBox');
         if (progressBox) progressBox.classList.add('hidden');
@@ -1386,6 +1480,20 @@ window.generate = async function() {
         return;
     }
 
+    // All combinations with more than a run makes: queue them all instead, or this run now (wildcards.js).
+    const comboAsk = window.Wildcards && Wildcards.comboAsk ? await Wildcards.comboAsk(job, false) : 'now';
+    if (!comboAsk) return;
+    if (comboAsk !== 'now') {
+        job.id = Date.now().toString();
+        job.timestamp = new Date().toLocaleString();
+        const jobs = Wildcards.comboJobsOf(job, comboAsk);
+        queueState.next.push(...jobs);
+        saveQueueState();
+        renderQueueAll();
+        if (typeof Toast !== 'undefined') Toast.show({ text: `Queued ${jobs.length} job${jobs.length === 1 ? '' : 's'}`, duration: 'short' });
+        return;
+    }
+
     // The same Gallery Cache Limit warning as processQueue(), for this job's image count (generate() bypasses processQueue()).
     const genThisJobImages = jobGalleryImageCount(job);
     const genCacheLimit = typeof getGalleryCacheLimit === 'function' ? getGalleryCacheLimit() : 30;
@@ -1404,6 +1512,8 @@ window.generate = async function() {
     if (typeof window.activateKeepAlive === 'function') window.activateKeepAlive();
 
     isSingleJobRunning = true;
+    singleJobGroup = job.mode === 'inp' ? 'inp' : 'gen';
+    refreshBusyButtons();
     lastJobTarget = { tab: job.mode === 'inp' ? 'inp' : 'gen', mode: job.mode, sub: job.inpSubMode };
     if (window.JobAbort) JobAbort.started();
     let connectionLost = false;
@@ -1413,8 +1523,21 @@ window.generate = async function() {
     let usageStatus = 'ok';
 
     try {
-        // Run the job
-        await runJob(job, false);
+        // Run the job (with wildcards and a Batch Count, one request per image; wildcards.js)
+        const genBtn = document.getElementById(job.mode === 'inp' ? 'inpGenBtn' : 'genBtn');
+        ListSort.recordJob(job);
+        // style::NAME first too, so a style's own wildcards are picked (runJob() fills in ones a wildcard picks).
+        if (window.StyleManager && StyleManager.expandTokens) StyleManager.expandTokens(job.payload);
+        if (window.RandomTokens) { await RandomTokens.ready(job); RandomTokens.rollSeed(job); }
+        let k = 0;
+        for (const part of (window.Scene ? await Scene.parts(job, genBtn) : window.Wildcards ? Wildcards.parts(job) : [job])) {
+            if (window.RandomTokens) RandomTokens.running(k);
+            try { await runJob(part, false); } catch (e) { if (window.RandomTokens && (isAborting || e.name === 'AbortError')) RandomTokens.rollback(k); if ((isAborting || e.name === 'AbortError') && window.Wildcards && Wildcards.comboAbort) Wildcards.comboAbort(part); throw e; }
+            // ABORT: order:: picks (and All combinations) from this image on are given again next time.
+            if (isAborting) { if (window.RandomTokens) RandomTokens.rollback(k); if (window.Wildcards && Wildcards.comboAbort) Wildcards.comboAbort(part); break; }
+            k++;
+        }
+        if (window.RandomTokens) RandomTokens.running(null);
     } catch (e) {
         usageStatus = e.name === 'AbortError' ? 'aborted' : 'failed';
         connectionLost = !!e.connectionLost;
@@ -1429,6 +1552,8 @@ window.generate = async function() {
         if (usage) DataUsage.end(usage, usageStatus);
         // --- 2. ALWAYS CLEAN UP ---
         isSingleJobRunning = false;
+        singleJobGroup = null;
+        refreshBusyButtons();
         setAbortButtonState('abortGenBtn', false);
         setAbortButtonState('abortInpGenBtn', false);
 
@@ -1438,12 +1563,24 @@ window.generate = async function() {
         await stopProgressService();
     }
 
+    if (usageStatus === 'ok') toastIfUnwatched(job.mode === 'inp' ? 'inpGenBtn' : 'genBtn', 'Generation complete');
     // Send completion notification
     if (typeof sendCompletionNotification === 'function') {
         // "Images" for a Batch Count or Batch Size above 1.
         const imageCount = job && job.payload ? (job.payload.n_iter || 1) * (job.payload.batch_size || 1) : 1;
         await sendCompletionNotification(imageCount > 1 ? "Images ready" : "Image ready");
     }
+}
+
+// With the app in front: a toast when a job finishes and its button isn't on screen (another tab, scrolled away, or a
+// window over it). Not while Live Preview is full screen, which shows the result itself.
+function toastIfUnwatched(btnId, text) {
+    if (document.hidden || document.body.classList.contains('lp-fs-open')) return;
+    const b = document.getElementById(btnId);
+    const r = b && b.getClientRects().length ? b.getBoundingClientRect() : null;
+    const top = r && r.bottom > 0 && r.top < window.innerHeight ? document.elementFromPoint(r.left + r.width / 2, Math.max(0, r.top) + Math.min(r.height, window.innerHeight - Math.max(0, r.top)) / 2) : null;
+    if (top && b.contains(top)) return;
+    if (typeof Toast !== 'undefined' && Toast) Toast.show({ text, duration: 'short' });
 }
 
 window.clearGenResults = function() {
@@ -1536,12 +1673,15 @@ async function fetchInternalPreview(pv, sig) {
 
 // Results added but not yet shown (still decoding); while any are, the job's end leaves the preview to them (addResult()).
 let resultRevealsPending = 0;
+// The results strip whose newest result opens in the viewer once its new results are shown (set when Live Preview full
+// screen closes for them).
+let resultCentreGal = null;
 // Counts frames, so a slow decode can't replace a newer frame or reappear after the preview was cleared.
 let livePreviewFrameSeq = 0;
 function updateLivePreviewImage(base64Data) {
     // Both the main tab's frame and the Inpaint/img2img tab's, as a job started on one tab can finish while the other is open.
     // Takes a whole data: URI (the preview endpoint's) or bare base64 (the progress checks').
-    const src = base64Data.startsWith('data:') ? base64Data : `data:image/png;base64,${base64Data}`;
+    const src = base64Data.startsWith('data:') ? base64Data : base64ToDataUrl(base64Data);
     const seq = ++livePreviewFrameSeq;
     // Decoded off screen first: swapping an undecoded image in showed nothing for a moment (e.g. a new ADetailer pass's first frame).
     const next = new Image();
@@ -1558,32 +1698,68 @@ function updateLivePreviewImage(base64Data) {
     });
 }
 
-// An overlay that hides the app behind it (the image viewer, Live Preview full screen) stays drawn for a moment after it
-// closes, until the images now on screen have decoded (0.4s at most): the app behind is skipped while it's open, so its
-// images were blank for a few frames otherwise. It already counts as closed (.hidden) and lets taps through. Not when
-// another window has opened in its place.
-function coverUntilAppDrawn(el) {
-    if (!el || document.querySelector('.modal:not(.hidden)')) return;
-    el.classList.add('closing-cover');
+// Resolves once the app's images on screen have decoded.
+function appImagesOnScreenDecoded() {
     const onScreen = [...document.querySelectorAll('.container img')].filter(i => {
         if (!i.getAttribute('src') || !i.getClientRects().length) return false;
         const r = i.getBoundingClientRect();
         return r.bottom > 0 && r.top < window.innerHeight;
     });
+    // Chrome can skip a re-shown large image until it decodes at its shown size; "sync" draws it with the rest.
+    onScreen.forEach(i => { i.decoding = 'sync'; });
+    return Promise.all(onScreen.map(i => (i.decode ? i.decode() : Promise.resolve()).catch(() => {})));
+}
+// Set when the app behind the viewer was already drawn before it closed, so no cover is needed.
+let viewerClosesDrawn = false;
+// A closing overlay (image viewer, Live Preview full screen) stays drawn until the images behind it have decoded (0.4s
+// at most), so they don't show blank; it lets taps through meanwhile. onGone runs once it's gone.
+function coverUntilAppDrawn(el, onGone) {
+    if (!el || document.querySelector('.modal:not(.hidden)')) { if (onGone) onGone(); return; }
+    el.classList.add('closing-cover');
     let done = false;
     const uncover = () => {
         if (done) return;
         done = true;
-        requestAnimationFrame(() => el.classList.remove('closing-cover'));
+        requestAnimationFrame(() => {
+            el.classList.remove('closing-cover');
+            if (onGone) onGone();
+        });
     };
-    Promise.all(onScreen.map(i => (i.decode ? i.decode() : Promise.resolve()).catch(() => {}))).then(uncover);
+    appImagesOnScreenDecoded().then(uncover);
     BgTimer.set(uncover, 400);
 }
 
+// Full screen: GENERATE's text keeps its lines, with the font shrunk until the longest fits.
+let lpGenTextObserver = null;
+function fitLpGenText(gen) {
+    if (!gen) return;
+    gen.style.fontSize = '';
+    gen.style.letterSpacing = '';
+    if (!gen.classList.contains('lp-fs-gen')) return;
+    const cs = getComputedStyle(gen);
+    const full = parseFloat(cs.fontSize) || 14, spacing = parseFloat(cs.letterSpacing) || 0;
+    let size = full;
+    while (gen.scrollWidth > gen.clientWidth + 1 && size > 8) {
+        size -= 0.5;
+        gen.style.setProperty('font-size', `${size}px`, 'important');
+        // Letter spacing shrinks with the font.
+        if (spacing) gen.style.setProperty('letter-spacing', `${(spacing * size / full).toFixed(2)}px`, 'important');
+    }
+    if (spacing && gen.scrollWidth > gen.clientWidth + 1) gen.style.setProperty('letter-spacing', '0px', 'important');
+}
+// Removes the closing full screen's copies of ABORT and GENERATE once it has gone (closeLivePreviewFullscreen()).
+let lpButtonsHome = null;
+// Run once the real buttons are back on the tab (a job that ended while they were in full screen).
+const lpAfterClose = [];
+function afterLpFullscreen(btn, fn) {
+    if (btn && btn.classList.contains('lp-fs-gen')) lpAfterClose.push(fn);
+    else fn();
+}
 // The real ABORT and GENERATE buttons are moved into the fullscreen view and back, so they look and behave exactly
 // as on the tab. No gestures; tapping the image, back or the job ending closes it.
 window.openLivePreviewFullscreen = function(fromImg) {
     if (lpFullscreenReturn || !fromImg.getAttribute('src')) return;
+    if (lpButtonsHome) lpButtonsHome();
     const inp = fromImg.id === 'inpLivePreviewImg';
     const abort = document.getElementById(inp ? 'abortInpGenBtn' : 'abortGenBtn');
     const gen = document.getElementById(inp ? 'inpGenBtn' : 'genBtn');
@@ -1592,32 +1768,70 @@ window.openLivePreviewFullscreen = function(fromImg) {
     lpFullscreenReturn = [abort, gen].map(el => ({ el, parent: el.parentNode, next: el.nextSibling }));
     abort.classList.add('lp-fs-abort');
     gen.classList.add('lp-fs-gen');
-    document.getElementById('lpFsControls').append(abort, gen);
+    // Close, GENERATE (centred), ABORT.
+    document.getElementById('lpFsControls').append(gen, abort);
+    if (lpGenTextObserver) lpGenTextObserver.disconnect();
+    lpGenTextObserver = new MutationObserver(() => fitLpGenText(gen));
+    lpGenTextObserver.observe(gen, { childList: true, characterData: true, subtree: true });
+    requestAnimationFrame(() => fitLpGenText(gen));
     document.getElementById('lpFullscreen').classList.remove('hidden');
     document.body.classList.add('lp-fs-open');
-    setLivePreviewStatusBarHidden(true);
+    syncStatusBar();
 };
-// Android's status bar is hidden while it's full screen, as in the image viewer.
-function setLivePreviewStatusBarHidden(hidden) {
+// The status bar stays hidden while Live Preview or the image viewer is full screen, and while the finished image
+// moves from one to the other (at most 3s).
+let statusBarHidden = false, viewerComing = false, viewerComingTimer = 0;
+function syncStatusBar() {
+    const viewer = document.getElementById('fullScreenModal');
+    const viewerOpen = !!(viewer && !viewer.classList.contains('hidden'));
+    if (viewerOpen) viewerComing = false;
+    const hidden = document.body.classList.contains('lp-fs-open') || !!resultCentreGal || viewerComing || viewerOpen;
+    if (hidden === statusBarHidden) return;
+    statusBarHidden = hidden;
+    // Its shadow (#statusBarScrim) goes with it.
+    document.body.classList.toggle('sb-hidden', hidden);
     const p = window.Capacitor?.Plugins?.ResolverDevice?.setStatusBarHidden?.({ hidden });
     if (p && p.catch) p.catch(() => {});
 }
 window.closeLivePreviewFullscreen = function() {
     if (!lpFullscreenReturn) return;
-    lpFullscreenReturn.forEach(({ el, parent, next }) => {
+    const ret = lpFullscreenReturn;
+    lpFullscreenReturn = null;
+    if (lpGenTextObserver) { lpGenTextObserver.disconnect(); lpGenTextObserver = null; }
+    // Still copies stay in the closing full screen so its toolbar doesn't change; the real buttons go back now.
+    const copies = ret.map(({ el }) => {
+        // Without the id (no duplicates), so its look is copied over inline.
+        const cs = getComputedStyle(el);
+        const c = el.cloneNode(true);
+        c.removeAttribute('id');
+        ['background', 'color', 'border-color', 'border-width', 'border-style', 'opacity', 'box-shadow', 'font-size', 'font-weight', 'font-family', 'letter-spacing']
+            .forEach(p => c.style.setProperty(p, cs.getPropertyValue(p), 'important'));
+        el.replaceWith(c);
+        return c;
+    });
+    ret.forEach(({ el, parent, next }) => {
         el.classList.remove('lp-fs-abort', 'lp-fs-gen');
+        el.style.fontSize = '';
+        el.style.letterSpacing = '';
         parent.insertBefore(el, next);
     });
-    lpFullscreenReturn = null;
+    lpAfterClose.splice(0).forEach(f => { try { f(); } catch (e) { console.error(e); } });
+    const home = () => {
+        if (lpButtonsHome !== home) return;
+        lpButtonsHome = null;
+        copies.forEach(c => c.remove());
+    };
+    lpButtonsHome = home;
     document.getElementById('lpFullscreen').classList.add('hidden');
     document.body.classList.remove('lp-fs-open');
-    coverUntilAppDrawn(document.getElementById('lpFullscreen'));
-    setLivePreviewStatusBarHidden(false);
+    coverUntilAppDrawn(document.getElementById('lpFullscreen'), home);
+    syncStatusBar();
 };
-function clearLivePreviewImage() {
+// keepFullscreen: Live Preview full screen stays open (the Queue's next job is coming).
+function clearLivePreviewImage(keepFullscreen) {
     livePreviewFrameSeq++;
     // The job is over, so a full screen preview closes too.
-    window.closeLivePreviewFullscreen?.();
+    if (!keepFullscreen) window.closeLivePreviewFullscreen?.();
     LIVE_PREVIEW_IMG_IDS.forEach(id => {
         const img = document.getElementById(id);
         if (!img) return;
@@ -1802,15 +2016,24 @@ async function syncJobServerOptions(job, serverOpts) {
     }
 }
 
-// Gallery badges for a job: HR, INP (Inpaint) or IMG (img2img), AD, CN (main ControlNet only).
-function galleryBadgesFor(job) {
+// Gallery badges for a job: HR, INP (Inpaint) or IMG (img2img), AD, CN (main ControlNet only), FC (Forge Couple).
+// adDetections: what the Progress Bridge reported ADetailer found in the whole job, or null if it never reported (no
+// bridge, or a report missed between polls). AD needs ADetailer in the request, and is left off only when it found nothing.
+function galleryBadgesFor(job, adDetections = null) {
     const badges = [];
     if (job.payload && job.payload.enable_hr) badges.push('HR');
-    if (job.payload && job.payload.alwayson_scripts && job.payload.alwayson_scripts.ADetailer) badges.push('AD');
+    if (job.payload && job.payload.alwayson_scripts && job.payload.alwayson_scripts.ADetailer && adDetections !== 0) badges.push('AD');
     if (job.payload && job.payload.alwayson_scripts && Object.keys(job.payload.alwayson_scripts).some(k => k.toLowerCase() === 'controlnet')) badges.push('CN');
+    if (job.payload && job.payload.alwayson_scripts && job.payload.alwayson_scripts['forge couple']) badges.push('FC');
     // A job without inpSubMode (queued before it existed) is img2img when it sends no mask.
     if (job.mode === 'inp') badges.push((job.inpSubMode || (job.payload && job.payload.mask ? 'inpaint' : 'img2img')) === 'img2img' ? 'IMG' : 'INP');
     return badges;
+}
+
+// The progress notification's name for a job's mode.
+function notificationLabel(job) {
+    if (job.mode === 'inp') return (job.inpSubMode || (job.payload && job.payload.mask ? 'inpaint' : 'img2img')) === 'img2img' ? 'Img2Img' : 'InPaint';
+    return { xl: 'SDXL', anima: 'Anima', qwen: 'Qwen', flux: 'Flux', krea: 'Krea' }[job.mode] || String(job.mode || '');
 }
 
 // Data Usage history label for a job.
@@ -1831,6 +2054,16 @@ async function serverLooksIdle(signal) {
 }
 
 async function runJob(job, isBatch = false) {
+    // A prompt with AND: no trailing commas, or Forge doesn't read the last part's weight (":0.5, " is text).
+    if (job && job.payload && typeof job.payload.prompt === 'string' && /\bAND\b/.test(job.payload.prompt)) job.payload.prompt = job.payload.prompt.replace(/[\s,]+$/, '');
+    // style::NAME in its prompts (styles.js).
+    if (window.StyleManager && StyleManager.expandTokens) StyleManager.expandTokens(job.payload);
+    // Tags doubled by wildcards, random:: or the scene model (ui.js).
+    if (typeof dedupeJobPayload === 'function') dedupeJobPayload(job);
+    // Tags in the negative out of the prompt; ~word out of both (ui.js).
+    if (typeof negativeBlocksJob === 'function') negativeBlocksJob(job);
+    // ADetailer detections the Progress Bridge reported in this job (galleryBadgesFor()); null until it reports.
+    let adDetectionsInJob = null;
     // --- UPDATED ISOLATION LOGIC ---
     const isInpaintJob = job.mode === 'inp';
 
@@ -1845,6 +2078,9 @@ async function runJob(job, isBatch = false) {
 
     btn.disabled = true;
     spinner.style.display = 'block';
+    runJobButtons.add(btnId);
+    if (btn.classList.contains('gen-busy')) btn.classList.remove('gen-busy');
+    refreshBusyButtons();
 
     // Declared outside try/finally so cleanup can always reach it.
     let progressPollTimeout = null;
@@ -1890,6 +2126,7 @@ async function runJob(job, isBatch = false) {
             try {
                 ({ data: opts } = await timedFetch(`${HOST}/sdapi/v1/options`, { headers: getHeaders() }, 15000, sig, true));
                 optsFailures = 0;
+                if (opts && 'samples_format' in opts) window.ImageFormat?.note(opts.samples_format);
             } catch (e) {
                 if (e.name === 'AbortError') throw e;
                 if (++optsFailures >= 5) throw connectionLostError("Couldn't reach the server: " + e.message);
@@ -1942,7 +2179,7 @@ async function runJob(job, isBatch = false) {
         // Re-asserts "SETTLING..." as the request goes out.
         btn.innerText = "SETTLING...";
         // A queue keeps showing its running step count between jobs.
-        if (!isBatch) await updateBatchNotification("Starting Generation", true, "Initializing...");
+        if (!isBatch) await updateBatchNotification("Settling...", true, "");
 
         // Base and Hi-Res second-pass step totals come from settings, not Forge's progress. img2img/Inpaint under 1.0 denoising run fewer steps (same formula as the Denoising hint).
         const effectiveBaseSteps = job.mode === 'inp' && typeof job.payload.denoising_strength === 'number'
@@ -1951,6 +2188,10 @@ async function runJob(job, isBatch = false) {
         const perImagePhases = [effectiveBaseSteps];
         if (job.payload.enable_hr) perImagePhases.push(job.payload.hr_second_pass_steps || 0);
         const nIterCount = job.payload.n_iter || 1;
+        job.skippedIters = new Set();
+        // A Batch Count split for wildcards (wildcards.js) counts across its requests.
+        skipState = job.splitOf ? { job, iter: job.splitOf[0], total: job.splitOf[1], split: true } : { job, iter: 1, total: nIterCount };
+        paintSkip();
         // One image's known phases only; ADetailer passes are tracked separately per image.
         const knownPhaseTotals = perImagePhases;
         const deterministicPerImage = perImagePhases.reduce((a, b) => a + b, 0);
@@ -2003,6 +2244,12 @@ async function runJob(job, isBatch = false) {
         // Per-batch step total: sums each unit's count as unit_index or batch_index changes, within the current image only.
         let adCumulativeCount = 0;
         let lastSeenUnitIndex = null;
+        // What ADetailer found in the image being made (Progress Bridge), for the notification: "[1 face, 2 hands]".
+        let adFound = {}, adFoundImage = 0;
+        const adNote = () => {
+            const p = adFoundImage === currentBatchNumber ? Object.values(adFound).map(f => `${f.n} ${f.n === 1 ? f.lab.singular : f.lab.plural}`) : [];
+            return p.length ? ` [${p.join(', ')}]` : '';
+        };
         let lastSeenBatchIndex = null; // batch-size's own equivalent of unit_index - distinguishes image slots sharing one base pass
         // 1-based, shown as "Batch N/M" when nIterCount > 1. Reset is bounded at nIterCount - 1 boundaries.
         let currentBatchNumber = 1;
@@ -2029,6 +2276,7 @@ async function runJob(job, isBatch = false) {
         const startNewBatch = () => {
             completedBatchesStepsSoFar += maxDisplayTotalShown;
             currentBatchNumber = Math.min(currentBatchNumber + 1, nIterCount);
+            if (skipState && skipState.job === job) { skipState.iter = currentBatchNumber; paintSkip(); }
             phaseIndex = 0;
             accumulatedKnownSteps = 0;
             adCumulativeCount = 0;
@@ -2152,7 +2400,12 @@ async function runJob(job, isBatch = false) {
                     if (jobNoChanged) suppressTotalChangedUntilProgress = true;
                     // A genuine image boundary resets to a fresh per-image display ("Batch N/M - Step X/Y"), since Forge's boundary signals are inconsistent.
                     if (isNewPass) {
-                        if (lastJobNo !== -1) {
+                        if (lastJobNo !== -1 && job.skipAdvance === currentBatchNumber) {
+                            // The skipped image ends here, whatever phase it was in.
+                            job.skipAdvance = null;
+                            pendingBoundaryCheck = false;
+                            if (currentBatchNumber < nIterCount) startNewBatch();
+                        } else if (lastJobNo !== -1) {
                             // Banks any tiled-upscale contribution (visible only through the bridge) into the permanent accumulator, so the next phase continues from it. Includes a still-active tile phase, just in case.
                             if (tilePhaseActive) tilesBankedThisGap += currentTileTotal;
                             if (tilesBankedThisGap > 0) {
@@ -2233,6 +2486,10 @@ async function runJob(job, isBatch = false) {
                                 const mergeActive = unitConfig && unitConfig.ad_mask_merge_invert !== 'None';
                                 // Passes are capped by Max Masks first, then collapsed to one by merge. The toast keeps the raw detected count.
                                 const processedCount = adetailerProcessedCount(bridge.adetailer.count, unitConfig);
+                                adDetectionsInJob = (adDetectionsInJob || 0) + bridge.adetailer.count;
+                                if (adFoundImage !== currentBatchNumber) { adFound = {}; adFoundImage = currentBatchNumber; }
+                                const found = bridge.adetailer.count > 0 && guessAdetailerLabel(unitConfig?.ad_model);
+                                if (found) (adFound[found.singular] = adFound[found.singular] || { lab: found, n: 0 }).n += bridge.adetailer.count;
                                 adCumulativeCount += mergeActive ? Math.min(1, processedCount) : processedCount;
                                 // Skipped while hidden: queued toasts would all play on returning to the app.
                                 if (bridge.adetailer.count > 0 && Toast && !document.hidden) {
@@ -2261,13 +2518,14 @@ async function runJob(job, isBatch = false) {
                     }
                 } else if (data.progress > 0) {
                     // Fallback with no per-job state yet (e.g. model still loading): scaled against the current batch's base+Hi-Res total only.
-                    const rawStep = Math.round(data.progress * deterministicPerImage);
+                    // None before Forge reports sampling steps (LoRAs and prompt still being prepared): SETTLING... stays.
+                    const rawStep = data.state && data.state.sampling_steps > 0 ? Math.round(data.progress * deterministicPerImage) : 0;
                     maxStepShown = Math.min(Math.max(maxStepShown, rawStep), deterministicPerImage);
                     currentStepInBatch = maxStepShown;
                     displayTotal = deterministicPerImage;
                 } else {
                     if (btn.innerText.includes("Step")) {
-                        if (!isBatch) updateBatchNotification("Finalizing...", false, "Receiving Images...");
+                        if (!isBatch) updateBatchNotification("Finalizing...", false, "");
                     }
                     return;
                 }
@@ -2317,7 +2575,7 @@ async function runJob(job, isBatch = false) {
 
                 const msg = `Step ${currentStepInBatch} / ${displayTotal}`;
                 // Literal line break rather than relying on word wrap.
-                const batchLabel = nIterCount > 1 ? `Batch ${currentBatchNumber}/${nIterCount}\n` : '';
+                const batchLabel = nIterCount > 1 ? `Batch ${currentBatchNumber}/${nIterCount}\n` : job.splitOf ? `Batch ${job.splitOf[0]}/${job.splitOf[1]}\n` : '';
 
                 // Compares the full message, and appends a "still working" hint when the same message repeats for several polls.
                 if (msg !== lastShownMsg) {
@@ -2331,9 +2589,11 @@ async function runJob(job, isBatch = false) {
                 if (stalledAtHrBoundary && likelyTilePhase) {
                     displayMsg = 'UPSCALING...';
                 } else if (stalledAtHrBoundary) {
-                    displayMsg = `${msg} (Processing...)`;
+                    // In a batch it replaces the step line, as UPSCALING... does, so the label stays two lines.
+                    displayMsg = batchLabel ? 'PROCESSING...' : `${msg} (Processing...)`;
                 }
-                btn.innerText = batchLabel + displayMsg;
+                // Nothing done yet (Forge still loading or preparing): SETTLING..., not "Step 0".
+                btn.innerText = currentStepInBatch === 0 && completedBatchesStepsSoFar === 0 ? 'SETTLING...' : batchLabel + displayMsg;
                 // The job queue needs the whole-job total, so earlier images' contributions are added back to the per-image display.
                 lastDisplayTotal = completedBatchesStepsSoFar + displayTotal;
 
@@ -2344,10 +2604,11 @@ async function runJob(job, isBatch = false) {
                     let batchTotalDisplay = totalBatchSteps + queueADetailerGrowthCarried + thisJobADetailerGrowth;
                     maxBatchTotalShown = Math.max(maxBatchTotalShown, batchTotalDisplay);
                     batchTotalDisplay = maxBatchTotalShown;
-                    document.getElementById('queueProgressText').innerText = `Step ${actualTotal} / ${batchTotalDisplay}`;
-                    updateBatchNotification(`Queue ${queueJobsDone + 1}/${queueJobsDone + queueState.ongoing.length}`, false, `${actualTotal} / ${batchTotalDisplay}`);
+                    document.getElementById('queueProgressText').innerText = `${actualTotal} / ${batchTotalDisplay} Steps`;
+                    if (window.QueueUI) QueueUI.progress(completedBatchesStepsSoFar + currentStepInBatch, completedBatchesStepsSoFar + displayTotal + (nIterCount - currentBatchNumber) * deterministicPerImage, currentBatchNumber, queueState.ongoing[0]);
+                    updateBatchNotification(`Queue ${queueJobsDone + 1}/${queueJobsDone + queueState.ongoing.length}`, false, `${actualTotal} / ${batchTotalDisplay}${adNote()}`);
                 } else {
-                    updateBatchNotification(nIterCount > 1 ? `Batch ${currentBatchNumber}/${nIterCount}` : "Generating...", false, msg);
+                    updateBatchNotification(nIterCount > 1 ? `${notificationLabel(job)} ${currentBatchNumber}/${nIterCount}` : job.splitOf ? `${notificationLabel(job)} ${job.splitOf[0]}/${job.splitOf[1]}` : notificationLabel(job), false, msg + adNote());
                 }
             } catch (e) {
                 jobAbort.serverBusy = false;
@@ -2379,7 +2640,8 @@ async function runJob(job, isBatch = false) {
                     method: 'POST',
                     headers: getHeaders(),
                     // The ID lets the preview endpoint find this job (fetchInternalPreview()); the stored payload is left as it is.
-                    body: JSON.stringify({ ...job.payload, force_task_id: previewEndpoint.taskId, ...livePreviewJobSettings(job.payload) }),
+                    // Commas beside BREAK left out (payloadForForge(), utils.js).
+                    body: JSON.stringify({ ...payloadForForge(job.payload), force_task_id: previewEndpoint.taskId, ...livePreviewJobSettings(job.payload) }),
                     signal: sig,
                     preferNative: true
                 }).finally(() => { jobAbort.replyPending = false; });
@@ -2435,11 +2697,19 @@ async function runJob(job, isBatch = false) {
         dlog(`${data.images ? data.images.length : 0} image(s) received`);
         if (data.images) {
             const expectedImages = (job.payload.batch_size || 1) * (job.payload.n_iter || 1);
+            // Skipped images (SKIP) are left out; the batch grid is then not made.
+            if (job.skippedIters && job.skippedIters.size && data.images.length === expectedImages) {
+                const per = job.payload.batch_size || 1;
+                data.images = data.images.filter((_, i) => !job.skippedIters.has(Math.floor(i / per) + 1));
+            }
 
             // Shown first; the History save (saveImageToDBInBackground(), utils.js) runs behind it.
-            const jobBadges = galleryBadgesFor(job);
+            const jobBadges = galleryBadgesFor(job, adDetectionsInJob);
+            const sourceUrl = job.payload.init_images && job.payload.init_images[0] ? base64ToDataUrl(job.payload.init_images[0]) : null;
             const addResult = (finalB64, isGrid) => {
-                const saved = saveImageToDBInBackground(finalB64, null, isGrid ? null : jobBadges);
+                const saved = saveImageToDBInBackground(finalB64, null, isGrid ? null : jobBadges, isGrid ? null : job.wcPicks);
+                if (isBatch && queueThumbJob && window.QueueUI) QueueUI.thumb(queueThumbJob, finalB64, saved, isGrid);
+                if (sourceUrl && !isGrid && window.ViewerCompare) ViewerCompare.remember(finalB64, sourceUrl);
 
                 const img = document.createElement('img');
                 img.src = finalB64;
@@ -2479,9 +2749,26 @@ async function runJob(job, isBatch = false) {
                     shown = true;
                     requestAnimationFrame(() => {
                         img.style.display = '';
+                        stripCopyLater(img, finalB64, gal);
                         if (isGrid) return;
                         resultRevealsPending--;
-                        if (typeof clearLivePreviewImage === 'function') clearLivePreviewImage();
+                        // Live Preview full screen: with another Queue job to come it stays, showing this result until that
+                        // job's frames; otherwise the newest result (a batch's last) opens in the viewer once all are shown.
+                        const lpStays = lpFullscreenReturn && isBatch && queueState.ongoing.length > 1;
+                        if (lpStays) document.getElementById('lpFsImage').src = finalB64;
+                        else if (lpFullscreenReturn) resultCentreGal = gal;
+                        if (typeof clearLivePreviewImage === 'function') clearLivePreviewImage(lpStays);
+                        if (resultCentreGal === gal && !resultRevealsPending) {
+                            resultCentreGal = null;
+                            const newest = gal.querySelector('.gen-result:not([data-grid])');
+                            scrollToForTap(newest, 'centre');
+                            if (newest) {
+                                viewerComing = true;
+                                clearTimeout(viewerComingTimer);
+                                viewerComingTimer = setTimeout(() => { viewerComing = false; syncStatusBar(); }, 3000);
+                                newest.click();
+                            } else syncStatusBar();
+                        }
                     });
                 };
                 (img.decode ? img.decode() : Promise.resolve()).catch(() => {}).then(reveal);
@@ -2490,14 +2777,15 @@ async function runJob(job, isBatch = false) {
                 if (autoDl && autoDl.checked) saveToMobileGallery(finalB64);
             };
 
+            if (data.images.length) window.ImageFormat?.checkResult(data.images[0]);
             for (const b64 of data.images) {
-                addResult("data:image/png;base64," + b64, false);
+                addResult(base64ToDataUrl(b64), false);
             }
-            if (window.DataUsage && data.images.length) DataUsage.addImages('gen', data.images.length, "data:image/png;base64," + data.images[0]);
+            if (window.DataUsage && data.images.length) DataUsage.addImages('gen', data.images.length, base64ToDataUrl(data.images[0]));
 
             // Show & Download Batch Grids: Forge was asked for no grid, so one is built here from the received images (see batchGridsEnabled(), utils.js), only when exactly the expected number came back. Not awaited, so the job and queue don't wait; added when ready.
             if (job.gridMaxEdge > 0 && expectedImages > 1 && data.images.length === expectedImages) {
-                const gridSources = data.images.map(b => "data:image/png;base64," + b);
+                const gridSources = data.images.map(base64ToDataUrl);
                 (async () => {
                     try {
                         const gridUrl = await buildLocalBatchGrid(gridSources, job.gridMaxEdge);
@@ -2512,17 +2800,24 @@ async function runJob(job, isBatch = false) {
         throw e;
     } finally {
         dlog('job end');
+        // Skipped, with the next image of its set to come: the last frame stays until that image's arrives.
+        const frameStays = !sig.aborted && job.splitOf && job.splitOf[0] < job.splitOf[1] && job.skippedIters && job.skippedIters.size > 0;
+        if (skipState && skipState.job === job) { skipState = null; paintSkip(); }
         activeJobs.delete(jobAbort);
         // Also stops any poll still in flight from relabelling the button.
         jobAbort.abort();
         if (progressPollTimeout) BgTimer.clear(progressPollTimeout);
         if (progressVisibilityHandler) document.removeEventListener('visibilitychange', progressVisibilityHandler);
         // No stale in-progress frame outlives the job; a result still decoding clears it when it's shown (addResult()).
-        if (!resultRevealsPending && typeof clearLivePreviewImage === 'function') clearLivePreviewImage();
+        if (!resultRevealsPending && !frameStays && typeof clearLivePreviewImage === 'function') clearLivePreviewImage();
         spinner.style.display = 'none';
-        btn.disabled = false;
-        // --- NEO HOOK: BUTTON TEXT ---
-        btn.innerText = getGenerateButtonLabel(currentMode);
+        afterLpFullscreen(btn, () => {
+            btn.disabled = false;
+            // --- NEO HOOK: BUTTON TEXT ---
+            btn.innerText = getGenerateButtonLabel(currentMode);
+            runJobButtons.delete(btnId);
+            refreshBusyButtons();
+        });
     }
 }
 
@@ -2532,36 +2827,85 @@ async function runJob(job, isBatch = false) {
 
 // True while a loadGallery() call waits on pending saves; a second call shares the queued reload.
 let galleryReloadQueued = false;
+// Only the latest load swaps its grid in.
+let galleryLoadSeq = 0;
+// Waiting for the next grid swap (loadGallery(onShown)).
+const galleryShownCallbacks = [];
+// History's grid is rebuilt in the background once new images are saved and the app is idle, so it opens up to date.
+let galleryRefreshQueued = false;
+function scheduleGalleryRefresh() {
+    if (galleryRefreshQueued) return;
+    galleryRefreshQueued = true;
+    const run = () => { galleryRefreshQueued = false; window.loadGallery(); };
+    if (window.requestIdleCallback) requestIdleCallback(run, { timeout: 5000 });
+    else setTimeout(run, 1000);
+}
 
-window.loadGallery = function() {
+// onShown runs as the new grid is swapped in (in the same step), or straight away if there's nothing to load.
+window.loadGallery = function(onShown) {
     const grid = document.getElementById('savedGalleryGrid');
-    if (!grid) return;
+    if (!grid) { if (onShown) onShown(); return; }
     // Results are shown before they are saved (saveImageToDBInBackground(), utils.js), so wait for pending saves first.
     if (imageSavesPending > 0) {
+        if (onShown) galleryShownCallbacks.push(onShown);
         if (!galleryReloadQueued) {
             galleryReloadQueued = true;
             imageSaveChain.then(() => { galleryReloadQueued = false; window.loadGallery(); });
         }
         return;
     }
+    if (onShown) galleryShownCallbacks.push(onShown);
+    const shown = () => galleryShownCallbacks.splice(0).forEach(f => { try { f(); } catch (e) { console.error(e); } });
     const paginationRow = document.getElementById('galleryPaginationRow');
-    // Hide pagination until the load has resolved.
-    if (paginationRow) paginationRow.classList.add('hidden');
-
-    if (!db) return;
-    db.transaction(["images"], "readonly").objectStore("images").getAll().onsuccess = e => {
-        const imgs = e.target.result;
+    if (!db) { shown(); return; }
+    const seq = ++galleryLoadSeq;
+    // The light copy (gallerylite.js), made once for galleries saved before it; the full store if it can't be had.
+    const note = text => { grid.innerHTML = `<div class="empty-note" style="margin-top:20px;grid-column:1/-1;">${text}</div>`; };
+    const lite = window.GalleryLite ? GalleryLite.list((i, n) => { if (seq === galleryLoadSeq) note(`Preparing History... ${i} / ${n}`); }) : Promise.resolve(null);
+    lite.then(list => {
+        if (seq !== galleryLoadSeq) return;
+        if (list) { GalleryLite.logMemory(list.length); show(list); return; }
+        db.transaction(["images"], "readonly").objectStore("images").getAll().onsuccess = e => show(e.target.result);
+    });
+    const show = async imgs => {
+        if (seq !== galleryLoadSeq) return;
+        // ★: favourites only (galleryfavs.js).
+        const favOnly = !!(window.GalleryFavs && GalleryFavs.only());
+        if (window.GalleryFavs && imgs) {
+            imgs = GalleryFavs.filter(imgs);
+            if (favOnly && !imgs.length) {
+                if (paginationRow) paginationRow.classList.add('hidden');
+                grid.innerHTML = '<div class="empty-note" style="margin-top:20px;grid-column:1/-1;">Empty</div>';
+                allGalleryImagesData = [];
+                shown();
+                return;
+            }
+        }
+        if (window.HistorySearch && HistorySearch.active() && imgs && imgs.length) {
+            imgs = (await HistorySearch.filter(imgs.slice().reverse())).reverse();
+            if (seq !== galleryLoadSeq) return;
+            if (!imgs.length) {
+                if (paginationRow) paginationRow.classList.add('hidden');
+                grid.innerHTML = '<div class="empty-note" style="margin-top:20px;grid-column:1/-1;">No matches</div>';
+                allGalleryImagesData = [];
+                shown();
+                return;
+            }
+        }
 
         // Built off-screen and swapped in atomically.
         const newContent = document.createDocumentFragment();
 
         if (!imgs || imgs.length === 0) {
             const emptyMsg = document.createElement('div');
-            emptyMsg.style.cssText = 'text-align:center;color:#777;margin-top:20px;grid-column:1/-1;';
-            emptyMsg.textContent = 'No images';
+            emptyMsg.className = 'empty-note';
+            emptyMsg.style.cssText = 'margin-top:20px;grid-column:1/-1;';
+            emptyMsg.textContent = 'Empty';
             newContent.appendChild(emptyMsg);
+            if (paginationRow) paginationRow.classList.add('hidden');
             grid.innerHTML = "";
             grid.appendChild(newContent);
+            shown();
             // DELETE ALL is greyed out when the gallery is empty (set on both branches since this re-runs on every load).
             const clearAllBtn = document.getElementById('galClearAllBtn');
             if (clearAllBtn) clearAllBtn.disabled = true;
@@ -2574,42 +2918,58 @@ window.loadGallery = function() {
         const reversed = imgs.reverse();
         // The full all-pages dataset for the fullscreen viewer's cross-page navigation.
         allGalleryImagesData = reversed;
-        const totalPages = Math.ceil(reversed.length / ITEMS_PER_PAGE);
+        const totalPages = Math.ceil(reversed.length / galleryPerPage());
         if (galleryPage < 1) galleryPage = 1;
         if (galleryPage > totalPages) galleryPage = totalPages;
 
-        const start = (galleryPage - 1) * ITEMS_PER_PAGE;
-        const end = start + ITEMS_PER_PAGE;
+        const start = (galleryPage - 1) * galleryPerPage();
+        const end = start + galleryPerPage();
         const pageItems = reversed.slice(start, end);
+        const thumbs = [];
+        // Favourites are one group, without date sections.
+        const dateSections = window.GalleryDates && !favOnly ? GalleryDates.sections(pageItems) : null;
 
         pageItems.forEach((item, index) => {
             const container = document.createElement('div');
             container.style.position = 'relative';
             const img = document.createElement('img');
-            // Uses the small thumbnail (generateThumbnail(), utils.js) when one exists, falling back to the full image. Fullscreen still uses item.data.
+            // The small thumbnail (generateThumbnail(), utils.js); the full image only if there's none.
             img.src = item.thumbnail || item.data;
+            // The viewer's full image starts loading as the finger goes down.
+            if (window.GalleryLite) img.addEventListener('pointerdown', () => GalleryLite.prefetch(item.id), { passive: true });
             img.className = 'gal-thumb';
-            img.loading = 'lazy';
+            // A long press (and slide) is selection's: not Android's image drag.
+            img.draggable = false;
+            // Decoded before the grid is swapped in (below), so the page appears with its thumbnails.
+            img.loading = 'eager';
+            img.decoding = 'sync';
+            thumbs.push(img);
             img.onclick = () => {
                 if (isSelectionMode) toggleSelectionForId(item.id, container);
                 else window.openFullscreenFromGallery(index);
             };
+            // Long press: selection mode with this image selected; sliding on selects a run (galleryDragSelect).
+            attachLongPress(img, () => {
+                // Already selecting and this one's selected: the press (and slide) unselects instead.
+                const unselect = isSelectionMode && selectedImageIds.has(item.id);
+                if (!isSelectionMode) window.toggleGallerySelectionMode();
+                galleryDragSelect.start(container, unselect);
+            });
             const tick = document.createElement('div');
             tick.className = 'gal-tick hidden';
-            // The tick icon takes its colour from .gal-tick (style.css), i.e. the per-mode accent colour. Fill stays black for contrast.
-            tick.innerHTML = '<i data-lucide="check-circle" size="24" fill="black"></i>';
-            tick.style.position = 'absolute';
-            tick.style.top = '5px';
-            tick.style.right = '5px';
             // Selection-mode circle.
             const ring = document.createElement('div');
             ring.className = 'gal-select-ring';
             container.appendChild(img);
             container.appendChild(ring);
             container.appendChild(tick);
-            // Gallery badges: HR, INP/IMG, AD, CN, UP.
-            const badgeNames = [...(item.badges || []), ...(item.upscale ? ['UP'] : [])];
-            const badgeOrder = ['HR', 'INP', 'IMG', 'AD', 'CN', 'UP'];
+            if (window.GalleryFavs) container.appendChild(GalleryFavs.star(item.id));
+            // Gallery badges: the format (JPG / PNG / WEBP), HR, INP/IMG, AD, CN, FC, UP; each can be turned off (Config >
+            // Interface > Gallery badges). A light copy from before formats were noted knows only JPEG or not (PNG then).
+            const fmt = item.fmt || (item.jpg !== undefined ? (item.jpg ? 'jpg' : 'png') : ({ 'image/jpeg': 'jpg', 'image/webp': 'webp' }[imageMimeFromBase64(item.data || '')] || 'png'));
+            const badgesOff = galleryBadgesOff();
+            const badgeNames = [...(item.badges || []), ...(item.upscale ? ['UP'] : []), fmt.toUpperCase()].filter(n => !badgesOff.has(n));
+            const badgeOrder = ['JPG', 'PNG', 'WEBP', 'HR', 'INP', 'IMG', 'AD', 'CN', 'FC', 'UP'];
             if (badgeNames.length) {
                 const badgeRow = document.createElement('div');
                 badgeRow.className = 'gal-badges';
@@ -2627,58 +2987,210 @@ window.loadGallery = function() {
                 container.classList.add('gal-selected');
             }
             container.dataset.id = item.id;
+            if (dateSections) dateSections.before(item, newContent);
             newContent.appendChild(container);
         });
 
+        const ready = i => new Promise(r => { if (i.complete && i.naturalWidth) r(); else { i.addEventListener('load', r, { once: true }); i.addEventListener('error', r, { once: true }); } })
+            .then(() => (i.decode ? i.decode() : null)).catch(() => {});
+        await Promise.race([
+            Promise.all(thumbs.map(ready)),
+            new Promise(r => setTimeout(r, 3000))
+        ]);
+        if (seq !== galleryLoadSeq) return;
         // Atomic swap of the grid.
         grid.innerHTML = "";
         grid.appendChild(newContent);
+        shown();
 
-        document.getElementById('pageIndicator').innerText = `Page ${galleryPage} / ${totalPages}`;
+        document.getElementById('pageIndicator').textContent = `${galleryPage} / ${totalPages}`;
         document.getElementById('prevPageBtn').disabled = galleryPage === 1;
         document.getElementById('nextPageBtn').disabled = galleryPage === totalPages;
         lucide.createIcons();
         // Pagination is revealed only when there is more than one page.
         if (paginationRow) paginationRow.classList.toggle('hidden', totalPages <= 1);
+        // The page controls' place follows the new page.
+        placeGalleryControls();
+        updateGallerySelectAll();
     }
 }
 
+// Saved on blur, at least 1; stays on the page holding the current first image.
+window.saveGalleryPerPage = function(el) {
+    const typed = parseInt(el.value, 10);
+    const n = isNaN(typed) ? DEFAULT_ITEMS_PER_PAGE : Math.max(1, typed);
+    el.value = n;
+    const firstShown = (galleryPage - 1) * galleryPerPage();
+    localStorage.setItem('bojroGalleryPerPage', String(n));
+    galleryPage = Math.floor(firstShown / n) + 1;
+    loadGallery();
+};
+
 window.changeGalleryPage = function(dir) {
     galleryPage += dir;
-    loadGallery();
+    // At the top of the new page, once it's shown.
+    loadGallery(() => window.scrollTo({ top: 0, behavior: 'instant' }));
+};
+
+// Page controls floating above the dock while the ones under the grid are off screen.
+(function () {
+    let float = null, queued = false;
+    const arrow = d => `<svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="${d}" fill="currentColor"/></svg>`;
+    function build() {
+        float = document.createElement('div');
+        float.id = 'galFloatPager';
+        float.className = 'gal-float-pager hidden';
+        float.innerHTML = `<button type="button" class="btn-small gal-page-btn" data-d="-1" aria-label="Previous page">${arrow('M16 4 6 12l10 8z')}</button>` +
+            `<span class="gal-float-num"></span><button type="button" class="btn-small gal-page-btn" data-d="1" aria-label="Next page">${arrow('m8 4 10 8-10 8z')}</button>`;
+        float.querySelectorAll('button').forEach(b => { b.onclick = () => changeGalleryPage(+b.dataset.d); });
+        document.body.appendChild(float);
+    }
+    function paint() {
+        queued = false;
+        const view = document.getElementById('view-gal'), rows = document.getElementById('galleryPaginationRow'), dock = document.querySelector('.glass-dock');
+        if (!view || !rows || !dock) return;
+        if (!float) build();
+        const d = dock.getBoundingClientRect(), r = rows.getBoundingClientRect();
+        const show = !!view.getClientRects().length && !rows.classList.contains('hidden')
+            && (r.top > d.top - 4 || r.bottom < 0);
+        float.classList.toggle('hidden', !show);
+        if (!show) return;
+        float.style.bottom = `${Math.round(window.innerHeight - d.top + 10)}px`;
+        float.querySelector('.gal-float-num').textContent = document.getElementById('pageIndicator')?.textContent || '';
+        const [p, b] = [document.getElementById('prevPageBtn'), document.getElementById('nextPageBtn')];
+        float.querySelector('[data-d="-1"]').disabled = !!(p && p.disabled);
+        float.querySelector('[data-d="1"]').disabled = !!(b && b.disabled);
+    }
+    const queue = () => { if (!queued) { queued = true; requestAnimationFrame(paint); } };
+    window.addEventListener('scroll', queue, { passive: true });
+    window.addEventListener('resize', queue);
+    document.addEventListener('DOMContentLoaded', () => {
+        // History's own changes (a tab switch, a page drawn, the page number); windows sit above it anyway.
+        const view = document.getElementById('view-gal');
+        if (view) new MutationObserver(queue).observe(view, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['class', 'style'] });
+    });
+    window.paintGalleryFloatPager = queue;
+})();
+
+// Gallery badges turned off (Config > Interface > Gallery badges): PNG at first; all, if the old switch was off.
+const GALLERY_BADGES = [['AD', 'ADetailer found something'], ['CN', 'ControlNet'], ['FC', 'Forge Couple'], ['HR', 'Hi-Res Fix'], ['IMG', 'img2img'],
+    ['INP', 'Inpaint'], ['JPG', 'JPEG image'], ['PNG', 'PNG image'], ['UP', 'Upscaled'], ['WEBP', 'WEBP image']];
+function galleryBadgesOff() {
+    try {
+        const v = JSON.parse(localStorage.getItem('bojroGalleryBadgeOff'));
+        if (Array.isArray(v)) return new Set(v);
+    } catch (e) {}
+    return new Set(localStorage.getItem('bojroGalleryBadgesOff') === 'true' ? GALLERY_BADGES.map(b => b[0]) : ['PNG']);
+}
+window.openGalleryBadges = function() {
+    document.getElementById('galleryBadgesModal')?.remove();
+    const off = galleryBadgesOff();
+    const m = document.createElement('div');
+    m.id = 'galleryBadgesModal';
+    m.className = 'modal';
+    m.innerHTML = `<div class="modal-content"><div class="modal-header"><h3>Gallery Badges</h3><div style="display:flex; gap:8px; align-items:center;"><button type="button" class="close-btn" aria-label="Close">×</button></div></div>
+        <div class="col" style="gap: 4px;">${GALLERY_BADGES.map(([n, d]) => `<div class="gb-row"><label class="gb-name" for="gb-${n}"><span class="gal-badge">${n}</span><span>${d}</span></label><input type="checkbox" id="gb-${n}" class="bojro-switch" data-b="${n}"${off.has(n) ? '' : ' checked'}></div>`).join('')}</div></div>`;
+    const close = () => m.remove();
+    m.querySelector('.close-btn').onclick = close;
+    let down = false;
+    m.addEventListener('pointerdown', e => { down = e.target === m; });
+    m.addEventListener('click', e => { if (down && e.target === m) close(); down = false; });
+    m.querySelectorAll('input[data-b]').forEach(i => {
+        i.onchange = () => {
+            const now = galleryBadgesOff();
+            if (i.checked) now.delete(i.dataset.b); else now.add(i.dataset.b);
+            try { localStorage.setItem('bojroGalleryBadgeOff', JSON.stringify([...now])); } catch (e) {}
+            if (typeof window.loadGallery === 'function' && !document.getElementById('view-gal')?.classList.contains('hidden')) window.loadGallery();
+        };
+    });
+    document.body.appendChild(m);
+};
+
+// A thumbnail's badges go smaller only when they don't fit on one line.
+function fitGalleryBadges() {
+    document.querySelectorAll('#savedGalleryGrid .gal-badges').forEach(row => {
+        row.classList.remove('compact');
+        if (row.scrollWidth > row.clientWidth + 0.5) row.classList.add('compact');
+    });
 }
 
+// A short page is stretched so its page controls sit just above the dock; a long one keeps them under its last row.
+function placeGalleryControls() {
+    const view = document.getElementById('view-gal');
+    const rows = document.getElementById('galleryPaginationRow');
+    const dock = document.querySelector('.glass-dock');
+    if (!view || !rows || !dock || !view.getClientRects().length) return;
+    fitGalleryBadges();
+    const grid = document.getElementById('savedGalleryGrid');
+    const header = document.getElementById('galClearAllBtn')?.closest('.row');
+    view.style.minHeight = '';
+    if (grid) grid.style.marginBottom = '';
+    if (header) header.style.marginBottom = '10px'; // its inline value
+    if (rows.classList.contains('hidden')) return;
+    const d = dock.getBoundingClientRect();
+    const gap = Math.max(12, Math.round(window.innerWidth - d.right));
+    let line = d.top - gap;
+    const top = view.getBoundingClientRect().top + window.scrollY;
+    // The dock's room under the page can exceed the space under the line, making a page that fits scroll; the line comes
+    // up by the difference, measured with the page held to the screen's height.
+    view.style.minHeight = `${Math.max(0, Math.round(line - top))}px`;
+    const room = document.documentElement.scrollHeight - (rows.getBoundingClientRect().bottom + window.scrollY);
+    const extra = Math.ceil(room - (window.innerHeight - line));
+    if (extra > 0 && extra <= 40) line -= extra;
+    view.style.minHeight = `${Math.max(0, Math.round(line - top))}px`;
+    // Up to 20px too long: the 10px gaps above the controls, then under the header, shrink so it fits.
+    const over = Math.round(rows.getBoundingClientRect().bottom + window.scrollY - line);
+    if (grid && header && over > 0 && over <= 20) {
+        grid.style.marginBottom = `${Math.max(0, 10 - over)}px`;
+        header.style.marginBottom = `${10 - Math.max(0, over - 10)}px`;
+    }
+}
+window.addEventListener('resize', () => placeGalleryControls());
+if (typeof ResizeObserver === 'function') {
+    let queued = false;
+    const ro = new ResizeObserver(() => {
+        if (queued) return;
+        queued = true;
+        requestAnimationFrame(() => { queued = false; placeGalleryControls(); });
+    });
+    // The grid, the header row (it changes for selection) and the dock.
+    [document.getElementById('savedGalleryGrid'), document.getElementById('galClearAllBtn')?.closest('.row'), document.querySelector('.glass-dock')]
+        .forEach(el => { if (el) ro.observe(el); });
+}
+// The selection bar over the dock while selecting.
+function setGallerySelectBar(on) {
+    document.getElementById('galSelectBar')?.classList.toggle('hidden', !on);
+    document.querySelector('.glass-dock')?.classList.toggle('selecting', on);
+    // The header's select-all circle first, as it can change the page's layout.
+    updateGallerySelectAll();
+    placeGalleryControls();
+}
+
+// Selection mode starts with a long press on a thumbnail, and ends with CANCEL, back, leaving History or deleting.
 window.toggleGallerySelectionMode = function() {
     isSelectionMode = !isSelectionMode;
-    const btn = document.getElementById('galSelectBtn');
-    const delBtn = document.getElementById('galDeleteBtn');
-    
-    // Kept as a variable for a minimal diff.
     const clearBtn = document.getElementById('galClearAllBtn');
 
     if (isSelectionMode) {
-        btn.style.background = "var(--accent-primary)";
-        btn.style.color = "white";
-        delBtn.classList.remove('hidden');
         document.getElementById('savedGalleryGrid')?.classList.add('selecting');
-        
-        // HIDE Delete All button to save space
+        // DELETE ALL gives way to the select-all circle.
         if(clearBtn) clearBtn.style.display = 'none';
-        
+        document.getElementById('galSearchBtn')?.classList.add('hidden');
+        document.getElementById('galDateBtn')?.classList.add('hidden');
+        document.getElementById('galFavBtn')?.classList.add('hidden');
     } else {
-        btn.style.background = "var(--input-bg)";
-        btn.style.color = "var(--text-main)";
-        delBtn.classList.add('hidden');
-        
         selectedImageIds.clear();
         document.getElementById('savedGalleryGrid')?.classList.remove('selecting');
         document.querySelectorAll('.gal-tick').forEach(t => t.classList.add('hidden'));
         document.querySelectorAll('#savedGalleryGrid .gal-selected').forEach(c => c.classList.remove('gal-selected'));
         updateDeleteBtn();
-        
-        // SHOW Delete All button again
         if(clearBtn) clearBtn.style.display = '';
+        document.getElementById('galSearchBtn')?.classList.remove('hidden');
+        document.getElementById('galDateBtn')?.classList.remove('hidden');
+        document.getElementById('galFavBtn')?.classList.remove('hidden');
     }
+    // Placed once the header has changed for selection.
+    setGallerySelectBar(isSelectionMode);
 }
 
 window.toggleSelectionForId = function(id, container) {
@@ -2692,27 +3204,279 @@ window.toggleSelectionForId = function(id, container) {
         tick.classList.remove('hidden');
         container.classList.add('gal-selected');
     }
+    // Select-all and a drag paint once when they're done (item 34); the SAVED marks don't change with the selection.
+    if (gallerySelBatch) return;
     updateDeleteBtn();
+    updateGallerySelectAll(false);
 }
+let gallerySelBatch = 0;
+function gallerySelectMany(fn) {
+    gallerySelBatch++;
+    try { fn(); } finally { gallerySelBatch--; }
+    updateDeleteBtn();
+    updateGallerySelectAll(false);
+}
+// Long press and slide selects every image from the pressed one to the one under the finger, in reading order;
+// going back unticks what this slide added. The page scrolls near the top or bottom.
+const galleryDragSelect = (() => {
+    let drag = null, scrollRaf = 0, lastY = 0, lastX = 0;
+    const grid = () => document.getElementById('savedGalleryGrid');
+    const cellAt = (x, y) => {
+        const el = document.elementFromPoint(x, y);
+        const c = el && el.closest && el.closest('#savedGalleryGrid > div[data-id]');
+        return c || null;
+    };
+    function apply() {
+        if (!drag) return;
+        const c = cellAt(lastX, lastY);
+        if (!c) return;
+        const cells = galleryPageCells();
+        const a = cells.indexOf(drag.from), b = cells.indexOf(c);
+        if (a < 0 || b < 0) return;
+        const lo = Math.min(a, b), hi = Math.max(a, b);
+        // A run selects, or unselects if it started on a selected image; what it changed goes back as the finger retreats.
+        gallerySelectMany(() => cells.forEach((cell, i) => {
+            const id = +cell.dataset.id;
+            const inRun = i >= lo && i <= hi;
+            const isSel = selectedImageIds.has(id);
+            if (inRun && isSel === drag.unselect) { toggleSelectionForId(id, cell); drag.changed.add(id); }
+            else if (!inRun && drag.changed.has(id)) { toggleSelectionForId(id, cell); drag.changed.delete(id); }
+        }));
+    }
+    function autoScroll() {
+        scrollRaf = 0;
+        if (!drag) return;
+        const dock = document.querySelector('.glass-dock')?.getBoundingClientRect().top ?? window.innerHeight;
+        const EDGE = 60;
+        let dy = 0;
+        if (lastY < EDGE) dy = -Math.ceil((EDGE - lastY) / 4);
+        else if (lastY > dock - EDGE) dy = Math.ceil((lastY - (dock - EDGE)) / 4);
+        if (dy) { window.scrollBy(0, dy); apply(); scrollRaf = requestAnimationFrame(autoScroll); }
+    }
+    // While selecting, a sideways swipe from a thumbnail starts a run; a vertical one scrolls.
+    let pending = null;
+    document.addEventListener('touchstart', e => {
+        // A run left over from a touch whose end never arrived doesn't outlive the next one.
+        if (drag && e.touches.length === 1) end();
+        pending = null;
+        if (!isSelectionMode || e.touches.length !== 1) return;
+        const t = e.touches[0];
+        const cell = e.target.closest && e.target.closest('#savedGalleryGrid > div[data-id]');
+        if (cell) pending = { cell, x: t.clientX, y: t.clientY };
+    }, { capture: true, passive: true });
+    function move(e) {
+        if (!drag && pending && e.touches.length === 1) {
+            const t = e.touches[0];
+            const dx = t.clientX - pending.x, dy = t.clientY - pending.y;
+            if (Math.hypot(dx, dy) >= 10) {
+                const cell = pending.cell;
+                pending = null;
+                lastX = t.clientX; lastY = t.clientY;
+                if (Math.abs(dx) > Math.abs(dy) && isSelectionMode) {
+                    drag = { from: cell, unselect: selectedImageIds.has(+cell.dataset.id), changed: new Set() };
+                    apply();
+                }
+            }
+        }
+        if (!drag) return;
+        const t = e.touches[0];
+        if (!t) return;
+        if (e.cancelable) e.preventDefault(); // the slide selects; the page doesn't scroll under it
+        lastX = t.clientX; lastY = t.clientY;
+        apply();
+        if (!scrollRaf) scrollRaf = requestAnimationFrame(autoScroll);
+    }
+    function end() {
+        drag = null;
+        pending = null;
+        if (scrollRaf) cancelAnimationFrame(scrollRaf);
+        scrollRaf = 0;
+    }
+    document.addEventListener('touchmove', move, { passive: false, capture: true });
+    document.addEventListener('touchend', end, { capture: true });
+    document.addEventListener('touchcancel', end, { capture: true });
+    // Nothing native (an image drag, a context menu) takes over a press in the grid.
+    ['dragstart', 'contextmenu'].forEach(t => document.addEventListener(t, e => {
+        if (e.target && e.target.closest && e.target.closest('#savedGalleryGrid')) e.preventDefault();
+    }, true));
+    return {
+        start(cell, unselect) {
+            const g = grid();
+            if (!g || !cell || !g.contains(cell)) return;
+            drag = { from: cell, unselect: !!unselect, changed: new Set() };
+            const r = cell.getBoundingClientRect();
+            lastX = r.left + r.width / 2; lastY = r.top + r.height / 2;
+            apply();
+        }
+    };
+})();
+
+// The select-all circle is filled when every image on the page is selected (by it or one by one).
+function galleryPageCells() {
+    return [...document.querySelectorAll('#savedGalleryGrid > div[data-id]')];
+}
+function updateGallerySelectAll(marks = true) {
+    const el = document.getElementById('galSelectAll');
+    if (!el) return;
+    el.classList.toggle('hidden', !isSelectionMode);
+    document.getElementById('galSelectHeadCount')?.classList.toggle('hidden', !isSelectionMode);
+    if (marks) paintSavedMarks();
+    const cells = galleryPageCells();
+    const all = isSelectionMode && cells.length > 0 && cells.every(c => selectedImageIds.has(+c.dataset.id));
+    el.classList.toggle('all', all);
+    el.querySelector('.gal-tick')?.classList.toggle('hidden', !all);
+}
+// Selects every image on the page, or unselects them all if they all are; selection mode stays on either way.
+window.toggleGallerySelectAll = function() {
+    const cells = galleryPageCells();
+    const all = cells.length > 0 && cells.every(c => selectedImageIds.has(+c.dataset.id));
+    gallerySelectMany(() => cells.forEach(c => { if (selectedImageIds.has(+c.dataset.id) === all) toggleSelectionForId(+c.dataset.id, c); }));
+};
 
 window.updateDeleteBtn = function() {
-    document.getElementById('galDeleteBtn').innerText = `DELETE (${selectedImageIds.size})`;
+    document.getElementById('galSelectHeadCount').textContent = `${selectedImageIds.size} selected`;
+    document.getElementById('galDownloadBtn').disabled = !selectedImageIds.size;
+    const share = document.getElementById('galShareBtn');
+    if (share) share.disabled = !selectedImageIds.size;
+    // Nothing selected: nothing to delete.
+    document.getElementById('galDeleteBtn').disabled = !selectedImageIds.size;
+    if (window.GalleryFavs) GalleryFavs.paintSelect();
 }
+
+// SAVED along the bottom of images already saved to the device, while selecting.
+let savedMarkSeq = 0;
+async function paintSavedMarks() {
+    const seq = ++savedMarkSeq;
+    const clear = () => document.querySelectorAll('#savedGalleryGrid .gal-saved-mark').forEach(m => m.remove());
+    if (!isSelectionMode || !window.GalleryLite || !GalleryLite.keyOf) { clear(); return; }
+    const saved = new Set(savedImageKeys());
+    const cells = galleryPageCells();
+    const keys = saved.size ? await Promise.all(cells.map(c => GalleryLite.keyOf(+c.dataset.id))) : [];
+    if (seq !== savedMarkSeq) return;
+    if (!isSelectionMode) { clear(); return; }
+    // Only where it changes.
+    cells.forEach((cell, i) => {
+        const on = !!(keys[i] && saved.has(keys[i])), mark = cell.querySelector('.gal-saved-mark');
+        if (on && !mark) {
+            const m = document.createElement('div');
+            m.className = 'gal-saved-mark';
+            m.textContent = 'SAVED';
+            cell.appendChild(m);
+        } else if (!on && mark) mark.remove();
+    });
+}
+// DOWNLOAD: the selected images to the device; ones already there are shown first, ticked, to untick.
+window.downloadSelectedImages = async function() {
+    if (!selectedImageIds.size || !window.GalleryLite) return;
+    const ids = [...selectedImageIds];
+    const saved = new Set(savedImageKeys());
+    const keys = await Promise.all(ids.map(id => GalleryLite.keyOf(id)));
+    const already = ids.filter((id, i) => keys[i] && saved.has(keys[i]));
+    let skip = new Set();
+    if (already.length) {
+        const grid = document.createElement('div');
+        grid.className = 'gal-dl-grid';
+        const thumbs = new Map([...document.querySelectorAll('#savedGalleryGrid > div[data-id]')].map(c => [+c.dataset.id, c.querySelector('img') && c.querySelector('img').src]));
+        already.forEach(id => {
+            const t = document.createElement('div');
+            t.className = 'gal-dl-tile on';
+            t.innerHTML = `<img alt="" src="${thumbs.get(id) || ''}"><span class="gal-dl-tick"></span><div class="gal-saved-mark">SAVED</div>`;
+            t.onclick = () => { t.classList.toggle('on'); if (t.classList.contains('on')) skip.delete(id); else skip.add(id); };
+            grid.appendChild(t);
+        });
+        const n = ids.length, k = already.length;
+        const ok = await window.appConfirm(`${k === n ? (k === 1 ? 'It is' : 'They are all') : `${k} of the ${n} are`} already saved on your device. Untick any you don't want saved again.`, { title: 'Already Saved', okText: 'DOWNLOAD', extra: grid });
+        if (!ok) return;
+    }
+    const todo = ids.filter(id => !skip.has(id));
+    let n = 0;
+    for (const id of todo) {
+        const data = await GalleryLite.load(id);
+        if (data && await saveToMobileGallery(data, 'bojro', '', null, true)) n++;
+    }
+    // One toast for them all (the app; a browser shows its own downloads).
+    if (n && window.Capacitor && window.Capacitor.isNative && typeof Toast !== 'undefined') Toast.show({ text: n === 1 ? 'Image saved' : `${n} images saved`, duration: 'short' });
+    toggleGallerySelectionMode();
+};
 
 window.deleteSelectedImages = async function() {
     if (selectedImageIds.size === 0) return;
-    const confirmed = await window.appConfirm(`Delete ${selectedImageIds.size} images?`, { title: 'Delete Images', okText: 'DELETE', danger: true });
-    if (!confirmed) return;
+    // The dialog stays up until the grid without them is ready, then goes as it's swapped in.
+    const sel = [...selectedImageIds], n = sel.length;
+    // Favourites only with Include N favourites ticked (item 58); the title counts what would go.
+    const favs = window.GalleryFavs ? GalleryFavs.ids() : new Set(), k = sel.filter(id => favs.has(id)).length;
+    const titleOf = withFavs => { const m = withFavs ? n : n - k; return `Delete ${m} image${m === 1 ? '' : 's'}?`; };
+    const pending = window.appConfirm('', { title: titleOf(false), okText: 'DELETE', danger: true, keepOpenOnOk: true, checkbox: k ? `Include ${k} favorite${k === 1 ? '' : 's'}` : undefined });
+    const box = document.getElementById('appConfirmCheck'), okBtn = document.getElementById('appConfirmOkBtn');
+    if (k && box) {
+        const paint = () => { document.getElementById('appConfirmTitle').textContent = titleOf(box.checked); okBtn.disabled = !box.checked && n === k; };
+        box.onchange = paint;
+        paint();
+    }
+    const confirmed = await pending;
+    const withFavs = !k || window.appConfirmChecked();
+    if (box) box.onchange = null;
+    if (!confirmed) { if (okBtn) okBtn.disabled = false; return; }
+    const gone = withFavs ? sel : sel.filter(id => !favs.has(id));
+    if (k && withFavs && window.GalleryFavs) { const left = GalleryFavs.ids(); gone.forEach(id => left.delete(id)); GalleryFavs.save(left); }
+    let closed = false;
+    const close = () => { if (!closed) { closed = true; window.closeAppConfirm(); } };
+    setTimeout(close, 3000); // never left up
     const tx = db.transaction(["images"], "readwrite");
     const store = tx.objectStore("images");
-    selectedImageIds.forEach(id => store.delete(id));
+    gone.forEach(id => store.delete(id));
+    tx.onerror = tx.onabort = close;
     tx.oncomplete = () => {
-        selectedImageIds.forEach(id => window.removeFromGenResultsById(id));
-        // Reuses toggleGallerySelectionMode()'s exit branch.
-        window.toggleGallerySelectionMode();
-        loadGallery();
+        gone.forEach(id => window.removeFromGenResultsById(id));
+        loadGallery(() => {
+            close();
+            // Reuses toggleGallerySelectionMode()'s exit branch.
+            if (isSelectionMode) window.toggleGallerySelectionMode();
+        });
     };
 }
+
+// The selected images through the share sheet at once (item 58): each is put in the share folder in turn (native,
+// ResolverDevicePlugin.shareStage), then one sheet for them all.
+window.shareSelectedImages = async function() {
+    const ids = [...selectedImageIds];
+    if (!ids.length) return;
+    const device = window.Capacitor?.Plugins?.ResolverDevice;
+    const HOLD = `Preparing ${ids.length} image${ids.length === 1 ? '' : 's'}...`;
+    if (ids.length > 2 && typeof Toast !== 'undefined') Toast.show({ text: HOLD, duration: 'hold' });
+    try {
+        const files = [], names = new Set();
+        for (let i = 0; i < ids.length; i++) {
+            const rec = await new Promise(res => {
+                try {
+                    const q = db.transaction(['images'], 'readonly').objectStore('images').get(ids[i]);
+                    q.onsuccess = () => res(q.result || null);
+                    q.onerror = () => res(null);
+                } catch (e) { res(null); }
+            });
+            const data = rec && rec.data;
+            if (!data) continue;
+            let name = typeof buildOutputFileName === 'function' ? await buildOutputFileName(data, 'bojro', '', null) : `bojro-${ids[i]}.png`;
+            // Two with the same name would overwrite each other in the share folder.
+            if (names.has(name)) name = name.replace(/(\.[a-z0-9]+)?$/i, m => `-${i + 1}${m}`);
+            names.add(name);
+            const mime = (data.match(/^data:([^;]+);/) || [])[1] || 'image/png';
+            if (device && device.shareStage) await device.shareStage({ data: data.split(',')[1], name, mime, reset: !files.length });
+            files.push({ data, name, mime });
+        }
+        if (!files.length) throw new Error('no images');
+        if (device && device.shareStaged) await device.shareStaged();
+        else if (device && device.shareImage && files.length === 1) await device.shareImage({ data: files[0].data.split(',')[1], name: files[0].name, mime: files[0].mime });
+        else {
+            const list = await Promise.all(files.map(async f => new File([await (await fetch(f.data)).blob()], f.name, { type: f.mime })));
+            await navigator.share({ files: list });
+        }
+    } catch (e) {
+        if (!(e && e.name === 'AbortError') && typeof Toast !== 'undefined') Toast.show({ text: "Couldn't share the images", duration: 'short' });
+    } finally {
+        if (typeof Toast !== 'undefined') Toast.dismiss(HOLD);
+    }
+};
 
 // -----------------------------------------------------------
 // NEW: SEND TO INPAINT EDITOR
@@ -2739,50 +3503,11 @@ function startEditorMetadataCapture(src) {
 }
 
 // Opens the shared crop editor over the Inpaint tab with this image (img2img / Inpaint / Upscale share it).
-function showEditorWithImage(src) {
+function showEditorWithImage(src, beforeShow) {
     // Kept in Crop & Edit's RECENT too, as an image picked from the phone is.
     if (typeof EditHistory !== 'undefined') fetch(src).then(r => r.blob()).then(b => EditHistory.save(b)).catch(() => {});
-    // Opens the editor modal immediately, before the image loads, and clears editorCanvas of stale content.
-    const editorCanvasEl = document.getElementById('editorCanvas');
-    editorCanvasEl?.getContext('2d')?.clearRect(0, 0, editorCanvasEl.width, editorCanvasEl.height);
-    document.getElementById('editorModal').classList.remove('hidden');
-
-    // 4. Load the image directly into the Editor
-    const img = new Image();
-    img.crossOrigin = "Anonymous"; 
-    img.src = src;
-    
-    img.onload = () => {
-        editorImage = img;
-        // Synchronous placeholder matching this image's shape (see openEditorFromFile(), editor.js).
-        editorTargetW = img.naturalWidth;
-        editorTargetH = img.naturalHeight;
-        if (typeof detectAndSetEditorOrientation === 'function') detectAndSetEditorOrientation(img);
-        if (typeof highlightEditorMpLabel === 'function') highlightEditorMpLabel(img);
-        if (typeof resetConfineToImageState === 'function') resetConfineToImageState();
-
-        // REMOVED: document.getElementById('img-input-container').style.display = 'none';
-        // We leave the upload box visible behind the modal. 
-        // It will only be hidden when you click "PROCEED" (handled by applyEditorChanges).
-        
-        // Double rAF waits for a completed layout/paint instead of a fixed delay.
-        requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-                if (typeof fitEditorToImage === 'function') {
-                    fitEditorToImage();
-                } else {
-                    editorTargetW = parseInt(document.getElementById('xl_width').value) || 1024;
-                    editorTargetH = parseInt(document.getElementById('xl_height').value) || 1024;
-                    if (typeof recalcEditorLayout === 'function') recalcEditorLayout();
-                    if (typeof resetEditorView === 'function') resetEditorView();
-                }
-            });
-        });
-    };
-    
-    img.onerror = () => {
-        window.appAlert("Failed to load image for editing.");
-    };
+    // Opens once the image is decoded (loadEditorImage(), editor.js).
+    loadEditorImage(src, beforeShow);
 }
 
 // Loads an image straight into the shared source image (as PROCEED would, without the crop step) and opens the Upscale panel. Everything is loaded and decoded before the tab changes, so the switch itself is instant with nothing flashing.
@@ -2844,7 +3569,8 @@ async function sendImageToUpscaler(src, badges = null) {
     return true;
 }
 
-window.editCurrentFs = function() {
+window.editCurrentFs = async function() {
+    if (window.GalleryLite) await GalleryLite.settle();
     const src = document.getElementById('fsImage').src;
     if (!src) return;
 
@@ -2855,13 +3581,11 @@ window.editCurrentFs = function() {
     editorPendingBadges = viewedBadges && viewedBadges.length ? [...viewedBadges] : null;
 
     if (typeof rememberEditorReturn === 'function') rememberEditorReturn({ images: currentGalleryImages, index: currentGalleryIndex, fromGrid: fullscreenOpenedFromGalleryGrid });
-    // 1. Close the Lightbox
-    window.closeFsModal();
-
-    // 2. Switch to the Inpaint Tab
-    window.switchTab('inp');
-
-    showEditorWithImage(src);
+    // The viewer stays until the image is ready; then it closes and the editor opens in the same frame.
+    showEditorWithImage(src, () => {
+        window.closeFsModal();
+        window.switchTab('inp');
+    });
 };
 
 // Reflects sourceImageB64 in the Upscale panel's preview. "Remove image" calls the shared clearInpaintImage().
@@ -2924,7 +3648,10 @@ window.runUpscaleJob = async function() {
     const spinner = document.getElementById('inpLoadingSpinner');
     const resultGal = document.getElementById('inpGallery');
     const oldText = btn ? btn.innerText : '';
-    if (btn) { btn.disabled = true; btn.innerText = "UPSCALING..."; }
+    // SETTLING... until the upscale starts (the bridge's tile count, or Forge's progress), then UPSCALING... or tile steps.
+    if (btn) { btn.disabled = true; btn.innerText = "SETTLING..."; }
+    isUpscaleRunning = true;
+    refreshBusyButtons();
     if (spinner) spinner.style.display = 'block';
     // Enables the Upscale abort button, which uses /sdapi/v1/interrupt.
     setAbortButtonState('abortInpGenBtn', true);
@@ -2939,7 +3666,7 @@ window.runUpscaleJob = async function() {
     // including one started during the upscale.
     const upNotify = !isQueueRunning && !isSingleJobRunning;
     const upOwnsNotification = () => upNotify && !isQueueRunning && !isSingleJobRunning;
-    if (upNotify) { updateBatchNotification("Upscaling...", true, ""); lastJobTarget = { tab: 'inp', sub: 'upscale' }; }
+    if (upNotify) { updateBatchNotification("Settling...", true, ""); lastJobTarget = { tab: 'inp', sub: 'upscale' }; }
     if (window.JobAbort) JobAbort.started();
     let connectionLost = false;
 
@@ -2956,12 +3683,14 @@ window.runUpscaleJob = async function() {
     const upscaleTileTracker = createTileTracker(expectSecondPass);
     let lastKnownTotal = null; // real total once seen, used to show a genuinely-complete state on success
     let bridgeSawActive = false;
+    let bridgeMissing = false;
     let upscaleDoneAt = 0;
     // Poll delay has a small floor to avoid hammering a low-latency connection.
     async function pollUpscaleBridge() {
         if (upscaleJobDone || upSig.aborted) return;
         const bridge = await fetchBridgeStatus();
         if (upscaleJobDone || upSig.aborted) return;
+        if (!bridge) bridgeMissing = true;
         if (bridge && !bridge.errors?.length && bridge.upscale?.active && typeof bridge.upscale.current === 'number' && typeof bridge.upscale.total === 'number') {
             bridgeSawActive = true;
             const { numerator, denominator } = upscaleTileTracker(bridge.upscale.current, bridge.upscale.total);
@@ -2976,6 +3705,29 @@ window.runUpscaleJob = async function() {
         if (!upscaleJobDone && !upSig.aborted) upscalePollTimeout = BgTimer.set(pollUpscaleBridge, document.hidden ? getBackgroundPollingRate() : getGenerationPollingRate());
     }
     if (localStorage.getItem('bojroProgressBridgeEnabled') === 'true') upscalePollTimeout = BgTimer.set(pollUpscaleBridge, getGenerationPollingRate());
+    // Without the bridge (or if it doesn't answer), Forge's progress says when the upscale is running.
+    let upscaleStartPoll = null;
+    async function pollUpscaleStart() {
+        if (upscaleJobDone || upSig.aborted) return;
+        try {
+            const { data } = await timedFetch(`${HOST}/sdapi/v1/progress?skip_current_image=true`, { headers: getHeaders() }, 3000, null, true);
+            if (upscaleJobDone || upSig.aborted) return;
+            const bridgeOn = localStorage.getItem('bojroProgressBridgeEnabled') === 'true' && !bridgeMissing;
+            if (data && data.state && data.state.job) {
+                if (!bridgeOn) {
+                    if (btn && btn.textContent === 'SETTLING...') {
+                        btn.innerText = 'UPSCALING...';
+                        if (upOwnsNotification()) updateBatchNotification("Upscaling...", true, "");
+                    }
+                    return;
+                }
+                // The bridge's progress has taken over.
+                if (bridgeSawActive) return;
+            }
+        } catch (e) {}
+        if (!upscaleJobDone && !upSig.aborted) upscaleStartPoll = BgTimer.set(pollUpscaleStart, document.hidden ? getBackgroundPollingRate() : Math.max(250, getGenerationPollingRate()));
+    }
+    upscaleStartPoll = BgTimer.set(pollUpscaleStart, Math.max(250, getGenerationPollingRate()));
 
     try {
         const isFactorMode = document.getElementById('upscale_resize_mode').value === '0';
@@ -3046,7 +3798,8 @@ window.runUpscaleJob = async function() {
         BgTimer.clear(upscalePollTimeout);
         if (lastKnownTotal !== null && btn) btn.innerText = `Step ${lastKnownTotal} / ${lastKnownTotal}`;
 
-        let finalB64 = "data:image/png;base64," + data.image;
+        let finalB64 = base64ToDataUrl(data.image);
+        window.ImageFormat?.checkResult(data.image);
         if (window.DataUsage) DataUsage.addImages('up', 1, finalB64);
         // Copy Metadata from Source.
         if (document.getElementById('upscale_copy_metadata')?.checked && inpSourceTextChunks) {
@@ -3055,6 +3808,7 @@ window.runUpscaleJob = async function() {
         // Shown first, saved behind it - see saveImageToDBInBackground(), utils.js.
         const upscaleInfo = { scale: upscaleScaleTag, seed: upscaleSourceSeed };
         const saved = saveImageToDBInBackground(finalB64, upscaleInfo, jobBadges);
+        if (window.ViewerCompare) ViewerCompare.remember(finalB64, base64ToDataUrl(payload.image));
 
         const img = document.createElement('img');
         img.className = 'gen-result';
@@ -3091,6 +3845,7 @@ window.runUpscaleJob = async function() {
         if (autoDl && autoDl.checked) saveToMobileGallery(finalB64, 'bojro', upscaleScaleTag, upscaleSourceSeed);
         // Sends a completion notification for Upscale jobs (only fires while backgrounded).
         dlog('upscale done');
+        toastIfUnwatched('upscaleBtn', 'Upscale complete');
         if (upOwnsNotification()) await stopProgressService();
         await sendCompletionNotification("Upscaled image ready");
     } catch (e) {
@@ -3107,8 +3862,11 @@ window.runUpscaleJob = async function() {
         upAbort.abort();
         upscaleJobDone = true;
         BgTimer.clear(upscalePollTimeout);
+        BgTimer.clear(upscaleStartPoll);
         if (upOwnsNotification()) stopProgressService();
         if (btn) { btn.disabled = false; btn.innerText = oldText; }
+        isUpscaleRunning = false;
+        refreshBusyButtons();
         if (spinner) spinner.style.display = 'none';
         setAbortButtonState('abortInpGenBtn', false);
     }
@@ -3119,7 +3877,7 @@ window.runUpscaleJob = async function() {
 // -----------------------------------------------------------
 
 // The results strips (Generate tabs; Inpaint / img2img / Upscale) keep the newest results, as many as
-// Config > Interface > Recent Results Shown (1-100, 20 by default); older ones stay in the gallery.
+// Recent Results Shown (1-100, default 20).
 function resultStripLimit() {
     const n = parseInt(localStorage.getItem('bojroResultStripLimit'), 10);
     return n >= 1 && n <= 100 ? n : 20;
@@ -3136,8 +3894,62 @@ window.saveResultStripLimit = function(el) {
     localStorage.setItem('bojroResultStripLimit', String(n));
     ['gallery', 'inpGallery'].forEach(id => { const g = document.getElementById(id); if (g) trimResultStrip(g); });
 };
-// A result's full image (an upscale may be shown from a screen-sized copy).
+// A result's full image (the strip shows a smaller copy).
 const resultFullSrc = img => img.fullSrc || img.src;
+// Once shown, the strip swaps in a JPEG copy at its size: a full PNG takes a few hundred ms to decode each time the
+// app is redrawn after the viewer. fullSrc keeps the full image for the viewer, seed, Upscaler and saving.
+function stripCopyLater(img, full, gal) {
+    if (img.fullSrc) return;
+    const make = async () => {
+        if (!img.isConnected || img.fullSrc || img.src !== full) return;
+        const stripPx = Math.round((gal.clientWidth || document.documentElement.clientWidth) * (window.devicePixelRatio || 1));
+        const w = Math.min(img.naturalWidth || stripPx, stripPx);
+        const copy = w > 0 ? await screenSizedCopy(full, w) : null;
+        if (!copy || !img.isConnected || img.src !== full) return;
+        const pre = new Image();
+        pre.src = copy;
+        await (pre.decode ? pre.decode() : Promise.resolve()).catch(() => {});
+        img.fullSrc = full;
+        img.src = copy;
+    };
+    if (window.requestIdleCallback) requestIdleCallback(make, { timeout: 2000 });
+    else setTimeout(make, 300);
+}
+// True for images that may be see-through (PNG with alpha or a palette, WEBP), which a JPEG copy would turn black.
+async function imageMayHaveAlpha(src) {
+    try {
+        const b = new Uint8Array(await (await (await fetch(src)).blob()).slice(0, 32).arrayBuffer());
+        if (b[0] === 0x89 && b[1] === 0x50) return b[25] === 3 || b[25] === 4 || b[25] === 6;
+        return !(b[0] === 0xFF && b[1] === 0xD8);
+    } catch (e) {
+        return true;
+    }
+}
+// Shows `full` in `img`, then when idle swaps in a JPEG copy up to maxW x maxH (img.fullSrc keeps the full one).
+// onCopy(copy) runs after a swap. Skipped for small or see-through images.
+function showWithScreenCopy(img, full, maxW, maxH, onCopy) {
+    img.fullSrc = full;
+    img.src = full;
+    const make = async () => {
+        if (!img.isConnected || img.getAttribute('src') !== full) return;
+        if (!img.naturalWidth && img.decode) await img.decode().catch(() => {});
+        const w = img.naturalWidth, h = img.naturalHeight;
+        const dpr = window.devicePixelRatio || 1;
+        const scale = Math.min(maxW * dpr / w, maxH * dpr / h);
+        if (!w || !h || scale > 0.8 || await imageMayHaveAlpha(full)) return;
+        const copy = await screenSizedCopy(full, Math.max(1, Math.round(w * scale)));
+        if (!copy || img.getAttribute('src') !== full) return;
+        const pre = new Image();
+        pre.src = copy;
+        await (pre.decode ? pre.decode() : Promise.resolve()).catch(() => {});
+        if (img.getAttribute('src') !== full) return;
+        img.src = copy;
+        if (onCopy) onCopy(copy);
+    };
+    if (window.requestIdleCallback) requestIdleCallback(make, { timeout: 2000 });
+    else setTimeout(make, 300);
+}
+
 // A JPEG copy of an image at the given width, or null.
 function screenSizedCopy(dataUrl, width) {
     return new Promise(resolve => {
@@ -3164,8 +3976,17 @@ function screenSizedCopy(dataUrl, width) {
     });
 }
 
-// Width and height from a PNG data URL's header (IHDR); nothing for other formats.
+// Width and height from a PNG data URL's header (IHDR), or a JPEG's frame header; nothing for other formats.
 function setImageSizeFromPng(img, dataUrl) {
+    const j = /^data:image\/jpeg;base64,/.exec(dataUrl || '');
+    if (j) {
+        try {
+            const s = atob(dataUrl.substr(j[0].length, 65536));
+            const size = jpegSizeFromBytes(Uint8Array.from(s, c => c.charCodeAt(0)));
+            if (size && size.width && size.height) { img.width = size.width; img.height = size.height; }
+        } catch (e) { }
+        return;
+    }
     const m = /^data:image\/png;base64,/.exec(dataUrl || '');
     if (!m) return;
     try {
@@ -3181,7 +4002,7 @@ function setImageSizeFromPng(img, dataUrl) {
 window.openFullscreenFromGallery = function(index) {
     fullscreenOpenedFromGalleryGrid = true;
     currentGalleryImages = [...allGalleryImagesData];
-    currentGalleryIndex = (galleryPage - 1) * ITEMS_PER_PAGE + index;
+    currentGalleryIndex = (galleryPage - 1) * galleryPerPage() + index;
     updateLightboxImage();
     document.getElementById('fullScreenModal').classList.remove('hidden');
 }
@@ -3199,15 +4020,30 @@ window.openFullscreen = function(items, index) {
 // While the viewer is open the app behind it is skipped (style.css), so a busy tab does not slow zoom and pan.
 ;(function () {
     const modal = document.getElementById('fullScreenModal');
-    if (modal) new MutationObserver(() => {
+    if (!modal) return;
+    let wasOpen = false;
+    new MutationObserver(() => {
         const open = !modal.classList.contains('hidden');
+        if (open === wasOpen) return;
+        wasOpen = open;
         // Closed: the app is drawn again behind the viewer before it goes (coverUntilAppDrawn()).
-        if (!open && document.body.classList.contains('fs-viewer-open')) {
-            document.body.classList.remove('fs-viewer-open');
-            coverUntilAppDrawn(modal);
-        }
         document.body.classList.toggle('fs-viewer-open', open);
+        if (!open && !viewerClosesDrawn) coverUntilAppDrawn(modal);
+        viewerClosesDrawn = false;
     }).observe(modal, { attributes: true, attributeFilter: ['class'] });
+    // Pressing CLOSE draws the app behind (still covered), so its images decode while the finger is down.
+    const closeBtn = modal.querySelector('.lightbox-controls button[onclick^="closeFsModal"]');
+    let rearm = 0;
+    closeBtn?.addEventListener('pointerdown', () => {
+        clearTimeout(rearm);
+        document.body.classList.remove('fs-viewer-open');
+    });
+    const restore = () => {
+        clearTimeout(rearm);
+        rearm = setTimeout(() => { if (!modal.classList.contains('hidden')) document.body.classList.add('fs-viewer-open'); }, 500);
+    };
+    closeBtn?.addEventListener('pointerup', restore);
+    closeBtn?.addEventListener('pointercancel', restore);
 })();
 
 window.updateLightboxImage = function() {
@@ -3226,6 +4062,11 @@ window.updateLightboxImage = function() {
         const containerWidth = document.getElementById('lightboxContainer').offsetWidth || window.innerWidth;
         if (prevImg) { prevImg.style.transition = 'none'; prevImg.style.transform = `translateX(${-containerWidth - 16}px)`; }
         if (nextImg) { nextImg.style.transition = 'none'; nextImg.style.transform = `translateX(${containerWidth + 16}px)`; }
+        // The images either side are loaded now, so a swipe shows them at once.
+        const len = currentGalleryImages.length;
+        const near = d => currentGalleryImages[((currentGalleryIndex + d) % len + len) % len].data;
+        if (prevImg && len > 1 && prevImg.getAttribute('src') !== near(-1)) prevImg.src = near(-1);
+        if (nextImg && len > 1 && nextImg.getAttribute('src') !== near(1)) nextImg.src = near(1);
     }
     if (typeof updateFsControlNetButtons === 'function') updateFsControlNetButtons();
 }
@@ -3251,6 +4092,12 @@ window.setupLightboxSwipe = function() {
     let containerWidth = 0;
     let containerLeft = 0;
     let isCompleting = false;
+    // The slide to the next image (ms), and the swap at its end, which a new swipe does at once instead of waiting.
+    const SLIDE_MS = 180;
+    let completeTimer = 0, completeSwap = null;
+    // A flick: at least this far and this fast (px/ms) counts as a swipe, however short.
+    const FLICK_MIN_PX = 30, FLICK_SPEED = 0.4;
+    let startTime = 0;
 
     // Zoom/pan state - scale 1 is the default fit-to-width view
     let scale = 1;
@@ -3342,17 +4189,15 @@ window.setupLightboxSwipe = function() {
         // The image area changes size, so a zoomed image is re-clamped.
         requestAnimationFrame(() => { if (scale > 1) { clampPan(); applyZoomTransform(false); } });
     };
-    // The status bar is hidden while the viewer is open, so a tall image never sits under it; leaving the viewer by any
-    // route brings it and the toolbar back.
-    let viewerOpen = false;
+    // The status bar is hidden while the viewer is open, so a tall image never sits under it (syncStatusBar()); leaving
+    // the viewer by any route brings it back. A hidden toolbar comes back when the viewer next opens, not as it closes
+    // (the closed viewer stays drawn for a moment, and the toolbar would show in it).
+    let fsWasHidden = document.getElementById('fullScreenModal').classList.contains('hidden');
     new MutationObserver(() => {
-        const modal = document.getElementById('fullScreenModal');
-        const open = !modal.classList.contains('hidden');
-        if (!open) window.setLightboxImmersive(false);
-        if (open === viewerOpen) return;
-        viewerOpen = open;
-        const p = window.Capacitor?.Plugins?.ResolverDevice?.setStatusBarHidden?.({ hidden: open });
-        if (p && p.catch) p.catch(() => {});
+        const modal = document.getElementById('fullScreenModal'), hidden = modal.classList.contains('hidden');
+        if (fsWasHidden && !hidden) window.setLightboxImmersive(false);
+        fsWasHidden = hidden;
+        syncStatusBar();
     }).observe(document.getElementById('fullScreenModal'), { attributes: true, attributeFilter: ['class'] });
 
     window.resetLightboxZoom = function(animate) {
@@ -3376,10 +4221,12 @@ window.setupLightboxSwipe = function() {
 
     function onStart(x) {
         if (currentGalleryImages.length <= 1) return; // nothing to swipe to
-        if (isCompleting) return; // previous swipe's swap animation still finishing
+        // The last swipe's slide still running: finished now, so this swipe goes on from the next image.
+        if (isCompleting && completeSwap) { clearTimeout(completeTimer); completeSwap(); }
         isDragging = true;
         startX = x;
         currentX = x;
+        startTime = Date.now();
 
         const rect = container.getBoundingClientRect();
         containerWidth = rect.width || window.innerWidth;
@@ -3387,8 +4234,8 @@ window.setupLightboxSwipe = function() {
 
         [img, prevImg, nextImg].forEach(el => { if (el) el.style.transition = 'none'; });
 
-        if (prevImg) prevImg.src = currentGalleryImages[neighborIndex(-1)].data;
-        if (nextImg) nextImg.src = currentGalleryImages[neighborIndex(1)].data;
+        if (prevImg && prevImg.getAttribute('src') !== currentGalleryImages[neighborIndex(-1)].data) prevImg.src = currentGalleryImages[neighborIndex(-1)].data;
+        if (nextImg && nextImg.getAttribute('src') !== currentGalleryImages[neighborIndex(1)].data) nextImg.src = currentGalleryImages[neighborIndex(1)].data;
     }
 
     function onMove(x) {
@@ -3419,10 +4266,11 @@ window.setupLightboxSwipe = function() {
             return;
         }
 
-        [img, prevImg, nextImg].forEach(el => { if (el) el.style.transition = 'transform 0.25s ease'; });
+        [img, prevImg, nextImg].forEach(el => { if (el) el.style.transition = `transform ${SLIDE_MS}ms ease`; });
 
         const threshold = containerWidth * 0.2;
-        if (Math.abs(delta) > threshold) {
+        const flick = Math.abs(delta) >= FLICK_MIN_PX && Math.abs(delta) / Math.max(1, Date.now() - startTime) >= FLICK_SPEED;
+        if (Math.abs(delta) > threshold || flick) {
             // Dragging left (negative delta) reveals the NEXT image.
             const dir = delta < 0 ? 1 : -1;
             const exitOffset = delta < 0 ? -(containerWidth + GAP) : (containerWidth + GAP);
@@ -3430,14 +4278,16 @@ window.setupLightboxSwipe = function() {
             if (dir === 1 && nextImg) nextImg.style.transform = 'translateX(0px)';
             if (dir === -1 && prevImg) prevImg.style.transform = 'translateX(0px)';
             isCompleting = true;
-            setTimeout(() => {
+            completeSwap = () => {
+                completeSwap = null;
                 window.slideImage(dir);
                 [img, prevImg, nextImg].forEach(el => { if (el) el.style.transition = 'none'; });
                 img.style.transform = 'translateX(0)';
                 if (prevImg) prevImg.style.transform = `translateX(${-containerWidth - GAP}px)`;
                 if (nextImg) nextImg.style.transform = `translateX(${containerWidth + GAP}px)`;
                 isCompleting = false;
-            }, 250);
+            };
+            completeTimer = setTimeout(completeSwap, SLIDE_MS);
         } else {
             img.style.transform = 'translateX(0)';
             if (prevImg) prevImg.style.transform = `translateX(${-containerWidth - GAP}px)`;
@@ -3518,7 +4368,8 @@ window.setupLightboxSwipe = function() {
 
     container.addEventListener('touchmove', (e) => {
         if (e.cancelable) e.preventDefault();
-        if (tapCandidate && e.touches.length === 1 && Math.max(Math.abs(e.touches[0].clientX - tapCandidate.x), Math.abs(e.touches[0].clientY - tapCandidate.y)) >= TAP_MOVE_THRESHOLD) tapCandidate = null;
+        // Moved: not a tap, so not the first of a double tap either (a quick second swipe isn't a zoom).
+        if (tapCandidate && e.touches.length === 1 && Math.max(Math.abs(e.touches[0].clientX - tapCandidate.x), Math.abs(e.touches[0].clientY - tapCandidate.y)) >= TAP_MOVE_THRESHOLD) { tapCandidate = null; lastTapTime = 0; }
         if (isPinching && e.touches.length === 2) {
             const newDist = touchDist(e.touches[0], e.touches[1]);
             // Clamps the scale before recalculating pan.
@@ -3610,7 +4461,7 @@ window.setupLightboxSwipe = function() {
     container.addEventListener('mouseleave', () => { if (isDragging) onEnd(); });
 };
 
-// Removes a deleted image from Generation Results too (called from both deletion paths). Not applied to "Clear View".
+// Removes a deleted image from Generation Results too (called from both deletion paths). Not applied to CLEAR.
 window.removeFromGenResultsById = function(id) {
     if (id == null) return;
     ['gallery', 'inpGallery'].forEach(containerId => {
@@ -3621,24 +4472,65 @@ window.removeFromGenResultsById = function(id) {
     });
 }
 
+// The viewer's trash (item 57): a first tap shows "Tap again to delete" and rings the trash; a second within 1.5s
+// deletes. One toast stays up through a run of deletes and goes 1.5s after the last tap. Favourites can't be deleted
+// here (item 48: the trash is greyed, GalleryFavs.paintViewer()).
+const FS_DEL_TEXT = 'Tap again to delete';
+let fsDelArmed = false, fsDelTimer = 0;
+function fsDelDisarm(dismiss) {
+    fsDelArmed = false;
+    document.querySelector('#fullScreenModal .fs-delete')?.classList.remove('armed');
+    if (dismiss) { clearTimeout(fsDelTimer); if (typeof Toast !== 'undefined') Toast.dismiss(FS_DEL_TEXT); }
+}
+function fsDelLater() { clearTimeout(fsDelTimer); fsDelTimer = setTimeout(() => fsDelDisarm(true), 1500); }
+document.addEventListener('DOMContentLoaded', () => {
+    const modal = document.getElementById('fullScreenModal'), img = document.getElementById('fsImage');
+    // Another image: the ring goes (the toast keeps its time); the viewer closed: both go.
+    if (img) new MutationObserver(() => fsDelDisarm(false)).observe(img, { attributes: true, attributeFilter: ['src'] });
+    if (modal) new MutationObserver(() => { if (modal.classList.contains('hidden')) fsDelDisarm(true); }).observe(modal, { attributes: true, attributeFilter: ['class'] });
+});
 window.deleteCurrentFsImage = async function() {
     const currentItem = currentGalleryImages[currentGalleryIndex];
     if (!currentItem) return;
-    const confirmed = await window.appConfirm("Delete this image?", { title: 'Delete Image', okText: 'DELETE', danger: true });
-    if (confirmed) {
-        if (currentItem.id) {
-            const tx = db.transaction(["images"], "readwrite");
-            tx.objectStore("images").delete(currentItem.id);
-            tx.oncomplete = () => {
-                currentGalleryImages.splice(currentGalleryIndex, 1);
-                window.removeFromGenResultsById(currentItem.id);
-                finishDeleteAction(currentItem);
-            };
-        } else {
-            currentGalleryImages.splice(currentGalleryIndex, 1);
-            finishDeleteAction(currentItem);
-        }
+    if (currentItem.id && window.GalleryFavs && GalleryFavs.ids().has(currentItem.id)) return;
+    if (!fsDelArmed) {
+        fsDelArmed = true;
+        document.querySelector('#fullScreenModal .fs-delete')?.classList.add('armed');
+        if (typeof Toast !== 'undefined' && !Toast.showing(FS_DEL_TEXT)) Toast.show({ text: FS_DEL_TEXT, duration: 'hold' });
+        fsDelLater();
+        return;
     }
+    fsDelDisarm(false);
+    fsDelLater();
+    if (currentItem.id) {
+        const ok = await new Promise(resolve => {
+            try {
+                const tx = db.transaction(["images"], "readwrite");
+                tx.objectStore("images").delete(currentItem.id);
+                tx.oncomplete = () => resolve(true);
+                tx.onerror = tx.onabort = () => resolve(false);
+            } catch (e) { resolve(false); }
+        });
+        if (!ok) { if (typeof Toast !== 'undefined') Toast.show({ text: "Couldn't delete the image", duration: 'short' }); return; }
+        window.removeFromGenResultsById(currentItem.id);
+    }
+    currentGalleryImages.splice(currentGalleryIndex, 1);
+    const next = currentGalleryImages[Math.min(currentGalleryIndex, currentGalleryImages.length - 1)];
+    if (!next) {
+        // The last one: the viewer closes. The app behind is drawn now, so the viewer and dialog go in one frame.
+        // Off the strip first, so the strip is drawn without it.
+        if (currentItem.domElement) currentItem.domElement.remove();
+        document.body.classList.remove('fs-viewer-open');
+        await Promise.race([appImagesOnScreenDecoded(), new Promise(r => setTimeout(r, 400))]);
+        await new Promise(r => requestAnimationFrame(r));
+        viewerClosesDrawn = true;
+    } else if (next.data) {
+        const pre = new Image();
+        pre.src = next.data;
+        await Promise.race([(pre.decode ? pre.decode() : Promise.resolve()).catch(() => {}), new Promise(r => setTimeout(r, 1500))]);
+        document.getElementById('fsImage').decoding = 'sync';
+    }
+    requestAnimationFrame(() => finishDeleteAction(currentItem));
 }
 
 window.finishDeleteAction = function(item) {
@@ -3653,7 +4545,8 @@ window.finishDeleteAction = function(item) {
     }
 }
 
-window.downloadCurrent = function() {
+window.downloadCurrent = async function() {
+    if (window.GalleryLite) await GalleryLite.settle();
     const src = document.getElementById('fsImage').src;
     // Upscale results keep their scale and seed in the name.
     const upscale = currentGalleryImages[currentGalleryIndex]?.upscale;
@@ -3664,7 +4557,7 @@ window.downloadCurrent = function() {
 window.closeFsModal = () => {
     document.getElementById('fullScreenModal').classList.add('hidden');
     if (fullscreenOpenedFromGalleryGrid && currentGalleryImages && currentGalleryImages.length > 0) {
-        const newPage = Math.floor(currentGalleryIndex / ITEMS_PER_PAGE) + 1;
+        const newPage = Math.floor(currentGalleryIndex / galleryPerPage()) + 1;
         if (newPage !== galleryPage) {
             galleryPage = newPage;
             if (typeof loadGallery === 'function') loadGallery();
@@ -3673,6 +4566,7 @@ window.closeFsModal = () => {
 };
 
 window.analyzeCurrentFs = async () => {
+    if (window.GalleryLite) await GalleryLite.settle();
     const src = document.getElementById('fsImage').src;
     // The viewer stays up until the image has loaded into the Analyzer preview, then the tab is switched and the viewer closed together.
     try {
@@ -3689,8 +4583,7 @@ window.analyzeCurrentFs = async () => {
     requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'instant' }));
 }
 
-// With ControlNet enabled anywhere in Settings, ANALYZE becomes a round icon button to make room for the send-to-ControlNet button.
-// ControlNet counts as on when either of its two Config switches is. The fullscreen viewer's buttons and the Analyzer's Send-to-ControlNet button and sticky-bar panel (analyzer.js) all use this one rule.
+// ControlNet counts as on when either of its two Config switches is. The viewer's send-to-ControlNet button and the Analyzer's Send-to-ControlNet button and sticky-bar panel (analyzer.js) all use this one rule.
 function isControlNetEnabledAnywhere() {
     return localStorage.getItem('bojroShowControlnetSdxlAnima') === 'true'
         || localStorage.getItem('bojroShowControlnetOther') === 'true';
@@ -3698,13 +4591,7 @@ function isControlNetEnabledAnywhere() {
 
 window.updateFsControlNetButtons = function() {
     const enabled = isControlNetEnabledAnywhere();
-    const analyzeBtn = document.getElementById('fsAnalyzeBtn');
     const sendBtn = document.getElementById('fsSendToCnBtn');
-    if (analyzeBtn) {
-        analyzeBtn.className = enabled ? 'btn-icon' : 'btn-small';
-        analyzeBtn.innerHTML = enabled ? '<i data-lucide="scan-line"></i>' : 'ANALYZE';
-        if (enabled && typeof lucide !== 'undefined') lucide.createIcons();
-    }
     if (sendBtn) sendBtn.classList.toggle('hidden', !enabled);
     // The Analyzer's own "Send image to ControlNet" button rides the same check
     if (typeof updateAnalyzerSendButtons === 'function') updateAnalyzerSendButtons();
@@ -3720,7 +4607,8 @@ function resolveControlNetModePrefix() {
 
 // Sends the fullscreen image to the first ControlNet unit of the current mode without an image, via applyControlNetImage() (network.js), then navigates to that unit.
 // The work is in sendImageToControlNet() below, which the Analyzer's button also uses.
-window.sendCurrentFsImageToControlNet = function() {
+window.sendCurrentFsImageToControlNet = async function() {
+    if (window.GalleryLite) await GalleryLite.settle();
     const src = document.getElementById('fsImage').src;
     if (!src) return;
     sendImageToControlNet(src, true);
@@ -3770,17 +4658,12 @@ function navigateToControlNetUnit(mode, unit, fromFullscreen) {
 
 window.handleFileSelect = e => {
     const file = e.target.files[0];
-    if (!file) return;
-    processImageForAnalysis(file);
+    if (!file) { if (typeof PickerCover !== 'undefined') PickerCover.cancelled(); return; }
+    // The picker's cover (editor.js) goes once Analyze shows the image.
+    processImageForAnalysis(file).catch(() => {}).finally(() => { if (typeof PickerCover !== 'undefined') PickerCover.lift(); });
 }
 
 // Grows a textarea to fit its content.
-function autoResizeTextarea(el) {
-    if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = el.scrollHeight + 'px';
-}
-
 // Bytes to a human-readable string.
 function formatFileSize(bytes) {
     if (!bytes && bytes !== 0) return '--';
@@ -3791,8 +4674,37 @@ function formatFileSize(bytes) {
 
 // Identifies the Analyzer image being loaded, so callbacks from a superseded or cleared load do nothing.
 let anaLoadToken = 0;
+// The file's type from its first bytes (what it is, whatever its name or reported type says).
+async function fileTypeOf(blob) {
+    try {
+        const b = new Uint8Array(await blob.slice(0, 16).arrayBuffer()), at = (i, t) => [...t].every((c, k) => b[i + k] === c.charCodeAt(0));
+        if (b[0] === 0x89 && at(1, 'PNG')) return 'PNG';
+        if (b[0] === 0xff && b[1] === 0xd8) return 'JPEG';
+        if (at(0, 'RIFF') && at(8, 'WEBP')) return 'WEBP';
+        if (at(0, 'GIF8')) return 'GIF';
+        if (at(4, 'ftypavif') || at(4, 'ftypavis')) return 'AVIF';
+        if (at(4, 'ftyphei') || at(4, 'ftypmif1')) return 'HEIC';
+        if (at(0, 'BM')) return 'BMP';
+    } catch (e) {}
+    const t = String(blob.type || '').split('/')[1];
+    return t ? t.toUpperCase().slice(0, 5) : '--';
+}
+// Analyze's Resolution / Ratio / Type / Size: the figures smaller (down to 11px) rather than clipped.
+function fitAnaStats() {
+    const row = document.getElementById('anaStats');
+    if (!row || !row.offsetParent) return;
+    const vals = [...row.querySelectorAll('.col > div')];
+    vals.forEach(v => { v.style.fontSize = ''; });
+    let size = parseFloat(getComputedStyle(vals[0]).fontSize) || 16;
+    while (row.scrollWidth > row.clientWidth + 1 && size > 11) { size -= 0.5; vals.forEach(v => { v.style.fontSize = `${size}px`; }); }
+}
+// Fitted whenever the row's size changes (a resize, or the Analyze tab first showing it).
+(() => { const row = document.getElementById('anaStats'); if (row && window.ResizeObserver) new ResizeObserver(() => fitAnaStats()).observe(row); else window.addEventListener('resize', () => fitAnaStats()); })();
 
-async function processImageForAnalysis(blob) {
+// onShown runs as the image appears (or if it can't be shown).
+async function processImageForAnalysis(blob, onShown) {
+    let shownDone = false;
+    const shown = () => { if (!shownDone && onShown) { shownDone = true; onShown(); } };
     const myLoadToken = ++anaLoadToken;
     // Shown immediately: these pieces stay hidden until an image is picked.
     const postUpload = document.getElementById('anaPostUploadSection');
@@ -3806,16 +4718,32 @@ async function processImageForAnalysis(blob) {
     // Resolves once the preview has loaded (or failed / been superseded), so callers can wait before showing it.
     let imageSettled;
     const imageLoaded = new Promise(resolve => { imageSettled = resolve; });
-    img.onerror = () => imageSettled();
-    img.onload = () => {
+    img.onerror = () => { shown(); imageSettled(); };
+    img.onload = async () => {
         if (myLoadToken !== anaLoadToken) { URL.revokeObjectURL(url); imageSettled(); return; }
+        // Decoded before it's shown (and before the viewer switches to Analyze), so it appears with the page.
+        const preview = document.getElementById('anaPreview');
+        preview.decoding = 'sync';
+        if (preview.fullSrc && preview.fullSrc !== url && preview.fullSrc.startsWith('blob:')) URL.revokeObjectURL(preview.fullSrc);
+        preview.thumbSrc = null;
+        const box = document.getElementById('anaGallery');
+        const boxW = (box && box.clientWidth) || document.documentElement.clientWidth;
+        showWithScreenCopy(preview, url, boxW, boxW * 4, () => {
+            // The bar's 40px thumbnail from the copy.
+            screenSizedCopy(preview.src, Math.max(1, Math.round(120 * Math.max(1, preview.naturalWidth / preview.naturalHeight)))).then(t => {
+                if (t && preview.fullSrc === url) { preview.thumbSrc = t; if (typeof updateAnalyzerStickyBar === 'function') updateAnalyzerStickyBar(); }
+            });
+        });
+        await Promise.race([(preview.decode ? preview.decode() : Promise.resolve()).catch(() => {}), new Promise(r => setTimeout(r, 1500))]);
+        if (myLoadToken !== anaLoadToken) { imageSettled(); return; }
         const w = img.width;
         const h = img.height;
         const d = gcd(w, h);
         document.getElementById('resOut').innerText = `${w} x ${h}`;
-        document.getElementById('arOut').innerText = `${w/d}:${h/d}`;
-        document.getElementById('anaPreview').src = url;
+        document.getElementById('arOut').innerText = ratioLabel(w, h, d);
         document.getElementById('anaGallery').classList.remove('hidden');
+        fitAnaStats();
+        shown();
         // The "Send image to" row works for any loaded image, metadata or not.
         document.getElementById('anaSendBlock')?.classList.remove('hidden');
         if (typeof updateAnalyzerSendButtons === 'function') updateAnalyzerSendButtons();
@@ -3828,6 +4756,8 @@ async function processImageForAnalysis(blob) {
     // Shows the file size alongside Resolution/Ratio.
     const fileSizeEl = document.getElementById('fileSizeOut');
     if (fileSizeEl) fileSizeEl.innerText = formatFileSize(blob.size);
+    const typeEl = document.getElementById('fileTypeOut');
+    if (typeEl) { typeEl.innerText = '--'; fileTypeOf(blob).then(t => { if (myLoadToken === anaLoadToken) { typeEl.innerText = t; fitAnaStats(); } }); }
     const text = await readPngMetadata(blob);
     await imageLoaded;
     if (myLoadToken !== anaLoadToken) return;
@@ -3866,8 +4796,10 @@ window.clearAnalyzedImage = function() {
 
     const preview = document.getElementById('anaPreview');
     if (preview) {
-        if (preview.src && preview.src.startsWith('blob:')) URL.revokeObjectURL(preview.src);
+        const full = preview.fullSrc || preview.src;
+        if (full && full.startsWith('blob:')) URL.revokeObjectURL(full);
         preview.removeAttribute('src');
+        preview.fullSrc = preview.thumbSrc = null;
     }
     document.getElementById('anaGallery')?.classList.add('hidden');
     document.getElementById('anaPostUploadSection')?.classList.add('hidden');
@@ -3877,6 +4809,7 @@ window.clearAnalyzedImage = function() {
     setText('resOut', '-- x --');
     setText('arOut', '--');
     setText('fileSizeOut', '--');
+    setText('fileTypeOut', '--');
 
     currentAnalyzedPrompts = null;
     const emptyBox = document.getElementById('anaMetaEmpty');
@@ -3893,7 +4826,7 @@ window.clearAnalyzedImage = function() {
     if (fileInput) fileInput.value = '';
 };
 
-// Rebuilds the Analyzer's "Use In" buttons, showing only modes enabled in Interface Tabs settings. With all 5, SDXL sits alone on a wide row below the other 4; with 1-4, they share one row.
+// Rebuilds the Analyzer's "Use In" buttons, showing only modes switched on in Config > Interface > Visible Tabs. With all 5, SDXL sits alone on a wide row below the other 4; with 1-4, they share one row.
 // The modes "Use In" offers, in order, minus any hidden in Settings. Shared by the Use In row and the Analyzer's sticky header menu (analyzer.js).
 const USE_IN_MODE_ORDER = [
     { key: 'xl', label: 'SDXL', fn: 'copyToSdxl' },
@@ -3978,7 +4911,7 @@ function analyzerUseInToast(label, skipped) {
 
 window.copyToSdxl = function() {
     if (!currentAnalyzedPrompts) return;
-    document.getElementById('xl_prompt').value = currentAnalyzedPrompts.pos;
+    document.getElementById('xl_prompt').value = window.ForgeCouple ? ForgeCouple.fromAnalyzed('xl', currentAnalyzedPrompts) : currentAnalyzedPrompts.pos;
     document.getElementById('xl_neg').value = currentAnalyzedPrompts.neg;
     if (typeof savePrompt === 'function') savePrompt('xl');
     if (typeof saveNegativePrompt === 'function') saveNegativePrompt('xl');
@@ -4012,7 +4945,7 @@ window.copyToQwen = function() {
 
 window.copyToAnima = function() {
     if (!currentAnalyzedPrompts) return;
-    document.getElementById('anima_prompt').value = currentAnalyzedPrompts.pos;
+    document.getElementById('anima_prompt').value = window.ForgeCouple ? ForgeCouple.fromAnalyzed('anima', currentAnalyzedPrompts) : currentAnalyzedPrompts.pos;
     document.getElementById('anima_neg').value = currentAnalyzedPrompts.neg || "bad quality, blur, watermark";
     if (typeof savePrompt === 'function') savePrompt('anima');
     if (typeof saveNegativePrompt === 'function') saveNegativePrompt('anima');
@@ -4033,3 +4966,49 @@ window.copyToKrea = function() {
     window.switchTab('gen');
     analyzerUseInToast('KREA', skippedParams);
 }
+
+// Generate / Upscale read SETTLING... from the click while the job is checked; the label returns if nothing starts.
+;(function () {
+    const IDS = ['genBtn', 'inpGenBtn', 'upscaleBtn'];
+    const clear = () => IDS.forEach(id => {
+        const b = document.getElementById(id);
+        if (!b || !b.classList.contains('gen-pending')) return;
+        b.classList.remove('gen-pending');
+        // Nothing ran (the text is still ours): put the label back.
+        if (!b.disabled && b.textContent === b.dataset.pendingText) b.textContent = b.dataset.pendingLabel;
+    });
+    document.addEventListener('click', e => {
+        const b = e.target.closest && e.target.closest('#genBtn, #inpGenBtn, #upscaleBtn');
+        if (!b || b.disabled || b.classList.contains('gen-pending')) return;
+        b.classList.add('gen-pending');
+        b.dataset.pendingLabel = b.textContent;
+        b.dataset.pendingText = b.id === 'genBtn' && window.Scene && Scene.wouldSet() ? 'SETTING SCENE...' : 'SETTLING...';
+        b.textContent = b.dataset.pendingText;
+    }, true);
+    ['generate', 'runUpscaleJob'].forEach(name => {
+        const fn = window[name];
+        if (typeof fn !== 'function') return;
+        window[name] = async function (...args) {
+            try { return await fn.apply(this, args); } finally { clear(); }
+        };
+    });
+})();
+
+// The status bar's height, kept while the bar is hidden (Live Preview or the viewer full screen), when
+// env(safe-area-inset-top) drops to 0 and the page would jump when it comes back.
+function safeTopBarHidden() {
+    return statusBarHidden;
+}
+function rememberSafeTop() {
+    if (safeTopBarHidden()) return;
+    let probe = document.getElementById('safeTopProbe');
+    if (!probe) {
+        probe = document.createElement('div');
+        probe.id = 'safeTopProbe';
+        document.body.appendChild(probe);
+    }
+    document.documentElement.style.setProperty('--safe-top', `${probe.offsetHeight}px`);
+}
+window.addEventListener('resize', rememberSafeTop);
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', rememberSafeTop);
+else rememberSafeTop();

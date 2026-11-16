@@ -1,4 +1,4 @@
-// Data Usage tracker (Config > Experimental): approximate data per Generate, queue or Upscale job.
+// Data Usage tracker (Config > Diagnostics): approximate data per Generate, queue or Upscale job.
 // Counts request/response bodies only (not headers, TLS or compression).
 (function () {
     const ENABLED_KEY = 'bojroDataUsageTracker';
@@ -95,7 +95,10 @@
     function addImages(kind, count, firstDataUrl) {
         const s = active[kind];
         if (!s || !count) return;
-        if (!s.firstImage && firstDataUrl) s.firstImage = firstDataUrl;
+        if (!s.firstImage && firstDataUrl) {
+            s.firstImage = firstDataUrl;
+            s.format = { 'image/jpeg': 'JPEG', 'image/webp': 'WEBP' }[imageMimeFromBase64(firstDataUrl)] || 'PNG';
+        }
         s.images += count;
     }
 
@@ -141,7 +144,7 @@
         const netEnd = await connectionType();
         const net = s.net && netEnd && s.net !== netEnd ? `${s.net} → ${netEnd}` : (s.net || netEnd);
         const list = readHistory();
-        list.unshift({ t: s.t, label: s.label, mode: s.mode, kind: s.kind, sent: s.sent, recv: s.recv, images: s.images, steps: s.steps, live: s.live, status, thumb, net });
+        list.unshift({ t: s.t, label: s.label, mode: s.mode, kind: s.kind, sent: s.sent, recv: s.recv, images: s.images, steps: s.steps, live: s.live, status, thumb, net, format: s.format || null });
         writeHistory(list.slice(0, MAX_HISTORY));
         const modal = document.getElementById('dataUsageModal');
         if (modal && !modal.classList.contains('hidden')) renderHistory();
@@ -185,7 +188,7 @@
         document.getElementById('dataUsageClearBtn')?.classList.toggle('hidden', !list.length);
         listEl.innerHTML = '';
         if (!list.length) {
-            listEl.innerHTML = '<div style="text-align:center; color:var(--text-muted); font-size:12px; padding:20px 0;">No jobs recorded yet</div>';
+            listEl.innerHTML = '<div class="empty-note" style="padding:20px 0;">No jobs recorded yet</div>';
             if (sumEl) sumEl.textContent = '';
             return;
         }
@@ -247,6 +250,12 @@
                 chip.textContent = e.net;
                 info.querySelector('.data-usage-when').appendChild(chip);
             }
+            if (e.format) {
+                const chip = document.createElement('span');
+                chip.className = 'gal-badge data-usage-fmt' + (e.format === 'PNG' ? ' png' : e.format === 'WEBP' ? ' webp' : '');
+                chip.textContent = e.format;
+                info.querySelector('.data-usage-when').appendChild(chip);
+            }
             row.append(thumb, info);
             listEl.appendChild(row);
         });
@@ -283,7 +292,6 @@
         if (typeof unlockBodyScroll === 'function') unlockBodyScroll();
     };
     window.clearDataUsageHistory = async function () {
-        if (!(await window.appConfirm('Clear the data usage history?', { title: 'Data Usage', okText: 'CLEAR', danger: true }))) return;
         localStorage.removeItem(HISTORY_KEY);
         // Closes the window, as Clear all in the Analyzer's Recent does.
         window.closeDataUsageHistory();
@@ -297,6 +305,7 @@
         if (pillSw) pillSw.checked = pillEnabled();
         document.getElementById('cfgDataUsagePillRow')?.classList.toggle('hidden', !enabled());
         document.getElementById('cfgDataUsageHistoryBtn')?.classList.toggle('hidden', !enabled());
+        window.syncCfgToolsRow?.();
     }
     // Switching tracking off also clears the history.
     window.toggleDataUsageTracker = function () {

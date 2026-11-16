@@ -14,16 +14,30 @@ window.updateDenoiseStepHint = function() {
         ? `All ${steps} steps will run`
         : `${steps} steps set \u2192 ~${effective} will actually run`;
 }
+// Setting either box's value by code refreshes the hint too.
+;(() => {
+    const desc = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+    if (!desc || !desc.set) return;
+    ['inp_steps', 'denoisingStrength'].forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        Object.defineProperty(el, 'value', {
+            configurable: true,
+            get() { return desc.get.call(this); },
+            set(v) { desc.set.call(this, v); window.updateDenoiseStepHint(); }
+        });
+    });
+})();
 
-// The main tabs' 1MP/2MP aspect ratio presets (index.html resGrid), stored in landscape form; portraitLabel is the same ratio the other way round. Sides are multiples of 8 (Forge rounds down otherwise); the revised exact-ratio sizes are kept identical to those grids.
+// The main tabs' 1MP/2MP aspect ratio presets (index.html resGrid), stored in landscape form; portraitLabel is the same ratio the other way round. Sides are multiples of 16, identical to those grids.
 const EDITOR_RATIO_PRESETS_1MP = [
     { w: 1024, h: 1024, landscapeLabel: '1:1', portraitLabel: '1:1' },
-    { w: 1152, h: 768, landscapeLabel: '3:2', portraitLabel: '2:3' },
-    { w: 1184, h: 888, landscapeLabel: '4:3', portraitLabel: '3:4' },
-    { w: 1368, h: 768, landscapeLabel: '16:9', portraitLabel: '9:16' }
+    { w: 1248, h: 832, landscapeLabel: '3:2', portraitLabel: '2:3' },
+    { w: 1152, h: 864, landscapeLabel: '4:3', portraitLabel: '3:4' },
+    { w: 1280, h: 720, landscapeLabel: '16:9', portraitLabel: '9:16' }
 ];
 const EDITOR_RATIO_PRESETS_2MP = [
-    { w: 1448, h: 1448, landscapeLabel: '1:1', portraitLabel: '1:1' },
+    { w: 1440, h: 1440, landscapeLabel: '1:1', portraitLabel: '1:1' },
     { w: 1776, h: 1184, landscapeLabel: '3:2', portraitLabel: '2:3' },
     { w: 1536, h: 1152, landscapeLabel: '4:3', portraitLabel: '3:4' },
     { w: 2048, h: 1152, landscapeLabel: '16:9', portraitLabel: '9:16' }
@@ -131,8 +145,101 @@ window.openEditorFromFile = function(e) {
     openEditorFromBlob(file);
 };
 
+// Android's photo picker fades back to the upload screen before the image arrives, so a cover goes up 0.3s after it
+// opens and lifts once Crop & Edit or Analyze shows the image (at once on cancel or a tap).
+const PickerCover = (() => {
+    const INPUTS = ['inpUpload', 'imageUpload'];
+    let armed = false, picked = false, timer = 0, showTimer = 0, cover = null;
+    // At once when the image is shown (same frame); faded out, alongside the picker's own fade, when nothing was picked.
+    const lift = (fade) => {
+        clearTimeout(timer);
+        clearTimeout(showTimer);
+        armed = false;
+        if (!cover || cover.classList.contains('hidden')) return;
+        if (fade !== true) {
+            cover.classList.remove('fading');
+            cover.classList.add('hidden');
+            return;
+        }
+        cover.classList.add('fading');
+        setTimeout(() => {
+            if (!cover.classList.contains('fading')) return;
+            cover.classList.remove('fading');
+            cover.classList.add('hidden');
+        }, 260);
+    };
+    const cancelled = () => lift(true);
+    const returned = () => {
+        if (!armed || picked) return;
+        clearTimeout(timer);
+        timer = setTimeout(() => { if (!picked) cancelled(); }, 1500);
+    };
+    const show = () => {
+        if (!cover) {
+            cover = document.createElement('div');
+            cover.id = 'pickerCover';
+            cover.addEventListener('pointerdown', cancelled);
+            document.body.appendChild(cover);
+        }
+        cover.classList.remove('hidden', 'fading');
+    };
+    INPUTS.forEach(id => {
+        const input = document.getElementById(id);
+        if (!input) return;
+        input.addEventListener('click', () => {
+            armed = true;
+            picked = false;
+            clearTimeout(timer);
+            clearTimeout(showTimer);
+            showTimer = setTimeout(() => { if (armed) show(); }, 300);
+        });
+        input.addEventListener('change', () => {
+            picked = true;
+            // Never left up if the image can't be shown.
+            clearTimeout(timer);
+            timer = setTimeout(lift, 5000);
+        });
+        input.addEventListener('cancel', cancelled);
+    });
+    document.addEventListener('visibilitychange', () => {
+        if (!armed) return;
+        if (document.hidden) { show(); return; }
+        returned();
+    });
+    window.addEventListener('focus', returned);
+    return { lift, cancelled };
+})();
+
+// Opens Crop & Edit on a loaded image, drawn in the same frame. beforeShow runs just before, so the screen changes once.
+function presentEditorImage(img, beforeShow) {
+    editorImage = img;
+    // Placeholder matching this image's shape, before anything renders.
+    editorTargetW = img.naturalWidth;
+    editorTargetH = img.naturalHeight;
+    detectAndSetEditorOrientation(img);
+    highlightEditorMpLabel(img);
+    resetConfineToImageState();
+    if (beforeShow) beforeShow();
+    const editorCanvasEl = document.getElementById('editorCanvas');
+    editorCanvasEl?.getContext('2d')?.clearRect(0, 0, editorCanvasEl.width, editorCanvasEl.height);
+    document.getElementById('editorModal').classList.remove('hidden');
+    // Laid out on the spot (the fit measures the viewport), so the crop box fits the image's aspect ratio rather than 1:1.
+    fitEditorToImage();
+    PickerCover.lift();
+}
+// Loads and decodes an image, then presents it (above).
+function loadEditorImage(src, beforeShow) {
+    const img = new Image();
+    img.crossOrigin = "Anonymous";
+    img.onload = () => {
+        (img.decode ? img.decode() : Promise.resolve()).catch(() => {}).then(() => presentEditorImage(img, beforeShow));
+    };
+    img.onerror = () => { PickerCover.lift(); window.appAlert("Failed to load image for editing."); };
+    img.src = src;
+}
+
 // An uploaded image (or one reopened from RECENT) into Crop & Edit.
-function openEditorFromBlob(file) {
+function openEditorFromBlob(file, beforeShow) {
     // Read the original file's embedded prompt/negative now, since PROCEED re-encodes the image and drops PNG text chunks (see inpSourceMetadata, globals.js). Held as a pending promise and committed by applyEditorChanges(), so backing out leaves the loaded image's metadata alone.
     editorPendingMetadataPromise = readImportablePromptsFromBlob(file);
     editorPendingTextChunksPromise = readPngTextChunks(file);
@@ -140,32 +247,9 @@ function openEditorFromBlob(file) {
     // Picked from the phone on the Inpaint tab: cancelling stays here.
     editorReturnTo = null;
 
-    // Opened immediately, before the file is read (as editCurrentFs(), engine.js), so the underlying page can't flash.
-    const editorCanvasEl = document.getElementById('editorCanvas');
-    editorCanvasEl?.getContext('2d')?.clearRect(0, 0, editorCanvasEl.width, editorCanvasEl.height);
-    document.getElementById('editorModal').classList.remove('hidden');
-
+    // Opens once the image is decoded, with it drawn (loadEditorImage()).
     const reader = new FileReader();
-    reader.onload = (evt) => {
-        const img = new Image();
-        img.src = evt.target.result;
-        img.onload = () => {
-            editorImage = img;
-            // Synchronous placeholder matching this image's shape, before anything renders.
-            editorTargetW = img.naturalWidth;
-            editorTargetH = img.naturalHeight;
-            detectAndSetEditorOrientation(img);
-            highlightEditorMpLabel(img);
-            resetConfineToImageState();
-
-            // 2. Wait for layout (double rAF), then fit the crop box to the image's aspect ratio rather than 1:1. editorTargetW/H are global and don't reset between images.
-            requestAnimationFrame(() => {
-                requestAnimationFrame(() => {
-                    fitEditorToImage();
-                });
-            });
-        };
-    };
+    reader.onload = (evt) => loadEditorImage(evt.target.result, beforeShow);
     reader.readAsDataURL(file);
 }
 
@@ -392,12 +476,24 @@ function drawEditor() {
     ctx.strokeRect(cropBox.x, cropBox.y, cropBox.w, cropBox.h);
 }
 
+// The midpoint of two touches in canvas pixels (the units editorTranslateX/Y and the crop box use).
+let editorPinchStartMid = null;
+function editorPinchMid(a, b) {
+    const cvs = getEditorCanvasEl();
+    const rect = cvs.getBoundingClientRect();
+    return {
+        x: ((a.clientX + b.clientX) / 2 - rect.left) * (cvs.width / rect.width),
+        y: ((a.clientY + b.clientY) / 2 - rect.top) * (cvs.height / rect.height)
+    };
+}
+
 // Touch Handling (Gestures)
 function handleTouchStart(e) {
     if (e.target.closest('input')) return;
     if (e.cancelable) e.preventDefault();
     if (e.touches.length === 2) {
         pinchStartDist = getDist(e.touches[0], e.touches[1]);
+        editorPinchStartMid = editorPinchMid(e.touches[0], e.touches[1]);
         startScale = editorScale;
         startTranslate = {
             x: editorTranslateX,
@@ -455,17 +551,17 @@ function handleTouchMove(e) {
     if (e.touches.length === 2 && pinchStartDist > 0) {
         const dist = getDist(e.touches[0], e.touches[1]);
         const scaleFactor = dist / pinchStartDist;
-        // Clamp the proposed scale before the zoom-around-centre translation maths, so pinching past the cap doesn't slide the image.
+        // Clamp the proposed scale before the anchor maths, so pinching past the cap doesn't slide the image.
         const clampedScale = clampEditorScale(startScale * scaleFactor);
         const effectiveScaleFactor = clampedScale / startScale;
         const prevScale = editorScale, prevX = editorTranslateX, prevY = editorTranslateY;
         editorScale = clampedScale;
 
-        const cvs = getEditorCanvasEl();
-        const centerX = cvs.width / 2;
-        const centerY = cvs.height / 2;
-        editorTranslateX = centerX - (centerX - startTranslate.x) * effectiveScaleFactor;
-        editorTranslateY = centerY - (centerY - startTranslate.y) * effectiveScaleFactor;
+        // The image point that was under the fingers' midpoint when the pinch began stays under it (and follows it as they move).
+        const mid = editorPinchMid(e.touches[0], e.touches[1]);
+        const start = editorPinchStartMid || mid;
+        editorTranslateX = mid.x - (start.x - startTranslate.x) * effectiveScaleFactor;
+        editorTranslateY = mid.y - (start.y - startTranslate.y) * effectiveScaleFactor;
         clampEditorTransform();
         // Only clears if the crop actually changed (tolerance, see the 1-finger pan branch below).
         if (Math.abs(editorScale - prevScale) > FIT_TO_IMAGE_CHANGE_EPSILON ||
@@ -493,6 +589,7 @@ function handleTouchMove(e) {
 function handleTouchEnd() {
     isEditorActive = false;
     pinchStartDist = 0;
+    editorPinchStartMid = null;
 }
 
 function handleMouseDown(e) {
@@ -560,6 +657,80 @@ function canvasToPngDataUrl(canvas) {
     });
 }
 
+// Outpainting: where the image sits in a crop that goes beyond it ({x0, y0, x1, y1} in output pixels), or null.
+let outpaintRect = null;
+function imageRectInCrop(sx, sy, sw, sh) {
+    const iw = editorImage.naturalWidth || editorImage.width, ih = editorImage.naturalHeight || editorImage.height;
+    const kx = editorTargetW / sw, ky = editorTargetH / sh;
+    const r = {
+        x0: Math.max(0, Math.ceil(-sx * kx)), y0: Math.max(0, Math.ceil(-sy * ky)),
+        x1: Math.min(editorTargetW, Math.floor((iw - sx) * kx)), y1: Math.min(editorTargetH, Math.floor((ih - sy) * ky))
+    };
+    if (r.x1 - r.x0 < 2 || r.y1 - r.y0 < 2) return null;
+    return (r.x0 > 0 || r.y0 > 0 || r.x1 < editorTargetW || r.y1 < editorTargetH) ? r : null;
+}
+// The empty margins take the image's edge colours (sides first, then top and bottom with the corners), blurred into
+// soft colour so no streaks are left for the model to follow.
+function fillOutpaintMargins(ctx, r) {
+    const c = ctx.canvas, W = c.width, H = c.height, h = r.y1 - r.y0;
+    ctx.imageSmoothingEnabled = false;
+    if (r.x0 > 0) ctx.drawImage(c, r.x0 + 1, r.y0, 1, h, 0, r.y0, r.x0 + 1, h);
+    if (r.x1 < W) ctx.drawImage(c, r.x1 - 2, r.y0, 1, h, r.x1 - 1, r.y0, W - r.x1 + 1, h);
+    if (r.y0 > 0) ctx.drawImage(c, 0, r.y0 + 1, W, 1, 0, 0, W, r.y0 + 1);
+    if (r.y1 < H) ctx.drawImage(c, 0, r.y1 - 2, W, 1, 0, r.y1 - 1, W, H - r.y1 + 1);
+    ctx.imageSmoothingEnabled = true;
+    // Blurred with the edges carried on past the canvas, so its borders keep full colour.
+    const rad = Math.max(6, Math.round(Math.max(W, H) * 0.02)), p = rad * 3;
+    const pad = document.createElement('canvas');
+    pad.width = W + 2 * p;
+    pad.height = H + 2 * p;
+    const pc = pad.getContext('2d');
+    pc.imageSmoothingEnabled = false;
+    pc.drawImage(c, p, p);
+    pc.drawImage(pad, p, p, 1, H, 0, p, p, H);
+    pc.drawImage(pad, p + W - 1, p, 1, H, p + W, p, p, H);
+    pc.drawImage(pad, 0, p, W + 2 * p, 1, 0, 0, W + 2 * p, p);
+    pc.drawImage(pad, 0, p + H - 1, W + 2 * p, 1, 0, p + H, W + 2 * p, p);
+    const blur = document.createElement('canvas');
+    blur.width = pad.width;
+    blur.height = pad.height;
+    const b = blur.getContext('2d');
+    b.filter = `blur(${rad}px)`;
+    b.drawImage(pad, 0, 0);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, W, H);
+    ctx.rect(r.x0, r.y0, r.x1 - r.x0, r.y1 - r.y0);
+    ctx.clip('evenodd');
+    ctx.drawImage(blur, p, p, W, H, 0, 0, W, H);
+    ctx.restore();
+}
+// Masks the margins plus a small overlap into the image, as if painted.
+function maskOutpaintMargins(r) {
+    const W = maskCanvas.width, H = maskCanvas.height;
+    const o = Math.round(Math.max(8, Math.min(W, H) * 0.03));
+    const keep = {
+        x: r.x0 > 0 ? r.x0 + o : 0, y: r.y0 > 0 ? r.y0 + o : 0,
+        x1: r.x1 < W ? r.x1 - o : W, y1: r.y1 < H ? r.y1 - o : H
+    };
+    const paint = (g, colour) => {
+        g.save();
+        g.fillStyle = colour;
+        g.beginPath();
+        g.rect(0, 0, W, H);
+        if (keep.x1 > keep.x && keep.y1 > keep.y) g.rect(keep.x, keep.y, keep.x1 - keep.x, keep.y1 - keep.y);
+        g.fill('evenodd');
+        g.restore();
+    };
+    paint(maskCtx, 'white');
+    paint(strokeLayerCtx, 'rgba(255, 165, 0, 1)');
+    mainCtx.clearRect(0, 0, mainCanvas.width, mainCanvas.height);
+    mainCtx.globalAlpha = 0.5;
+    mainCtx.drawImage(strokeLayerCanvas, 0, 0);
+    mainCtx.globalAlpha = 1;
+    saveHistory();
+}
+
 window.applyEditorChanges = async function() {
     // toDataURL('image/png') is synchronous and freezes the UI, so show feedback on tap, use toBlob() and read it back into the data-URL format downstream code expects.
     const proceedBtn = document.getElementById('editorProceedBtn');
@@ -587,6 +758,8 @@ window.applyEditorChanges = async function() {
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(editorImage, sourceX, sourceY, sourceW, sourceH, 0, 0, editorTargetW, editorTargetH);
+        outpaintRect = imageRectInCrop(sourceX, sourceY, sourceW, sourceH);
+        if (outpaintRect) fillOutpaintMargins(ctx, outpaintRect);
 
         sourceImageB64 = await canvasToPngDataUrl(finalCvs);
         // Commit the metadata captured when this image entered the editor (inpSourceMetadata, globals.js) together with its image. Unconditional, so a path that captured none leaves null rather than the previous image's prompts. Awaited, since the read is async.
@@ -603,7 +776,12 @@ window.applyEditorChanges = async function() {
         }
     }
 
+    // Only Inpaint fills the new area, so a crop beyond the image switches there (from img2img or Upscale).
+    const toInpaint = outpaintRect && currentTask === 'inp' && currentInpaintTopMode !== 'inpaint' && typeof setInpaintTopMode === 'function';
+    if (toInpaint) setInpaintTopMode('inpaint');
     resetInpaintCanvas();
+    if (outpaintRect) maskOutpaintMargins(outpaintRect);
+    if (toInpaint && typeof Toast !== 'undefined' && Toast) Toast.show({ text: 'Switched to Inpaint to fill the new area', duration: 'short' });
 
     // As clearInpaintImage(): any uploaded ControlNet image was for the previous image.
     if (typeof clearControlNetImage === 'function') {
@@ -1164,7 +1342,7 @@ function restoreInpaintModeState(mode) {
         // sampler/scheduler are populated from the server, so setting .value before the list exists is ignored.
         if (id === 'denoisingStrength') {
             const dv = document.getElementById('denoiseVal');
-            if (dv) dv.innerText = el.value;
+            if (dv) dv.innerText = Number(el.value).toFixed(2);
         }
     });
 
@@ -1271,6 +1449,7 @@ window.setInpaintTopMode = function(mode) {
     document.getElementById('img2img_add_lora_btn').classList.toggle('hidden', isInpaint);
     document.getElementById('img2imgColorCorrectionRow').classList.toggle('hidden', isInpaint);
     document.getElementById('img2imgPresetsBtn').classList.toggle('hidden', isInpaint);
+    document.getElementById('img2imgStylesBtn').classList.toggle('hidden', isInpaint);
     // The import-from-image-metadata buttons are img2img only: there the prompt describes the whole image. In Inpaint the box describes only the masked region.
     document.getElementById('img2imgImportPromptBtn').classList.toggle('hidden', isInpaint);
     document.getElementById('img2imgImportNegBtn').classList.toggle('hidden', isInpaint);
@@ -1312,7 +1491,8 @@ function initThumbOnlySlider(sliderId) {
         const inputRect = input.getBoundingClientRect();
         const min = parseFloat(input.min) || 0;
         const max = parseFloat(input.max) || 100;
-        const step = parseFloat(input.step) || 1;
+        // data-drag-step: a coarser step for dragging than the input's own (Denoising: 0.05, with − / + in 0.01).
+        const step = parseFloat(input.dataset.dragStep || input.step) || 1;
         const rawPercent = inputRect.width > 0 ? (clientX - inputRect.left) / inputRect.width : 0;
         const clampedPercent = Math.min(1, Math.max(0, rawPercent));
         const rawValue = min + clampedPercent * (max - min);
@@ -1361,6 +1541,19 @@ function initThumbOnlySlider(sliderId) {
 }
 
 THUMB_ONLY_SLIDER_IDS.forEach(initThumbOnlySlider);
+
+// − / + beside a slider's value: moves it by delta (0.01) within its range, as if typed, so its input/change handlers
+// save it. Dragging afterwards snaps back to the slider's own drag step.
+window.nudgeSlider = function (id, delta) {
+    const input = document.getElementById(id);
+    if (!input) return;
+    const min = parseFloat(input.min), max = parseFloat(input.max);
+    const v = Math.min(max, Math.max(min, Math.round((parseFloat(input.value) + delta) * 100) / 100));
+    input.value = v.toFixed(2);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    if (THUMB_ONLY_SLIDER_IDS.includes(id)) syncThumbOnlySliderPosition(id);
+};
 // The thumb position comes from the input's rendered width, which a rotation, resize or the tab becoming visible can change without the value changing.
 window.addEventListener('resize', () => THUMB_ONLY_SLIDER_IDS.forEach(syncThumbOnlySliderPosition));
 
@@ -1383,17 +1576,20 @@ window.addEventListener('resize', () => THUMB_ONLY_SLIDER_IDS.forEach(syncThumbO
 
     const dockTop = () => document.querySelector('.glass-dock')?.getBoundingClientRect().top ?? window.innerHeight;
 
-    // Shown while the real slider is below the dock and the canvas is on screen.
+    const mainWrap = main.closest('.slider-fake-thumb-wrap') || main;
+    // Shown once the whole real slider (thumb included) is behind the dock, with the canvas on screen. The real slider
+    // is hidden meanwhile (its space kept), so it doesn't show moving in the gap under a floating dock.
     function update() {
-        const on = localStorage.getItem('bojroFloatingBrushSize') === 'true';
+        const on = localStorage.getItem('bojroFloatingBrushSize') !== 'false';
         if (!on || main.offsetParent === null) { hide(); return; }
-        // Thumb touch area, so half-hidden counts as hidden.
         const r = mainThumb.getBoundingClientRect();
         const limit = dockTop();
         const c = mainCanvas ? mainCanvas.getBoundingClientRect() : null;
         const canvasOnScreen = !!c && c.bottom > 0 && c.top < limit;
-        if (!(r.width > 0 && canvasOnScreen && r.bottom > limit && !isKeyboardUp())) { hide(); return; }
+        const track = main.getBoundingClientRect();
+        if (!(r.width > 0 && canvasOnScreen && Math.min(track.top, r.top) >= limit && !isKeyboardUp())) { hide(); return; }
         bar.classList.remove('hidden');
+        mainWrap.style.visibility = 'hidden';
         bar.style.bottom = `${window.innerHeight - limit + GAP}px`;
         // Toasts sit just above the dock, so lift them over the bar while it shows.
         const toasts = toastBox();
@@ -1404,6 +1600,7 @@ window.addEventListener('resize', () => THUMB_ONLY_SLIDER_IDS.forEach(syncThumbO
     function hide() {
         if (bar.classList.contains('hidden')) return;
         bar.classList.add('hidden');
+        mainWrap.style.visibility = '';
         const toasts = toastBox();
         if (toasts) toasts.style.bottom = toastBottom;
     }
@@ -1411,7 +1608,7 @@ window.addEventListener('resize', () => THUMB_ONLY_SLIDER_IDS.forEach(syncThumbO
 
     let queued = false;
     const schedule = () => {
-        if (queued || (bar.classList.contains('hidden') && localStorage.getItem('bojroFloatingBrushSize') !== 'true')) return;
+        if (queued || (bar.classList.contains('hidden') && localStorage.getItem('bojroFloatingBrushSize') === 'false')) return;
         queued = true;
         requestAnimationFrame(() => { queued = false; update(); });
     };
@@ -1578,7 +1775,7 @@ window.clearMask = function() {
             g = null;
             guardUntil = 0;
             if (e.touches.length !== 1 || ignoresSwipe(e.target, view)) return;
-            g = { x0: e.touches[0].clientX, y0: e.touches[0].clientY, t: Date.now(), locked: false, field: e.target.closest('input,textarea,select,[contenteditable]') };
+            g = { x0: e.touches[0].clientX, y0: e.touches[0].clientY, sy: window.scrollY, t: Date.now(), locked: false, field: e.target.closest('input,textarea,select,[contenteditable]') };
             if (!g.field) return;
             // A field not being typed in is read-only during the touch, so a drag can't focus it or move its caret.
             const f = g.field;
@@ -1604,7 +1801,10 @@ window.clearMask = function() {
                 g.locked = true;
                 unfocus();
             }
+            // A swipe that turns into a scroll is a scroll.
+            if (Math.abs(dy) > Math.max(40, Math.abs(dx))) { g = null; return; }
             g.dx = dx;
+            g.dy = dy;
         }, { passive: true });
         const end = (e) => {
             const s = g;
@@ -1612,6 +1812,10 @@ window.clearMask = function() {
             if (!s || !s.locked) return;
             const fast = Math.abs(s.dx) / Math.max(1, Date.now() - s.t) > 0.5 && Math.abs(s.dx) > 40;
             if (Math.abs(s.dx) < MIN_DX && !fast) return;
+            // The page scrolled meanwhile (a fling still moving, or content arriving): not a swipe.
+            const scrolled = window.scrollY - s.sy;
+            if (Math.abs(scrolled) > 12) return;
+            if (typeof dlog === 'function') dlog(`tab swipe: across ${Math.round(s.dx)}px, down ${Math.round(s.dy || 0)}px, scrolled ${Math.round(scrolled)}px, ${Date.now() - s.t}ms`);
             // Stop the lift-off from focusing a field, and close one still being edited.
             if (e && e.cancelable) e.preventDefault();
             guardUntil = Date.now() + 600;

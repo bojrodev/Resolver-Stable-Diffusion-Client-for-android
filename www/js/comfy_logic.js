@@ -549,7 +549,7 @@ function renderPowerLoraSlot(container, nodeId, key, data) {
             <label style="color:var(--text-main); font-weight:900; margin:0;">${escapeHtmlAttr(key.toUpperCase().replace('_', ' '))}</label>
             
             <div class="row" style="width:auto; gap:8px; align-items:center;">
-                <label for="${enabledSwId}" style="margin:0; font-size:9px;">ENABLED</label>
+                <label for="${enabledSwId}" style="margin:0; font-size:var(--fs-small);">ENABLED</label>
                 <input type="checkbox" id="${enabledSwId}" class="bojro-switch" 
                     ${data.on ? 'checked' : ''} 
                     onchange="updateComfyValue('${safeId(nodeId)}', '${safeId(key)}.on', this.checked)">
@@ -757,7 +757,7 @@ function createComfyImageUpload(parent, nodeId, inputs, title) {
                     <i data-lucide="x" size="14"></i>
                 </button>
             </div>
-            <div id="${statusId}" style="font-size:9px; color:var(--text-muted); margin-top:5px; text-align:right;"></div>
+            <div id="${statusId}" style="font-size:var(--fs-small); color:var(--text-muted); margin-top:5px; text-align:right;"></div>
         </div>
     `;
     
@@ -940,7 +940,7 @@ async function queueComfyPrompt() {
     btn.disabled = true;
     
     if (typeof updateBatchNotification === 'function') {
-        updateBatchNotification("ComfyUI", true, "Generating...");
+        updateBatchNotification("ComfyUI: Generating...", true, "");
         }
     btn.innerHTML = `<i data-lucide="loader-2" class="spin"></i> RUNNING...`; // Keeps spinning!
     
@@ -1373,7 +1373,7 @@ async function renderTemplateList() {
             div.innerHTML = `
                 <div class="tmpl-info">
                     <span class="tmpl-name">${escapeHtmlAttr(tmpl.name)}</span>
-                    <span style="font-size:9px; color:var(--text-muted);">${escapeHtmlAttr(tmpl.date)}</span>
+                    <span style="font-size:var(--fs-small); color:var(--text-muted);">${escapeHtmlAttr(tmpl.date)}</span>
                 </div>
                 <div class="tmpl-check ${isSelected ? '' : 'hidden'}">
                     <i data-lucide="check-circle" size="14" style="color:var(--error);"></i>
@@ -1602,6 +1602,8 @@ function isolateComfyMaskingDOM(isolate) {
 
     // 4. Force brush tools visible even if user was previously in img2img or upscale mode
     if (brushControls) brushControls.classList.remove('hidden');
+    // The Mask card's other settings aren't used by Comfy masking.
+    ['maskedContentGroup', 'maskOnlyControls'].forEach(id => document.getElementById(id)?.classList.add('comfy-isolated-hidden'));
     const maskToolBtns = document.getElementById('maskToolButtons');
     if (maskToolBtns) maskToolBtns.classList.remove('hidden');
 }
