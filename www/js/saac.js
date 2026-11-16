@@ -110,13 +110,14 @@ window.SaacManager = {
             if (!grid) return resolve(false);
 
             grid.innerHTML = `
-                <div style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 85%; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; font-family: var(--font-main); color: var(--text-main); z-index: 100;">
-                    <div style="margin-bottom: 15px; font-weight: bold; letter-spacing: 1px;">SYNCING DATABASE...<br>DO NOT CLOSE THIS POP UP</div>
-                    <div style="width: 100%; height: 12px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; overflow: hidden; margin-bottom: 12px;">
-                        <div id="saac-progress-bar" style="width: 0%; height: 100%; background: var(--accent-gradient); box-shadow: 0 0 10px var(--accent-primary); transition: width 0.1s;"></div>
-                    </div>
-                    <div id="saac-progress-text" style="font-size: 12px; color: var(--text-muted);">Requesting access...</div>
+                <div class="saac-sync">
+                    <div class="saac-sync-icon"><i data-lucide="database" width="26" height="26"></i></div>
+                    <div class="saac-sync-title">Downloading characters</div>
+                    <div class="saac-sync-note">One-time download. Keep this window open<br>until it finishes.</div>
+                    <div class="saac-sync-track"><div id="saac-progress-bar" class="saac-sync-fill"></div></div>
+                    <div class="saac-sync-row"><span id="saac-progress-text">Connecting...</span><span id="saac-progress-pct" class="saac-sync-pct"></span></div>
                 </div>`;
+            if (window.lucide) lucide.createIcons();
 
             if (this.currentXhr) this.currentXhr.abort();
             this.currentXhr = new XMLHttpRequest();
@@ -133,15 +134,17 @@ window.SaacManager = {
                     if (progressText) {
                         const loadedMb = (event.loaded / (1024 * 1024)).toFixed(1);
                         const totalMb = (event.total / (1024 * 1024)).toFixed(1);
-                        progressText.innerText = `${Math.round(percent)}% (${loadedMb}MB / ${totalMb}MB)`;
+                        progressText.innerText = `${loadedMb} MB of ${totalMb} MB`;
                     }
+                    const pct = document.getElementById('saac-progress-pct');
+                    if (pct) pct.innerText = `${Math.round(percent)}%`;
                 }
             };
 
             xhr.onload = () => {
                 if (xhr.status === 200) {
                     const progressText = document.getElementById('saac-progress-text');
-                    if (progressText) progressText.innerText = "Processing 125MB Data...";
+                    if (progressText) progressText.innerText = "Preparing the list...";
                     
                     setTimeout(async () => {
                         try {
@@ -205,17 +208,22 @@ window.SaacManager = {
         const q = searchQuery(rawQ);
         const clearBtn = document.getElementById('saacSearchClear');
         if (clearBtn) clearBtn.classList.toggle('hidden', !rawQ);
-        let filtered = q ? this.data.filter(c => 
-            searchKey(c.name).includes(q) || searchKey(c.tag).includes(q)
-        ) : [...this.data];
-        // Characters already in the prompt first, alphabetical within each group. Matched loosely (normaliseTag()), so a formatted tag counts.
+        let filtered = q ? searchFilter(this.data, c => [c.name, c.tag], q) : [...this.data];
+        // Favourites view: favourites only, unless searching (then everything, favourites first, item 59).
+        if (this.favOnly && !q) filtered = filtered.filter(c => this.isFav(c.tag));
+        this.paintFavButton();
+        // Characters already in the prompt first, then the order chosen with the sort button (item 85). Matched loosely (normaliseTag()), so a formatted tag counts.
         const inPrompt = boxTagSet(document.getElementById('xl_prompt'));
+        const favFirst = this.favOnly && q;
+        const order = ListSort.compare('saac', { name: c => c.name, key: c => normaliseTag(c.tag), added: () => 0 });
+        ListSort.paint(document.getElementById('saacSortBtn'), 'saac');
         filtered.sort((a, b) => {
+            if (favFirst && this.isFav(a.tag) !== this.isFav(b.tag)) return this.isFav(a.tag) ? -1 : 1;
             const aActive = inPrompt.has(normaliseTag(a.tag));
             const bActive = inPrompt.has(normaliseTag(b.tag));
             if (aActive && !bActive) return -1;
             if (!aActive && bActive) return 1;
-            return a.name.localeCompare(b.name);
+            return order(a, b);
         });
         this.filteredData = filtered;
         cardsGrid.innerHTML = "";
@@ -228,12 +236,29 @@ window.SaacManager = {
         // A sibling of cardsGrid, in normal flow after it.
         scrollContainer.appendChild(trigger);
         this.renderMore();
+        this.fillAhead();
+        if (this.favOnly && !filtered.length) cardsGrid.innerHTML = `<div class="saac-empty">${q ? 'No matches.' : 'Empty'}</div>`;
         this.fitGridHeight(scrollContainer, cardsGrid);
         if(this.observer) this.observer.disconnect();
         this.observer = new IntersectionObserver(e => {
-            if(e[0].isIntersecting && this.displayedCount < this.filteredData.length) this.renderMore();
+            if(e[0].isIntersecting) this.fillAhead();
         }, { root: scrollContainer });
         this.observer.observe(trigger);
+        if (!scrollContainer.saacFillListener) {
+            scrollContainer.saacFillListener = true;
+            scrollContainer.addEventListener('scroll', () => this.fillAhead(), { passive: true });
+        }
+    },
+
+    // Renders batches until there are two screens of cards past those shown, so a fling never reaches the end of the
+    // rendered cards (where it would stop) before the next batch is in.
+    fillAhead: function() {
+        const grid = document.getElementById('saacGrid');
+        if (!grid) return;
+        while (this.displayedCount < this.filteredData.length
+            && grid.scrollHeight - (grid.scrollTop + grid.clientHeight) < grid.clientHeight * 2 + 400) {
+            this.renderMore();
+        }
     },
 
     refitGrid: function() {
@@ -272,14 +297,17 @@ window.SaacManager = {
             card.innerHTML = `
                 <div class="saac-card-thumb">
                     ${imgSrc ? `<img src="${imgSrc}" loading="lazy">` : `<div class="saac-no-img">${c.name.charAt(0)}</div>`}
-                    <div class="saac-card-zoom" onclick="event.stopPropagation(); window.SaacManager.showImage('${c.tag.replace(/'/g, "\\'")}', '${c.name.replace(/'/g, "\\'")}')">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
-                    </div>
+                    <button type="button" class="saac-fav" aria-label="Favorite"></button>
                 </div>
                 <div class="saac-card-info">
                     <div class="saac-card-name">${c.name}</div>
                 </div>`;
             card.onclick = () => this.toggle(c);
+            const fav = card.querySelector('.saac-fav');
+            this.paintFav(fav, c.tag);
+            fav.onclick = e => { e.stopPropagation(); this.toggleFav(c.tag, fav); };
+            // Held: the picture full screen; a tap there closes it.
+            if (imgSrc && typeof attachLongPress === 'function') attachLongPress(card.querySelector('.saac-card-thumb'), () => this.showImage(c.tag, c.name));
             frag.appendChild(card);
         });
         // Append only; the trigger is outside this grid.
@@ -301,6 +329,50 @@ window.SaacManager = {
         }
         el.value = v.replace(/^[\s,]+|[\s,]+$/g, '').replace(/,\s*,/g, ',');
         this.render(); 
+    },
+
+    // ---- favourites (saved, by tag) ----
+    FAV_KEY: 'bojroSaacFavs',
+    FAV_ONLY_KEY: 'bojroSaacFavOnly',
+    favOnly: (() => { try { return localStorage.getItem('bojroSaacFavOnly') === 'true'; } catch (e) { return false; } })(),
+    favs: null,
+    // Drawn here rather than by lucide.createIcons(), which would search the whole page for every card.
+    starSvg: (size, filled) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="${filled ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/></svg>`,
+    favSet: function() {
+        if (!this.favs) {
+            try { this.favs = new Set(JSON.parse(localStorage.getItem(this.FAV_KEY) || '[]')); } catch (e) { this.favs = new Set(); }
+        }
+        return this.favs;
+    },
+    isFav: function(tag) { return this.favSet().has(tag); },
+    paintFav: function(btn, tag) {
+        const on = this.isFav(tag);
+        btn.classList.toggle('on', on);
+        btn.title = on ? 'Unfavorite' : 'Favorite';
+        btn.innerHTML = this.starSvg(14, on);
+    },
+    // Showing favourites only, one taken off goes from the grid at once.
+    toggleFav: function(tag, btn) {
+        const set = this.favSet();
+        if (set.has(tag)) set.delete(tag); else set.add(tag);
+        try { localStorage.setItem(this.FAV_KEY, JSON.stringify([...set])); } catch (e) {}
+        if (this.favOnly && !set.has(tag)) this.render();
+        else this.paintFav(btn, tag);
+    },
+    toggleFavOnly: function() {
+        this.favOnly = !this.favOnly;
+        try { localStorage.setItem(this.FAV_ONLY_KEY, String(this.favOnly)); } catch (e) {}
+        const grid = document.getElementById('saacGrid');
+        if (grid) grid.scrollTop = 0;
+        this.render();
+    },
+    paintFavButton: function() {
+        const btn = document.getElementById('saacFavBtn');
+        if (!btn) return;
+        btn.classList.toggle('saac-fav-filter-on', this.favOnly);
+        btn.setAttribute('aria-pressed', String(this.favOnly));
+        btn.title = this.favOnly ? 'Show all' : 'Show favorites';
+        btn.innerHTML = this.starSvg(16, this.favOnly);
     },
 
     showImage: function(key, name) {

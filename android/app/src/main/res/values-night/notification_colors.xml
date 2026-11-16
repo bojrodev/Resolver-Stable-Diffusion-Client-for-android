@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The progress notification's bar (dark mode): the system's text colour, and a faint track. -->
+<resources>
+    <color name="notification_progress_bar">#FFFFFFFF</color>
+    <color name="notification_progress_track">#40FFFFFF</color>
+</resources>

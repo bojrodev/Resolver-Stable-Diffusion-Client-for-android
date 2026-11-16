@@ -13,6 +13,8 @@ const Browser = window.Capacitor ? window.Capacitor.Plugins.Browser : null;
 // In-app toast replacing the native Capacitor Toast plugin, with the same .show({text, duration}) shape. Queues rather than stacks.
 const appToastQueue = [];
 let appToastIsShowing = false;
+// The toast on screen: its text and hide(next), which fades it out (and then shows the next queued one if next).
+let appToastCurrent = null;
 function showNextAppToast() {
     if (appToastQueue.length === 0) { appToastIsShowing = false; return; }
     appToastIsShowing = true;
@@ -34,19 +36,44 @@ function showNextAppToast() {
         el.style.transform = 'translateY(0)';
     });
 
-    setTimeout(() => {
+    let hidden = false;
+    const hide = (next) => {
+        if (hidden) return;
+        hidden = true;
+        clearTimeout(timer);
+        if (appToastCurrent && appToastCurrent.el === el) appToastCurrent = null;
         el.style.opacity = '0';
         el.style.transform = 'translateY(10px)';
         setTimeout(() => {
             el.remove();
-            showNextAppToast();
+            if (next) showNextAppToast();
         }, FADE_MS);
-    }, durationMs);
+    };
+    // 'hold': up until Toast.dismiss() (Clearing VRAM..., Tap again to delete).
+    const timer = duration === 'hold' ? 0 : setTimeout(() => hide(true), durationMs);
+    appToastCurrent = { el, text, hide };
 }
 const Toast = {
-    show: function({ text, duration } = {}) {
+    show: function({ text, duration, once } = {}) {
+        // once: not again while it's up or waiting.
+        if (once && ((appToastCurrent && appToastCurrent.text === text) || appToastQueue.some(t => t.text === text))) return;
+        // The same message again (another save, say): shown now, the one up already fading out.
+        if (appToastCurrent && appToastCurrent.text === text) {
+            for (let i = appToastQueue.length - 1; i >= 0; i--) if (appToastQueue[i].text === text) appToastQueue.splice(i, 1);
+            appToastCurrent.hide(false);
+            appToastQueue.unshift({ text, duration });
+            showNextAppToast();
+            return;
+        }
         appToastQueue.push({ text, duration });
         if (!appToastIsShowing) showNextAppToast();
+    },
+    // Up now or waiting.
+    showing: text => !!((appToastCurrent && appToastCurrent.text === text) || appToastQueue.some(t => t.text === text)),
+    // Takes a message away: out of the queue, and faded out if it's showing.
+    dismiss: function(text) {
+        for (let i = appToastQueue.length - 1; i >= 0; i--) if (appToastQueue[i].text === text) appToastQueue.splice(i, 1);
+        if (appToastCurrent && appToastCurrent.text === text) appToastCurrent.hide(true);
     }
 };
 const LocalNotifications = window.Capacitor ? window.Capacitor.Plugins.LocalNotifications : null;
@@ -183,7 +210,19 @@ let lastGeneratedLoraSet = null;
 
 let currentGalleryIndex = 0;
 let galleryPage = 1;
-const ITEMS_PER_PAGE = 30;
+// History Images Per Page, 30 by default.
+const DEFAULT_ITEMS_PER_PAGE = 30;
+// The number set in Config.
+function galleryPerPageSetting() {
+    const n = parseInt(localStorage.getItem('bojroGalleryPerPage'), 10);
+    return n >= 1 ? n : DEFAULT_ITEMS_PER_PAGE;
+}
+// What a page holds: the setting rounded up to whole rows (item 82).
+let galleryColumnCount = 3;
+function galleryPerPage() {
+    const n = galleryPerPageSetting(), c = Math.max(1, galleryColumnCount);
+    return Math.ceil(n / c) * c;
+}
 
 // LoRA Configuration Storage
 let loraConfigs = {};

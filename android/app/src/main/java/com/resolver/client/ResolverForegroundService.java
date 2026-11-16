@@ -12,6 +12,7 @@ import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.IBinder;
 import android.os.PowerManager;
+import android.widget.RemoteViews;
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
 
@@ -231,13 +232,23 @@ public class ResolverForegroundService extends Service {
         return openApp;
     }
 
+    // Status bar icon (Config > Experimental > Notification icon); the default is the logo's R on transparent (the app icon
+    // is solid, so it showed as a blank square).
+    private int statusIcon() {
+        String icon = getSharedPreferences(ResolverDevicePlugin.PREFS, Context.MODE_PRIVATE)
+                .getString(ResolverDevicePlugin.KEY_NOTIFICATION_ICON, "logo");
+        if ("badge".equals(icon)) return R.drawable.ic_stat_badge;
+        if ("bold".equals(icon)) return R.drawable.ic_stat_bold;
+        if ("sparkles".equals(icon)) return R.drawable.ic_stat_sparkles;
+        return R.drawable.ic_stat_resolver;
+    }
+
     private Notification buildNotification(String title, String body, int progress) {
         createNotificationChannel();
         
         NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle(title)
-                .setSmallIcon(R.mipmap.ic_launcher)
-                .setProgress(100, progress, false)
+                .setSmallIcon(statusIcon())
                 .setOnlyAlertOnce(true)
                 .setShowWhen(false) // the time would truncate the step count
                 .setOngoing(true)
@@ -250,9 +261,21 @@ public class ResolverForegroundService extends Service {
         // An empty body leaves the title on its own line ("Generating: Step 42 / 50").
         if (body != null && !body.isEmpty()) builder.setContentText(body);
         // Android 16 Live Update (raw extra, as compileSdk is 35); Config > Experimental.
-        if (Build.VERSION.SDK_INT >= 36 && getSharedPreferences(ResolverDevicePlugin.PREFS, Context.MODE_PRIVATE)
-                .getBoolean(ResolverDevicePlugin.KEY_LIVE_UPDATE, false)) {
+        boolean liveUpdate = Build.VERSION.SDK_INT >= 36 && getSharedPreferences(ResolverDevicePlugin.PREFS, Context.MODE_PRIVATE)
+                .getBoolean(ResolverDevicePlugin.KEY_LIVE_UPDATE, false);
+        if (liveUpdate) {
+            builder.setProgress(100, progress, false);
             builder.getExtras().putBoolean("android.requestPromotedOngoing", true);
+        } else {
+            // Its own layout: a slightly smaller title, the second line only when there is one, and the bar close under
+            // them (the standard layout keeps room for a text line that isn't there). Live Updates need the standard one.
+            boolean hasBody = body != null && !body.isEmpty();
+            RemoteViews content = new RemoteViews(getPackageName(), R.layout.notification_progress);
+            content.setTextViewText(R.id.notification_title, title);
+            content.setTextViewText(R.id.notification_body, hasBody ? body : "");
+            content.setViewVisibility(R.id.notification_body, hasBody ? android.view.View.VISIBLE : android.view.View.GONE);
+            content.setProgressBar(R.id.notification_progress, 100, progress, false);
+            builder.setStyle(new NotificationCompat.DecoratedCustomViewStyle()).setCustomContentView(content);
         }
         return builder.build();
     }

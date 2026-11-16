@@ -120,7 +120,7 @@ window.applyCheckpointDefaults = function(mode, checkpointTitle) {
         const el = document.getElementById(`${fieldMode}_${field}`);
         if (value === undefined || value === '' || !el) return;
         if (el.tagName === 'SELECT' && !Array.from(el.options).some(o => o.value === value)) return;
-        if (el.value === value) return;
+        if (el.value === value || (el.tagName === 'INPUT' && el.value !== '' && Number(el.value) === Number(value))) return;
         el.value = value;
         changed = true;
         // The field's own handlers save it and update anything that depends on it.
@@ -257,9 +257,8 @@ window.renderCheckpointManagerList = function() {
     document.getElementById('ckptSearchClear')?.classList.toggle('hidden', !rawQuery);
     const pairs = readModulePairs();
 
-    const items = collectAllKnownCheckpoints()
-        .map(c => Object.assign({ name: splitCheckpointDisplayName(c.title) }, c))
-        .filter(c => !query || searchKey(c.name.primary).includes(query) || searchKey(c.title).includes(query))
+    const items = searchFilter(collectAllKnownCheckpoints()
+        .map(c => Object.assign({ name: splitCheckpointDisplayName(c.title) }, c)), c => [c.name.primary, c.title], query)
         .sort((a, b) => a.name.primary.localeCompare(b.name.primary, undefined, { sensitivity: 'base' }));
 
     if (checkpointThumbObserver) checkpointThumbObserver.disconnect();
@@ -274,7 +273,7 @@ window.renderCheckpointManagerList = function() {
 
     list.innerHTML = '';
     if (!items.length) {
-        list.innerHTML = `<p style="font-size:12px; color:var(--text-muted); text-align:center; padding:20px 0; margin:0;">${query ? 'No checkpoints match your search.' : 'No checkpoints yet. Connect to the server first.'}</p>`;
+        list.innerHTML = `<p class="empty-note" style="padding:20px 0; margin:0;">${query ? 'No checkpoints match your search.' : 'No checkpoints yet. Connect to the server first.'}</p>`;
         return;
     }
     items.forEach(c => {
@@ -291,9 +290,9 @@ window.renderCheckpointManagerList = function() {
         row.innerHTML = `
             <img src="${memThumb || 'icon.png'}" class="lora-item-thumb">
             <div class="lora-item-info">
-                <div class="lora-item-name">${escapeHtmlModulePairs(c.name.primary)}</div>
+                <div class="lora-item-name">${nameHtmlKeepBrackets(c.name.primary)}</div>
                 ${c.name.subtitle ? `<div class="model-item-subtitle">${escapeHtmlModulePairs(c.name.subtitle)}</div>` : ''}
-                ${tags.length ? `<div class="lora-item-meta" style="color:var(--accent-primary); margin-top:2px;">${escapeHtmlModulePairs(tags.join(' · '))}</div>` : ''}
+                ${tags.length ? `<div class="lora-item-meta" style="color:var(--accent-primary); margin-top:2px;">${escapeHtmlModulePairs(tags.join(' • '))}</div>` : ''}
             </div>`;
         row.onclick = () => window.openCheckpointConfig(c.title);
         if (!memThumb && c.filename && window.LoraManager) {
@@ -408,6 +407,11 @@ window.openCheckpointConfig = function(title) {
     copyOptions('xl_scheduler', 'ckptCfgScheduler', cfg.scheduler);
     document.getElementById('ckptCfgSteps').value = cfg.steps || '';
     document.getElementById('ckptCfgCfg').value = cfg.cfg || '';
+    document.getElementById('ckptCfgClipSkip').value = cfg.clipSkip || '';
+    // Open unless closed last time.
+    const defaultsClosed = localStorage.getItem('bojro_vis_ckpt_defaults') === 'closed';
+    document.getElementById('grp-ckpt-defaults').classList.toggle('hidden', defaultsClosed);
+    document.getElementById('arr-ckpt-defaults').style.transform = defaultsClosed ? 'rotate(-90deg)' : 'rotate(0deg)';
 
     // Low Bits is stored per checkpoint by engine.js (getLowBitsForMode()); Automatic when nothing is set.
     const lowBitsSel = document.getElementById('ckptCfgLowBits');
@@ -441,6 +445,13 @@ window.updateCheckpointConfigFields = function() {
     });
 };
 
+// Clip Skip from Checkpoint settings; left to the server when not set.
+window.applyCheckpointClipSkip = function(job) {
+    const n = parseInt((getCheckpointConfig(job.modelTitle) || {}).clipSkip, 10);
+    if (!job.payload || !(n >= 1)) return;
+    job.payload.override_settings = Object.assign({}, job.payload.override_settings, { CLIP_stop_at_last_layers: n });
+};
+
 window.saveCheckpointConfig = function() {
     const title = checkpointConfigTitle;
     if (!title) return;
@@ -464,6 +475,8 @@ window.saveCheckpointConfig = function() {
     if (val('ckptCfgScheduler')) cfg.scheduler = val('ckptCfgScheduler');
     if (val('ckptCfgSteps') !== '' && Number(val('ckptCfgSteps')) > 0) cfg.steps = String(Math.round(Number(val('ckptCfgSteps'))));
     if (val('ckptCfgCfg') !== '' && Number(val('ckptCfgCfg')) >= 0) cfg.cfg = String(Number(val('ckptCfgCfg')));
+    const clipSkip = Math.round(Number(val('ckptCfgClipSkip')));
+    if (val('ckptCfgClipSkip') !== '' && clipSkip >= 1 && clipSkip <= 12) cfg.clipSkip = String(clipSkip);
 
     const lowBitsKey = typeof lowBitsModelKey === 'function' ? lowBitsModelKey(title) : null;
     if (lowBitsKey) {

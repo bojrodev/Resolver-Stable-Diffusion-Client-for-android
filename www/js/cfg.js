@@ -46,6 +46,9 @@ function loadConnectionConfig() {
     const saacSwitch = document.getElementById('cfgSaacSwitch');
     if(saacSwitch) saacSwitch.checked = saacEnabled;
 
+    // LoRA variant thumbnails, read into memory once the app is idle (loravariants.js).
+    if (window.LoraVariants) window.LoraVariants.preload();
+
     // Additional Upscale Features (GFPGAN/CodeFormer blend fields): off by default (legacy parameters Forge Neo no longer shows).
     const upscaleExpEnabled = localStorage.getItem('bojroUpscaleExpEnabled') === 'true';
     const upscaleExpSwitch = document.getElementById('cfgUpscaleExpSwitch');
@@ -58,11 +61,21 @@ function loadConnectionConfig() {
     if (neverOomSwitch) neverOomSwitch.checked = neverOomEnabled;
     document.querySelectorAll('.neveroom-box').forEach(el => el.classList.toggle('hidden', !neverOomEnabled));
 
-    // Hide Model-Specific Hints & Labels: inverted like Dev Power, so off means visible.
+    // Show Magic Prompt (on by default; stored as the hidden state).
+    const hideMagicPrompt = localStorage.getItem('bojroHideMagicPrompt') === 'true';
+    const showMagicPromptSwitch = document.getElementById('cfgShowMagicPromptSwitch');
+    if (showMagicPromptSwitch) showMagicPromptSwitch.checked = !hideMagicPrompt;
+    document.body.classList.toggle('hide-magic-prompt', hideMagicPrompt);
+
+    // Show model hints (on by default; stored as the hidden state).
     const hideModelHints = localStorage.getItem('bojroHideModelHints') === 'true';
-    const hideModelHintsSwitch = document.getElementById('cfgHideModelHintsSwitch');
-    if (hideModelHintsSwitch) hideModelHintsSwitch.checked = hideModelHints;
-    document.querySelectorAll('.model-hint').forEach(el => el.classList.toggle('hidden', hideModelHints));
+    const showModelHintsSwitch = document.getElementById('cfgShowModelHintsSwitch');
+    if (showModelHintsSwitch) showModelHintsSwitch.checked = !hideModelHints;
+    // Show UI hints (the model lines among them); the old Show model hints setting now names the GENERATE buttons only.
+    const hideUiHints = localStorage.getItem('bojroHideUiHints') === 'true';
+    const uiHintsSwitch = document.getElementById('cfgShowUiHintsSwitch');
+    if (uiHintsSwitch) uiHintsSwitch.checked = !hideUiHints;
+    document.body.classList.toggle('no-ui-hints', hideUiHints);
     if (typeof updateGenerateButtonLabel === 'function') updateGenerateButtonLabel();
 
     // Update Notifications: on or absent (default) runs the launch update check and notice board; stored as the OFF state.
@@ -79,24 +92,20 @@ function loadConnectionConfig() {
     const abortOnCloseSwitch = document.getElementById('cfgAbortJobOnCloseSwitch');
     if (abortOnCloseSwitch) abortOnCloseSwitch.checked = localStorage.getItem('bojroAbortJobOnClose') === 'true';
 
-    // Auto-Collapse Config Sections (off by default).
-    const oneSectionSwitch = document.getElementById('cfgOneSectionSwitch');
-    if (oneSectionSwitch) oneSectionSwitch.checked = localStorage.getItem('bojroCfgOneSection') === 'true';
+    const promptHistorySwitch = document.getElementById('cfgPromptHistorySwitch');
+    if (promptHistorySwitch) promptHistorySwitch.checked = localStorage.getItem('bojroPromptHistory') !== 'false';
 
-    // Floating Brush Size (off by default).
+    const confirmVramSwitch = document.getElementById('cfgConfirmClearVramSwitch');
+    if (confirmVramSwitch) confirmVramSwitch.checked = localStorage.getItem('bojroConfirmClearVram') !== 'false';
+
+    // Floating Brush Size (on by default).
     const floatingBrushSwitch = document.getElementById('cfgFloatingBrushSwitch');
-    if (floatingBrushSwitch) floatingBrushSwitch.checked = localStorage.getItem('bojroFloatingBrushSize') === 'true';
+    if (floatingBrushSwitch) floatingBrushSwitch.checked = localStorage.getItem('bojroFloatingBrushSize') !== 'false';
 
-    // Gallery Badges switch.
-    const galleryBadgesOff = localStorage.getItem('bojroGalleryBadgesOff') === 'true';
-    const galleryBadgesSwitch = document.getElementById('cfgGalleryBadgesSwitch');
-    if (galleryBadgesSwitch) galleryBadgesSwitch.checked = !galleryBadgesOff;
-    document.body.classList.toggle('hide-gallery-badges', galleryBadgesOff);
-
-    // Hide Loading Circle: off/absent (the default) means the circle shows.
+    // Show loading circle (on by default; stored as the hidden state).
     const hideGenSpinner = localStorage.getItem('bojroHideGenSpinner') === 'true';
-    const hideGenSpinnerSwitch = document.getElementById('cfgHideGenSpinnerSwitch');
-    if (hideGenSpinnerSwitch) hideGenSpinnerSwitch.checked = hideGenSpinner;
+    const showGenSpinnerSwitch = document.getElementById('cfgShowGenSpinnerSwitch');
+    if (showGenSpinnerSwitch) showGenSpinnerSwitch.checked = !hideGenSpinner;
     applyGenSpinnerHidden(hideGenSpinner);
 
     // Show & Download Batch Grids: off/absent (the default) means no grids.
@@ -118,6 +127,9 @@ function loadConnectionConfig() {
     // Recent Results Shown (engine.js).
     const resultStripLimitEl = document.getElementById('cfgResultStripLimit');
     if (resultStripLimitEl && typeof resultStripLimit === 'function') resultStripLimitEl.value = resultStripLimit();
+    // History Images Per Page (globals.js).
+    const galleryPerPageEl = document.getElementById('cfgGalleryPerPage');
+    if (galleryPerPageEl && typeof galleryPerPageSetting === 'function') galleryPerPageEl.value = galleryPerPageSetting();
 
     // Auto-Delete Warning: on unless switched off (utils.js).
     const autoDeleteWarningSwitch = document.getElementById('cfgAutoDeleteWarningSwitch');
@@ -175,17 +187,17 @@ function loadConnectionConfig() {
     if (showControlnetSdxlAnimaSwitch) showControlnetSdxlAnimaSwitch.checked = showControlnetSdxlAnima;
     document.querySelectorAll('.controlnet-section-sdxl-anima').forEach(el => el.classList.toggle('feature-hidden', !showControlnetSdxlAnima));
 
-    // Show Upload History (Analyze / Edit): on unless switched off (analyzerhistory.js).
-    const analyzerHistorySwitch = document.getElementById('cfgAnalyzerHistorySwitch');
-    if (analyzerHistorySwitch) analyzerHistorySwitch.checked = localStorage.getItem('bojroAnalyzerHistory') !== 'false';
-    const editHistorySwitch = document.getElementById('cfgEditHistorySwitch');
-    if (editHistorySwitch) editHistorySwitch.checked = localStorage.getItem('bojroEditHistory') !== 'false';
+    // Recent Uploads: one switch for both RECENT histories (analyzerhistory.js); on if either key is.
+    const uploadsOn = localStorage.getItem('bojroAnalyzerHistory') !== 'false' || localStorage.getItem('bojroEditHistory') !== 'false';
+    ['bojroAnalyzerHistory', 'bojroEditHistory'].forEach(k => { if (localStorage.getItem(k) !== null) localStorage.setItem(k, uploadsOn ? 'true' : 'false'); });
+    const uploadHistorySwitch = document.getElementById('cfgUploadHistorySwitch');
+    if (uploadHistorySwitch) uploadHistorySwitch.checked = uploadsOn;
     if (window.AnalyzerHistory) AnalyzerHistory.applyVisibility();
     if (window.EditHistory) EditHistory.applyVisibility();
 
-    // Analyzer sticky action bar: OFF unless switched on here (see analyzer.js)
+    // Analyzer Sticky Bar: on unless switched off (analyzer.js).
     const analyzerStickyBarSwitch = document.getElementById('cfgAnalyzerStickyBarSwitch');
-    if (analyzerStickyBarSwitch) analyzerStickyBarSwitch.checked = localStorage.getItem('bojroAnalyzerStickyBar') === 'true';
+    if (analyzerStickyBarSwitch) analyzerStickyBarSwitch.checked = localStorage.getItem('bojroAnalyzerStickyBar') !== 'false';
 
     const showControlnetOther = localStorage.getItem('bojroShowControlnetOther') === 'true';
     const showControlnetOtherSwitch = document.getElementById('cfgShowControlnetOtherSwitch');
@@ -196,10 +208,10 @@ function loadConnectionConfig() {
     // Checkpoint Manager count beside MANAGE.
     if (typeof updateCheckpointManagerCount === 'function') updateCheckpointManagerCount();
 
-    // Bojro Dev Power: inverted, so unchecked (default) means visible.
+    // Show Dev Power (on by default; stored as the hidden state).
     const hideDevPower = localStorage.getItem('bojroHideDevPower') === 'true';
-    const hideDevPowerSwitch = document.getElementById('cfgHideDevPowerSwitch');
-    if (hideDevPowerSwitch) hideDevPowerSwitch.checked = hideDevPower;
+    const showDevPowerSwitch = document.getElementById('cfgShowDevPowerSwitch');
+    if (showDevPowerSwitch) showDevPowerSwitch.checked = !hideDevPower;
     document.getElementById('devPowerSection')?.classList.toggle('hidden', hideDevPower);
 
     const showFluxCache = localStorage.getItem('bojroShowFluxCache') === 'true';
@@ -207,13 +219,12 @@ function loadConnectionConfig() {
     if (fluxCacheSwitch) fluxCacheSwitch.checked = showFluxCache;
     document.getElementById('fluxCacheSection')?.classList.toggle('hidden', !showFluxCache);
 
-    const showLivePreview = localStorage.getItem('bojroShowLivePreviewToggle') === 'true';
-    const livePreviewSwitch = document.getElementById('cfgShowLivePreviewSwitch');
-    if (livePreviewSwitch) livePreviewSwitch.checked = showLivePreview;
-    // livePreviewToggleRow visibility/position is handled by reorganizeGenRowLayout() (utils.js).
-    document.querySelectorAll('.lp-option-row').forEach(r => r.classList.toggle('hidden', !showLivePreview));
+    // Unused keys.
+    localStorage.removeItem('bojroShowLivePreviewToggle');
+    localStorage.removeItem('bojroCfgOneSection');
+    window.syncLpMobileMethodRow?.();
 
-    // Always interactive when visible; a standing preference, not tied to the main toggle.
+    // A standing preference, not tied to the Preview switch.
     const mobileDataAllowed = localStorage.getItem('bojroLivePreviewMobileDataAllowed') === 'true';
     const mobileDataSwitch = document.getElementById('cfgLivePreviewMobileDataSwitch');
     if (mobileDataSwitch) mobileDataSwitch.checked = mobileDataAllowed;
@@ -233,23 +244,18 @@ function toggleConnectionModeUI() {
         }
 
 
-    const localCont = document.getElementById('container-local');
-    const extCont = document.getElementById('container-external');
-    const label = document.getElementById('modeLabel');
-
-
-    if (isRemote) {
-        localCont.classList.add('hidden');
-        extCont.classList.remove('hidden');
-        if(label) label.innerText = "EXTERNAL (TUNNEL)";
-        if(label) label.style.color = "var(--accent-primary)";
-    } else {
-        localCont.classList.remove('hidden');
-        extCont.classList.add('hidden');
-        if(label) label.innerText = "LOCAL NETWORK";
-        if(label) label.style.color = "var(--text-muted)";
-    }
+    document.getElementById('container-local').classList.toggle('hidden', isRemote);
+    document.getElementById('container-external').classList.toggle('hidden', !isRemote);
+    document.getElementById('connModeLocal')?.classList.toggle('active', !isRemote);
+    document.getElementById('connModeRemote')?.classList.toggle('active', isRemote);
 }
+// Connection mode's LOCAL / REMOTE buttons set the (hidden) cfgModeSwitch.
+window.setConnectionMode = function(remote) {
+    const el = document.getElementById('cfgModeSwitch');
+    if (!el || el.checked === remote) return;
+    el.checked = remote;
+    el.dispatchEvent(new Event('change'));
+};
 
 // Save configuration to localStorage
 function saveConnectionConfig() {
@@ -330,27 +336,21 @@ function updateConnectionStatus(service, status) {
     
     if (service === 'llm') {
         const btn = document.getElementById('llmLinkBtn');
-        const dot = document.getElementById('llmStatusDot');
-        
-        if (!btn || !dot) return;
-        
-        // Remove all state classes
+        if (!btn) return;
         btn.classList.remove('connecting', 'connected', 'disconnected');
-        dot.classList.remove('connecting', 'connected', 'disconnected');
-        
+        // The engine button's icons: zap once connected, zap-off otherwise.
+        const label = (icon, text) => `<i data-lucide="${icon}" width="16" height="16"></i>${text}`;
         if (status === 'connecting') {
             btn.classList.add('connecting');
-            btn.innerText = 'LINKING...';
-            dot.classList.add('connecting');
+            btn.innerHTML = label('zap-off', 'LINKING...');
         } else if (status === 'connected') {
             btn.classList.add('connected');
-            btn.innerText = 'CONNECTED';
-            dot.classList.add('connected');
+            btn.innerHTML = label('zap', 'CONNECTED');
         } else {
             btn.classList.add('disconnected');
-            btn.innerText = 'LINK';
-            dot.classList.add('disconnected');
+            btn.innerHTML = label('zap-off', 'LINK');
         }
+        if (typeof lucide !== 'undefined') lucide.createIcons();
     }
 }
 
@@ -421,23 +421,27 @@ window.saveConfiguration = function(showToast = false) {
 // Gallery Cache Limit is kept too: the gallery is trimmed to it at launch, so a lower one would delete images at once.
 const RESET_KEYS = [
     // Interface
-    'bojroTheme', 'bojroResultStripLimit', 'bojroAnalyzerHistory', 'bojroEditHistory', 'bojroCfgOneSection',
-    'bojroFloatingBrushSize', 'bojroHideModelHints', 'bojroHideGenSpinner', 'bojroGalleryBadgesOff', 'bojroHideDevPower',
-    'bojro_model_visibility', 'bojroTallPrompt', 'bojroTallNeg',
+    'bojroTheme', 'bojroResultStripLimit', 'bojroAnalyzerHistory', 'bojroEditHistory',
+    'bojroFloatingBrushSize', 'bojroHideModelHints', 'bojroHideUiHints', 'bojroHideMagicPrompt', 'bojroHideGenSpinner', 'bojroGalleryBadgesOff', 'bojroGalleryBadgeOff', 'bojroHideDevPower',
+    'bojro_model_visibility', 'bojroTallPrompt', 'bojroTallNeg', 'bojroAutoGrowPrompt', 'bojroGalleryPerPage', 'bojroGalDates', 'bojroGalDatesBy', 'bojroWildcardsOn',
+    'bojroPromptColors', 'bojroGalleryCols', 'bojroGalleryWide', 'bojroAdChipNames',
     // Generation
     'bojroAutoDeleteWarning', 'bojroAutoSave', 'bojroGenerationPollingRate', 'bojroBackgroundPollingRate',
     'bojroKeepSourceSeed', 'bojroProgressBridgeEnabled', 'bojroShowBatchGrids', 'bojroLimitBatchGrid',
-    'bojroShowLivePreviewToggle', 'bojroLivePreviewMobileDataAllowed', 'bojroLpMethod', 'bojroLpEveryN', 'bojroLpBorder',
+    'bojroLivePreviewMobileDataAllowed', 'bojroLpMethod', 'bojroLpMethodMobile', 'bojroLpEveryN', 'bojroLpBorder',
+    'bojroVramProfile', 'bojroConfirmClearVram', 'bojroDockStyle',
     // Models
     'bojroShowAdetailer', 'bojroShowAdetailerOther', 'bojroShowAdetailerSdxlAnima', 'bojroAdetailerControlNet',
     'bojroShowControlnet', 'bojroShowControlnetOther', 'bojroShowControlnetSdxlAnima', 'bojroShowExtraAdetailerPasses',
-    'bojroShowLowBitsRows', 'bojroShowFluxCache', 'bojroNeverOomVisible', 'bojro_upscaler2_visibility',
+    'bojroShowLowBitsRows', 'bojroShowFluxCache', 'bojroForgeCouple', 'bojroNeverOomVisible', 'bojro_upscaler2_visibility',
     // Experimental
     'bojroUpscaleExpEnabled', 'bojroPromptFormat', 'bojroPromptFormatOnBlur', 'bojroSaacEnabled',
     'bojroAbortJobOnClose', 'bojroDataUsageTracker', 'bojroDataUsagePill', 'bojroDebugLogEnabled',
-    'bojroHideFromAccessibility', 'bojroLiveUpdate',
+    'bojroHideFromAccessibility', 'bojroLiveUpdate', 'bojroNotificationIcon',
     // View, and prompts shown once (battery optimisation, update notices, a skipped update)
-    'bojroLoraViewMode', 'bojroAnalyzerStickyBar', 'bojroBatteryOpt', 'bojroUpdateNoticesOff', 'bojro_skip_version',
+    'bojroLoraViewMode', 'bojroStyleSearchPrompts', 'bojroAnalyzerStickyBar', 'bojroBatteryOpt', 'bojroUpdateNoticesOff', 'bojro_skip_version',
+    'bojroMpPrompt', 'bojroMpDescribe', 'bojroMpWcGen', 'bojroMpScene', 'bojroSceneOn', 'bojroSceneModel', 'bojroSceneUnload',
+    'bojroSceneRecolor', 'bojroSceneRecolorBg', 'bojroSceneDrop', 'bojroSceneNeg',
 ];
 // Which Config and tab sections are open.
 const RESET_PREFIXES = ['bojro_vis_', 'bojro_collapse_'];
@@ -447,7 +451,7 @@ function isResetKey(key) {
 }
 
 window.resetAppConfig = async function() {
-    if (!await window.appConfirm('Every option in Config goes back to its default. Your server connections, prompts, gallery, styles, LoRAs, presets and other saved content are kept.', { title: 'Reset App Configuration', okText: 'RESET', danger: true })) return;
+    if (!await window.appConfirm('Every option in Config goes back to its default. Your server connections, prompts, gallery, styles, LoRAs, presets and other saved content are kept, and the example wildcards are put back.', { title: 'Reset App Configuration', okText: 'RESET', danger: true })) return;
     // Keys are collected first, as removing while iterating skips entries.
     const keys = [];
     for (let i = 0; i < localStorage.length; i++) {
@@ -455,31 +459,192 @@ window.resetAppConfig = async function() {
         if (isResetKey(key)) keys.push(key);
     }
     keys.forEach(key => localStorage.removeItem(key));
+    if (window.Wildcards) Wildcards.restoreDefaults();
     // The page reads everything afresh; settings Android keeps its own copy of are sent again at launch.
+    try { sessionStorage.setItem('bojroReturnTo', 'button[onclick="resetAppConfig()"]'); } catch (e) {}
+    if (typeof paintNativeBg === 'function') paintNativeBg();
     window.location.reload();
 };
 
-// Double Prompt Box Height / Double Negative Box Height (Config > Interface): each tab's prompt and negative boxes are
+// Double Prompt Box Height / Double Negative Box Height (Config > Prompts): each tab's prompt and negative boxes are
 // 3 rows tall, or 6 with the option on.
 const PROMPT_BOX_MODES = ['xl', 'flux', 'qwen', 'anima', 'krea', 'inp'];
+// The Style and LoRA editors' and ADetailer's boxes follow the same options (trigger words count as prompt).
+const EDITOR_PROMPT_BOXES = ['styleEditPrompt', 'cfgTrigger', 'lvTrigger', 'img2imgPresetEdPrompt'];
+const EDITOR_NEG_BOXES = ['styleEditNeg', 'cfgLoraAdditionalNegative', 'lvNegative', 'img2imgPresetEdNeg'];
 function applyPromptBoxHeights() {
     const tall = key => localStorage.getItem(key) === 'true';
+    const setRows = (id, key) => { const el = document.getElementById(id); if (el) el.rows = tall(key) ? 6 : 3; };
     PROMPT_BOX_MODES.forEach(m => {
-        const p = document.getElementById(`${m}_prompt`), n = document.getElementById(`${m}_neg`);
-        if (p) p.rows = tall('bojroTallPrompt') ? 6 : 3;
-        if (n) n.rows = tall('bojroTallNeg') ? 6 : 3;
+        setRows(`${m}_prompt`, 'bojroTallPrompt');
+        setRows(`${m}_neg`, 'bojroTallNeg');
     });
+    EDITOR_PROMPT_BOXES.forEach(id => setRows(id, 'bojroTallPrompt'));
+    EDITOR_NEG_BOXES.forEach(id => setRows(id, 'bojroTallNeg'));
+    document.querySelectorAll('textarea.fc-text, #styleFcBg, textarea[id^="styleFcR"]').forEach(el => { el.rows = tall('bojroTallPrompt') ? 4 : 2; });
+    document.querySelectorAll('textarea[id*="_adetailer_"][id$="_prompt"]').forEach(el => setRows(el.id, 'bojroTallPrompt'));
+    document.querySelectorAll('textarea[id*="_adetailer_"][id$="_neg"]').forEach(el => setRows(el.id, 'bojroTallNeg'));
+    if (typeof refitPromptBoxes === 'function' && typeof autoGrowOn !== 'undefined') refitPromptBoxes();
     const ps = document.getElementById('cfgTallPromptSwitch'), ns = document.getElementById('cfgTallNegSwitch');
     if (ps) ps.checked = tall('bojroTallPrompt');
     if (ns) ns.checked = tall('bojroTallNeg');
 }
+// Auto-Expand Prompt Boxes: prompt boxes grow to fit their text, never below their rows, and shrink back.
+// Fitted on typing, on .value changes and when a box is shown or changes width.
+const AUTOGROW_SELECTOR = PROMPT_BOX_MODES.flatMap(m => [`#${m}_prompt`, `#${m}_neg`]).concat([
+    'textarea[id*="_adetailer_"][id$="_prompt"]', 'textarea[id*="_adetailer_"][id$="_neg"]',
+    '#styleEditPrompt', '#styleEditNeg', '#img2imgPresetEdPrompt', '#img2imgPresetEdNeg', '#cfgTrigger', '#cfgLoraAdditionalNegative', '#lvTrigger', '#lvNegative', '#llmInput', '#llmOutput',
+    'textarea[id^="in_"][id$="_text"]', 'textarea.fc-text', '#wcEditorText', '#wxText', '#styleFcBg', 'textarea[id^="styleFcR"]'
+]).join(', ');
+let autoGrowOn = false;
+const autoGrowQueue = new Set();
+let autoGrowFrame = 0;
+const autoGrowWidths = new WeakMap();
+const autoGrowObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(entries => {
+    // Only a width change (or being shown) can change the fit; the fit's own height change is ignored. Fitted here, after
+    // layout and before the box is drawn, so a box just shown never appears at its empty size first.
+    entries.forEach(e => {
+        const w = Math.round(e.contentRect.width), was = autoGrowWidths.get(e.target);
+        // Shown again (its window opened): a held box starts held again.
+        if (!(was > 0) && w > 0) delete e.target.dataset.capOpen;
+        if (was !== w) { autoGrowWidths.set(e.target, w); fitPromptBox(e.target); }
+    });
+}) : null;
+// Editor boxes held at twice the main box's height (item 80): the pill opens the whole text.
+const CAPPED_BOXES = ['cfgTrigger', 'cfgLoraAdditionalNegative', 'lvTrigger', 'lvNegative', 'styleEditPrompt', 'styleEditNeg', 'img2imgPresetEdPrompt', 'img2imgPresetEdNeg'];
+function capPill(el) {
+    let wrap = el.parentElement;
+    if (!wrap.classList.contains('cap-wrap')) {
+        wrap = document.createElement('div');
+        wrap.className = 'cap-wrap';
+        el.parentNode.insertBefore(wrap, el);
+        wrap.appendChild(el);
+    }
+    let pill = wrap.querySelector(':scope > .cap-btn');
+    if (!pill) {
+        pill = document.createElement('button');
+        pill.type = 'button';
+        pill.className = 'cap-btn hidden';
+        pill.addEventListener('mousedown', e => e.preventDefault());
+        pill.addEventListener('click', () => { if (el.dataset.capOpen) delete el.dataset.capOpen; else el.dataset.capOpen = '1'; fitPromptBox(el); });
+        wrap.appendChild(pill);
+    }
+    return pill;
+}
+function paintCap(el, state) {
+    if (!CAPPED_BOXES.includes(el.id)) return;
+    if (!state && !el.parentElement.classList.contains('cap-wrap')) return;
+    const pill = capPill(el), wrap = el.parentElement;
+    wrap.classList.toggle('capped', state === 'capped');
+    pill.classList.toggle('hidden', !state);
+    el.classList.toggle('cap-held', state === 'capped');
+    if (!state) return;
+    const n = el.value.split(/[,\n]/).filter(t => t.trim()).length;
+    pill.innerHTML = state === 'capped'
+        ? `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>SHOW ALL · ${n} TAG${n === 1 ? '' : 'S'}`
+        : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>SHOW LESS';
+}
+function fitPromptBox(el) {
+    const fc = el.classList.contains('fc-bg');
+    if (!autoGrowOn) paintCap(el, null);
+    if (!autoGrowOn && el.style.height) el.style.height = '';
+    if (!el.offsetWidth || (!autoGrowOn && !fc)) return; // hidden: fitted when shown
+    const grow = () => {
+        if (!autoGrowOn) return;
+        el.style.height = ''; // back to its rows, so it can shrink
+        const cs = getComputedStyle(el);
+        const extra = cs.boxSizing === 'border-box'
+            ? parseFloat(cs.borderTopWidth) + parseFloat(cs.borderBottomWidth)
+            : -(parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom));
+        let need = Math.ceil(el.scrollHeight + extra);
+        if (CAPPED_BOXES.includes(el.id)) {
+            // Measured without the room the pill takes at the bottom.
+            const held = el.classList.contains('cap-held');
+            if (held) { el.classList.remove('cap-held'); need = Math.ceil(el.scrollHeight + extra); }
+            const cap = el.offsetHeight * 2;
+            if (need <= cap) paintCap(el, null);
+            else if (el.dataset.capOpen) paintCap(el, 'open');
+            else { paintCap(el, 'capped'); el.style.height = `${cap}px`; return; }
+        }
+        if (need > el.offsetHeight) el.style.height = `${need}px`;
+    };
+    // Forge Couple: fitted without the BACKGROUND tag's row, which is added only when the text would run under the tag.
+    if (fc) el.classList.remove('fc-bg-row');
+    grow();
+    if (fc && window.ForgeCouple && ForgeCouple.needsRow(el)) { el.classList.add('fc-bg-row'); grow(); }
+    if (fc || el.parentElement.classList.contains('wc-box')) placeBoxChips(el);
+}
+function queueAutoGrow(el) {
+    autoGrowQueue.add(el);
+    if (autoGrowObserver && !autoGrowWidths.has(el)) { autoGrowWidths.set(el, -1); autoGrowObserver.observe(el); }
+    if (!autoGrowFrame) autoGrowFrame = requestAnimationFrame(() => {
+        autoGrowFrame = 0;
+        const els = [...autoGrowQueue]; autoGrowQueue.clear();
+        els.forEach(fitPromptBox);
+    });
+}
+function placeBoxChips(ta) {
+    const btn = ta.parentElement && ta.parentElement.classList.contains('wc-box') ? ta.parentElement.querySelector('.wc-box-btn') : null;
+    const tag = ta.nextElementSibling && ta.nextElementSibling.classList.contains('fc-bgtag') ? ta.nextElementSibling : null;
+    const up = ta.scrollTop, down = Math.max(0, ta.scrollHeight - ta.clientHeight - ta.scrollTop);
+    const move = (el, dy, cut) => {
+        el.style.transform = dy ? `translateY(${dy}px)` : '';
+        el.style.clipPath = cut > 0 ? (dy < 0 ? `inset(${cut}px 0 0 0)` : `inset(0 0 ${cut}px 0)`) : '';
+        el.style.visibility = cut >= el.offsetHeight ? 'hidden' : '';
+    };
+    // How far each can move before it meets the box's edge (inside the border).
+    if (btn) move(btn, -up, up - (btn.offsetTop - ta.offsetTop - ta.clientTop));
+    if (tag) {
+        tag.style.transform = '';
+        const room = ta.getBoundingClientRect().bottom - ta.clientTop - tag.getBoundingClientRect().bottom;
+        move(tag, down, down - room);
+    }
+}
+// Scrolling a prompt box moves its wildcard button and BACKGROUND tag with the text.
+document.addEventListener('scroll', e => { if (e.target && e.target.tagName === 'TEXTAREA') placeBoxChips(e.target); }, true);
+function refitPromptBoxes() {
+    document.querySelectorAll(AUTOGROW_SELECTOR).forEach(el => autoGrowOn ? queueAutoGrow(el) : fitPromptBox(el));
+}
+// Typing fits the box at once, not on the next frame: a frame late, a new line first scrolls the text up inside the
+// too-short box and then drops it back as the box grows, so the text and caret hop at every line wrap.
+function autoGrowNow(el) {
+    if (autoGrowObserver && !autoGrowWidths.has(el)) { autoGrowWidths.set(el, -1); autoGrowObserver.observe(el); }
+    autoGrowQueue.delete(el);
+    fitPromptBox(el);
+}
+document.addEventListener('input', e => {
+    if (e.target.matches && e.target.matches(AUTOGROW_SELECTOR) && (autoGrowOn || e.target.classList.contains('fc-bg'))) autoGrowNow(e.target);
+}, true);
+// Text put in by the app (LoRAs, styles, Analyze, presets, resets) sets .value, which fires no input event.
+(() => {
+    const desc = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
+    if (!desc || !desc.set) return;
+    Object.defineProperty(HTMLTextAreaElement.prototype, 'value', {
+        ...desc,
+        set(v) {
+            desc.set.call(this, v);
+            if ((autoGrowOn || this.classList.contains('fc-bg')) && this.matches(AUTOGROW_SELECTOR)) queueAutoGrow(this);
+        }
+    });
+})();
+function applyAutoGrowPromptBoxes() {
+    autoGrowOn = localStorage.getItem('bojroAutoGrowPrompt') !== 'false';
+    const sw = document.getElementById('cfgAutoGrowSwitch');
+    if (sw) sw.checked = autoGrowOn;
+    refitPromptBoxes();
+}
+window.toggleAutoGrowPromptBoxes = function(on) {
+    localStorage.setItem('bojroAutoGrowPrompt', on ? 'true' : 'false');
+    applyAutoGrowPromptBoxes();
+};
 window.togglePromptBoxHeight = function(field, on) {
     localStorage.setItem(field === 'neg' ? 'bojroTallNeg' : 'bojroTallPrompt', on ? 'true' : 'false');
     applyPromptBoxHeights();
 };
 applyPromptBoxHeights();
+applyAutoGrowPromptBoxes();
 
-// Live Preview Border (Config > Generation, on by default): the ring round the preview image (style.css).
+// Preview Border: the ring round the preview image.
 function applyLivePreviewBorder() {
     const on = localStorage.getItem('bojroLpBorder') !== 'false';
     document.body.classList.toggle('lp-border-off', !on);
@@ -492,45 +657,132 @@ window.toggleLivePreviewBorder = function(on) {
 };
 applyLivePreviewBorder();
 
-// Live Preview Method / Live Preview Every N Steps (Config > Generation). Sent with each job while Live Preview is on, as
+// Preview Method / Update Every N Steps (Config > Live Preview). Sent with each job while Live Preview is on, as
 // per-job overrides that Forge Neo puts back afterwards, so its own settings are left alone. Empty = Forge's setting.
 window.saveLivePreviewOverride = function(sel) {
     localStorage.setItem(sel.dataset.key, sel.value);
 };
 function livePreviewOverrides() {
     const out = {};
-    const method = localStorage.getItem('bojroLpMethod');
+    let method = localStorage.getItem('bojroLpMethod');
     const everyN = parseInt(localStorage.getItem('bojroLpEveryN'), 10);
+    // On mobile data its own method, if set ('forge' = no override).
+    const mobile = localStorage.getItem('bojroLpMethodMobile') || '';
+    const onMobile = window.currentNetworkType && window.currentNetworkType !== 'wifi';
+    if (onMobile && mobile) method = mobile;
     if (['RGB', 'Approx NN', 'TAESD'].includes(method)) out.show_progress_type = method;
     if (everyN >= 1 && everyN <= 5) out.show_progress_every_n_steps = everyN;
     return out;
 }
 ;(function () {
-    ['cfgLpMethod', 'cfgLpEveryN'].forEach(id => {
+    // VRAM Profile defaults to Standard; the Live Preview ones to Forge's Setting.
+    ['cfgLpMethod', 'cfgLpMethodMobile', 'cfgLpEveryN', 'vramProfile', 'cfgDockStyle'].forEach(id => {
         const sel = document.getElementById(id);
         if (!sel) return;
         const saved = localStorage.getItem(sel.dataset.key) || '';
-        sel.value = [...sel.options].some(o => o.value === saved) ? saved : '';
+        sel.value = [...sel.options].some(o => o.value === saved) ? saved : (id === 'vramProfile' ? 'mid' : '');
         if (typeof updateModelPickerTriggerText === 'function') updateModelPickerTriggerText(id);
     });
 })();
 
-// Backs up every localStorage key, independent of what resetAppConfig() resets.
+// Dock style: '' floating, 'bar', 'round', 'inset' (bar types) or 'fill'.
+window.setDockStyle = function(v) {
+    localStorage.setItem('bojroDockStyle', v || '');
+    const b = document.body;
+    b.classList.remove('dock-bar', 'dock-round', 'dock-inset', 'dock-fill');
+    if (v === 'bar' || v === 'round' || v === 'inset') b.classList.add('dock-bar');
+    if (v) b.classList.add('dock-' + v);
+    if (typeof placeGalleryControls === 'function') requestAnimationFrame(placeGalleryControls);
+};
+setDockStyle(localStorage.getItem('bojroDockStyle') || '');
+
+// Mobile Preview Method: only while Live Preview is allowed on mobile data.
+window.syncLpMobileMethodRow = function () {
+    const on = localStorage.getItem('bojroLivePreviewMobileDataAllowed') === 'true';
+    document.getElementById('lpMobileMethodRow')?.classList.toggle('hidden', !on);
+};
+// Diagnostics buttons row: hidden when neither button is.
+window.syncCfgToolsRow = function () {
+    const row = document.getElementById('cfgToolsRow');
+    if (row) row.classList.toggle('hidden', !row.querySelector('button:not(.hidden)'));
+};
+syncLpMobileMethodRow();
+syncCfgToolsRow();
+
+// Config search: shows options containing the query (or all of a section whose title does), opens their sections
+// and marks the match. Clearing restores the sections.
+let cfgSearchOpen = null; // which sections were open before searching
+function cfgSearchUnmark() {
+    document.querySelectorAll('#view-cfg label[data-search-text]').forEach(l => {
+        l.textContent = l.dataset.searchText;
+        delete l.dataset.searchText;
+    });
+}
+window.filterCfgSearch = function (raw) {
+    const q = raw.trim().toLowerCase();
+    const cards = [...document.querySelectorAll('#view-cfg .cfg-card')];
+    document.getElementById('cfgSearchClear')?.classList.toggle('hidden', !raw);
+    cfgSearchUnmark();
+    document.querySelectorAll('#view-cfg .cfg-search-miss').forEach(e => e.classList.remove('cfg-search-miss'));
+    if (!q) {
+        if (cfgSearchOpen) cards.forEach(card => {
+            const c = card.querySelector('.cfg-accordion-content');
+            c.classList.toggle('hidden', !cfgSearchOpen.has(c.id));
+            const arrow = document.getElementById('arr-' + c.id);
+            if (arrow) arrow.style.transform = cfgSearchOpen.has(c.id) ? 'rotate(0deg)' : 'rotate(-90deg)';
+        });
+        cfgSearchOpen = null;
+        return;
+    }
+    if (!cfgSearchOpen) cfgSearchOpen = new Set(cards.map(c => c.querySelector('.cfg-accordion-content')).filter(c => !c.classList.contains('hidden')).map(c => c.id));
+    const has = el => el.textContent.toLowerCase().includes(q);
+    cards.forEach(card => {
+        const title = card.querySelector('.cfg-accordion-header label');
+        const content = card.querySelector('.cfg-accordion-content');
+        const whole = has(title);
+        const items = [...content.children];
+        let any = whole;
+        if (!whole) items.forEach((el, i) => {
+            // A heading (a label on its own, as Visible Tabs) goes with what's under it.
+            const next = el.tagName === 'LABEL' ? items[i + 1] : null;
+            const hit = has(el) || (next && has(next)) || (items[i - 1]?.tagName === 'LABEL' && has(items[i - 1]));
+            el.classList.toggle('cfg-search-miss', !hit);
+            if (hit && !el.classList.contains('hidden')) any = true;
+        });
+        card.classList.toggle('cfg-search-miss', !any);
+        if (any) {
+            content.classList.remove('hidden');
+            const arrow = document.getElementById('arr-' + content.id);
+            if (arrow) arrow.style.transform = 'rotate(0deg)';
+        }
+    });
+    // Mark the match in option names (plain labels only, so their switches keep working).
+    document.querySelectorAll('#view-cfg .cfg-card:not(.cfg-search-miss) label').forEach(l => {
+        if (l.children.length || l.closest('.cfg-search-miss')) return;
+        const t = l.textContent, i = t.toLowerCase().indexOf(q);
+        if (i < 0) return;
+        const mark = document.createElement('mark');
+        mark.className = 'cfg-search-hit';
+        mark.textContent = t.slice(i, i + q.length);
+        // In one span: labels are flex rows, which would space the pieces apart.
+        const span = document.createElement('span');
+        span.append(t.slice(0, i), mark, t.slice(i + q.length));
+        l.dataset.searchText = t;
+        l.textContent = '';
+        l.append(span);
+    });
+};
+window.clearCfgSearch = function () {
+    const input = document.getElementById('cfgSearch');
+    if (input) input.value = '';
+    window.filterCfgSearch('');
+};
+
+// The Settings backup (Backup & Restore, backup.js): every option, without the presets, LoRA data and styles, which
+// have their own.
 window.backupAppSettings = async function() {
     try {
-        const settings = {};
-        for (let i = 0; i < localStorage.length; i++) {
-            const key = localStorage.key(i);
-            settings[key] = localStorage.getItem(key);
-        }
-
-        const payload = {
-            app: 'Resolver',
-            appVersion: APP_VERSION,
-            exportedAt: new Date().toISOString(),
-            settings: settings
-        };
-        const json = JSON.stringify(payload, null, 2);
+        const json = JSON.stringify(window.Backup.settingsPayload(), null, 2);
         // Shortened to resolver-YYYYMMDDHHMMSS.json.
         const iso = new Date().toISOString(); // e.g. "2026-09-06T17:45:33.717Z"
         const stamp = iso.slice(0, 10).replace(/-/g, '') + iso.slice(11, 19).replace(/:/g, '');
@@ -538,14 +790,13 @@ window.backupAppSettings = async function() {
 
         const fs = typeof Filesystem !== 'undefined' ? Filesystem : null;
         if (fs) {
-            const result = await fs.writeFile({
+            await fs.writeFile({
                 path: filename,
                 data: json,
                 directory: 'DOCUMENTS',
                 encoding: 'utf8'
             });
-            // A toast (without the filename) confirms the export.
-            if (typeof Toast !== 'undefined') Toast.show({ text: 'Backup complete', duration: 'short' });
+            if (typeof Toast !== 'undefined') Toast.show({ text: 'Saved to Documents', duration: 'short' });
         } else {
             // Browser fallback (e.g. testing outside the native app): download link.
             const blob = new Blob([json], { type: 'application/json' });
@@ -560,49 +811,6 @@ window.backupAppSettings = async function() {
         }
     } catch (e) {
         await window.appAlert('Backup failed: ' + e.message, { title: 'Backup Failed', danger: true });
-    }
-}
-
-// Restores an exported backup, replacing current settings (not merging).
-window.restoreAppSettings = async function(event) {
-    const file = event.target.files[0];
-    event.target.value = ''; // reset so picking the same file again still fires onchange
-    if (!file) return;
-
-    // Another app's file (or not JSON at all): back on Config with a toast, no confirmation.
-    const incompatible = () => {
-        if (typeof window.switchTab === 'function') window.switchTab('cfg');
-        if (typeof Toast !== 'undefined' && Toast) Toast.show({ text: 'Incompatible backup', duration: 'short' });
-    };
-    let payload;
-    try { payload = JSON.parse(await file.text()); } catch (e) { incompatible(); return; }
-    // backupAppSettings() writes app: 'Resolver' and the settings as strings.
-    const settings = payload && payload.app === 'Resolver' && payload.settings && typeof payload.settings === 'object' && !Array.isArray(payload.settings) ? payload.settings : null;
-    const keys = settings ? Object.keys(settings) : [];
-    if (!keys.length || keys.some(k => typeof settings[k] !== 'string')) { incompatible(); return; }
-
-    try {
-
-        const when = payload && payload.exportedAt ? new Date(payload.exportedAt).toLocaleString() : 'this file';
-        const backupVersion = payload && payload.appVersion;
-        let versionNote = '';
-        if (backupVersion && typeof APP_VERSION !== 'undefined' && backupVersion !== APP_VERSION) {
-            // Can't auto-fix renamed or reshaped settings, but flag it.
-            versionNote = `\n\nWarning: this backup is from version ${backupVersion}, but you're on ${APP_VERSION}. Some settings may have been renamed or restructured since then and might not restore correctly.`;
-        }
-
-        const confirmed = await window.appConfirm(`Restore settings from ${when}?${versionNote}\n\nThis replaces ALL current settings and cannot be undone. The app will reload afterward.`, { title: 'Restore Settings', okText: 'RESTORE', danger: true });
-        if (!confirmed) {
-            return;
-        }
-
-        localStorage.clear();
-        keys.forEach(key => localStorage.setItem(key, settings[key]));
-
-        await window.appAlert('Settings restored. Reloading...', { title: 'Restore Complete' });
-        window.location.reload();
-    } catch (e) {
-        await window.appAlert('Restore failed: ' + e.message, { title: 'Restore Failed', danger: true });
     }
 }
 
@@ -824,22 +1032,34 @@ window.toggleNeverOomVisibility = function() {
     document.querySelectorAll('.neveroom-box').forEach(el => el.classList.toggle('hidden', !isChecked));
 }
 
-// Inverted: unchecked (default) means Dev Power is visible; checking "Hide Dev Power" hides it.
+// Show Dev Power; the key stores the hidden state.
 window.toggleDevPowerVisibility = function() {
-    const isChecked = document.getElementById('cfgHideDevPowerSwitch').checked;
-    localStorage.setItem('bojroHideDevPower', isChecked ? 'true' : 'false');
-    document.getElementById('devPowerSection')?.classList.toggle('hidden', isChecked);
+    const hide = !document.getElementById('cfgShowDevPowerSwitch').checked;
+    localStorage.setItem('bojroHideDevPower', hide ? 'true' : 'false');
+    document.getElementById('devPowerSection')?.classList.toggle('hidden', hide);
 }
 
-// Hides Flux's GGUF hint and Qwen's Z-Image Turbo hint and special GENERATE labels for setups they don't match (Nunchaku/SVDQuant, Qwen-Image-Lightning, etc). Off by default.
+// Magic Prompt: the button on every tab's Prompt title.
+window.toggleMagicPromptHidden = function(on) {
+    localStorage.setItem('bojroHideMagicPrompt', on ? 'true' : 'false');
+    document.body.classList.toggle('hide-magic-prompt', on);
+    if (window.Scene) Scene.paintVisibility();
+};
+// Show model hints: Flux's GGUF hint, Qwen's Z-Image Turbo hint and special GENERATE labels, which don't match every setup (Nunchaku/SVDQuant, Qwen-Image-Lightning, etc). The key stores the hidden state.
+// Show UI hints: the grey how-to text across the app (body.no-ui-hints, style.css).
+window.toggleUiHints = function() {
+    const hide = !document.getElementById('cfgShowUiHintsSwitch').checked;
+    localStorage.setItem('bojroHideUiHints', hide ? 'true' : 'false');
+    document.body.classList.toggle('no-ui-hints', hide);
+}
+// Show model button names: QUANTUM / TURBO GENERATE on Flux / Z-Image (the setting was "Show model hints").
 window.toggleModelHintsVisibility = function() {
-    const isChecked = document.getElementById('cfgHideModelHintsSwitch').checked;
-    localStorage.setItem('bojroHideModelHints', isChecked ? 'true' : 'false');
-    document.querySelectorAll('.model-hint').forEach(el => el.classList.toggle('hidden', isChecked));
+    const hide = !document.getElementById('cfgShowModelHintsSwitch').checked;
+    localStorage.setItem('bojroHideModelHints', hide ? 'true' : 'false');
     if (typeof updateGenerateButtonLabel === 'function') updateGenerateButtonLabel();
 }
 
-// Hide Loading Circle: hides the spinner above the results of the main tabs and the Inpaint/img2img/Upscale tab while a job runs. Off by default. Applied as a body class (see style.css) so the generation logic is untouched; takes effect immediately.
+// Show loading circle: the spinner above the results of the main tabs and the Inpaint/img2img/Upscale tab while a job runs. On by default. Applied as a body class (see style.css) so the generation logic is untouched; takes effect immediately.
 function applyGenSpinnerHidden(hidden) {
     document.body.classList.toggle('hide-gen-spinner', hidden);
 }
@@ -877,16 +1097,10 @@ window.toggleFloatingBrushBar = function() {
     localStorage.setItem('bojroFloatingBrushSize', isOn ? 'true' : 'false');
     if (typeof updateFloatingBrushBar === 'function') updateFloatingBrushBar();
 }
-// Gallery Badges switch (stored as the OFF state).
-window.toggleGalleryBadges = function() {
-    const isOn = document.getElementById('cfgGalleryBadgesSwitch').checked;
-    localStorage.setItem('bojroGalleryBadgesOff', isOn ? 'false' : 'true');
-    document.body.classList.toggle('hide-gallery-badges', !isOn);
-}
-window.toggleGenSpinnerHidden = function() {
-    const isChecked = document.getElementById('cfgHideGenSpinnerSwitch').checked;
-    localStorage.setItem('bojroHideGenSpinner', isChecked ? 'true' : 'false');
-    applyGenSpinnerHidden(isChecked);
+window.toggleGenSpinnerVisibility = function() {
+    const hide = !document.getElementById('cfgShowGenSpinnerSwitch').checked;
+    localStorage.setItem('bojroHideGenSpinner', hide ? 'true' : 'false');
+    applyGenSpinnerHidden(hide);
 }
 
 // Show ADetailer/ControlNet, split into SDXL/Anima and Other. Hiding a group also turns the feature off for its modes (.feature-hidden, see style.css); each toggle's auto-disable loop covers only its own modes.
@@ -995,7 +1209,7 @@ function renderAdetailerLabelsList() {
     list.innerHTML = '';
     entries.forEach((entry, i) => {
         const row = document.createElement('div');
-        row.style.cssText = 'display:flex; flex-direction:column; gap:6px; padding:10px; border:1px solid var(--border-color); border-radius:8px;';
+        row.className = 'ad-label-card';
         // A saved value missing from the installed list is kept as its own option so opening this never changes it.
         const options = [...installedModels];
         if (entry.match && !options.includes(entry.match)) options.unshift(entry.match);
@@ -1010,15 +1224,28 @@ function renderAdetailerLabelsList() {
                     <span class="model-picker-trigger-primary"></span>
                     <span class="model-picker-trigger-subtitle hidden"></span>
                 </button>
-                <button class="btn-icon" style="width:28px; height:28px; padding:4px; color:#f44336;" title="Remove" onclick="removeAdetailerLabelRow(${i})"><i data-lucide="trash-2" width="16" height="16"></i></button>
+                <button class="card-btn card-btn-delete" title="Remove" onclick="removeAdetailerLabelRow(${i})"><i data-lucide="trash-2" width="16" height="16"></i></button>
             </div>
-            <div class="row" style="gap:6px;">
-                <input type="text" placeholder="Singular" value="${escapeHtmlAttr(entry.singular || '')}" style="flex:1;" oninput="updateAdetailerLabelField(${i}, 'singular', this.value)">
-                <input type="text" placeholder="Plural" value="${escapeHtmlAttr(entry.plural || '')}" style="flex:1;" oninput="updateAdetailerLabelField(${i}, 'plural', this.value)">
+            <div class="col"><label>Chip name</label>
+                <div class="row" style="gap:8px; align-items:stretch;">
+                    <input type="text" class="ad-chip-name-input" value="${escapeHtmlAttr(entry.name || '')}" autocomplete="off" spellcheck="false" style="text-transform:uppercase; flex:1; min-width:0;" oninput="updateAdChipName(${i}, this)">
+                    <div class="ad-pass-chip active ad-chip-preview"><span class="ad-pass-num">${i + 1}</span><input type="checkbox" checked tabindex="-1" onclick="return false"><span class="ad-pass-name"></span></div>
+                </div>
             </div>
+            <div class="row" style="gap:10px;">
+                <div class="col"><label>Singular</label><input type="text" placeholder="face" value="${escapeHtmlAttr(entry.singular || '')}" oninput="updateAdetailerLabelField(${i}, 'singular', this.value)"></div>
+                <div class="col"><label>Plural</label><input type="text" placeholder="faces" value="${escapeHtmlAttr(entry.plural || '')}" oninput="updateAdetailerLabelField(${i}, 'plural', this.value)"></div>
+            </div>
+            <div class="ad-label-preview"></div>
         `;
+        row.querySelector('.ad-label-preview').textContent = adetailerLabelPreview(entry);
+        row.querySelector('.ad-chip-preview .ad-pass-name').textContent = entry.name || '';
         list.appendChild(row);
     });
+    const sw = document.getElementById('adChipNamesSwitch');
+    if (sw) sw.checked = adChipNamesOn();
+    const w = adChipWidth();
+    list.querySelectorAll('.ad-chip-preview').forEach(c => { c.style.width = `${w}px`; });
     if (typeof lucide !== 'undefined') lucide.createIcons();
     // Re-runs initModelPickers() (safe to repeat) for the triggers just created.
     if (typeof initModelPickers === 'function') initModelPickers();
@@ -1029,6 +1256,9 @@ window.addAdetailerLabelRow = function() {
     entries.push({ match: '', singular: '', plural: '' });
     setCustomAdetailerLabels(entries);
     renderAdetailerLabelsList();
+    // The new row, at the bottom, scrolled into view.
+    const list = document.getElementById('adetailerLabelsList');
+    if (list) list.scrollTop = list.scrollHeight;
 }
 
 window.removeAdetailerLabelRow = function(index) {
@@ -1036,14 +1266,93 @@ window.removeAdetailerLabelRow = function(index) {
     entries.splice(index, 1);
     setCustomAdetailerLabels(entries);
     renderAdetailerLabelsList();
+    paintAdChipNames();
 }
 
-// Updates one field of one row in place; a full re-render would drop focus mid-keystroke.
+// ---- Chip names (item 9) ----
+const AD_CHIP_NAMES_KEY = 'bojroAdChipNames';
+function adChipNamesOn() { return localStorage.getItem(AD_CHIP_NAMES_KEY) !== 'false'; }
+window.toggleAdChipNames = function(on) {
+    localStorage.setItem(AD_CHIP_NAMES_KEY, on ? 'true' : 'false');
+    paintAdChipNames();
+};
+// The narrowest pass chip (four to a row): measured from one on screen, else worked out from the app's width.
+function adChipWidth() {
+    const c = [...document.querySelectorAll('.ad-pass-chip:not(.ad-chip-preview)')].find(x => x.offsetWidth > 0);
+    if (c) { try { localStorage.setItem('bojroAdChipW', String(c.offsetWidth)); } catch (e) { } return c.offsetWidth; }
+    const saved = Number(localStorage.getItem('bojroAdChipW'));
+    if (saved > 0) return saved;
+    return Math.floor((Math.min(window.innerWidth, 650) - 32 - 34 - 18) / 4);
+}
+// Whether a name fits on a chip's second line (its own font, upper case).
+let adChipCanvas = null;
+function adChipNameFits(text) {
+    const probe = document.querySelector('.ad-chip-preview .ad-pass-name, .ad-pass-name');
+    if (!probe) return true;
+    const cs = getComputedStyle(probe);
+    adChipCanvas = adChipCanvas || document.createElement('canvas').getContext('2d');
+    adChipCanvas.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+    const room = adChipWidth() - 16 - 2;
+    return adChipCanvas.measureText(String(text).toUpperCase()).width <= room;
+}
+// A typed name is kept only while it fits; past that the box shows the last one that did, and flashes.
+window.updateAdChipName = function(index, input) {
+    const entries = getCustomAdetailerLabels();
+    if (!entries[index]) return;
+    let v = input.value;
+    if (!adChipNameFits(v)) {
+        // Back to what was there before this keystroke (or, if that was too long too, cut to fit).
+        const last = typeof input._last === 'string' ? input._last : (entries[index].name || '');
+        const pos = Math.max(0, (input.selectionStart || 0) - (v.length - last.length));
+        v = last;
+        while (v && !adChipNameFits(v)) v = v.slice(0, -1);
+        input.value = v;
+        try { input.setSelectionRange(Math.min(pos, v.length), Math.min(pos, v.length)); } catch (e) { }
+        input.classList.add('full');
+        clearTimeout(input._full);
+        input._full = setTimeout(() => input.classList.remove('full'), 700);
+    }
+    input._last = v;
+    entries[index].name = v.trim();
+    setCustomAdetailerLabels(entries);
+    const prev = input.closest('.ad-label-card')?.querySelector('.ad-chip-preview .ad-pass-name');
+    if (prev) prev.textContent = v;
+    paintAdChipNames();
+};
+// Each pass chip: the name set for its detection model (blank when none).
+window.paintAdChipNames = function() {
+    const on = adChipNamesOn();
+    document.body.classList.toggle('ad-chip-names', on);
+    if (!on) return;
+    const byModel = new Map(getCustomAdetailerLabels().filter(e => e.match).map(e => [e.match, e.name || '']));
+    document.querySelectorAll('.ad-pass-chip[id*="-adetailer-pass-chip-"]').forEach(chip => {
+        const m = chip.id.match(/^(.+)-adetailer-pass-chip-(\d+)$/);
+        if (!m) return;
+        const sel = document.getElementById(`${m[1]}_adetailer_${m[2]}_model`);
+        const model = (sel && sel.value) || localStorage.getItem(`bojro_${m[1]}_adetailer_${m[2]}_model`) || '';
+        let span = chip.querySelector('.ad-pass-name');
+        if (!span) { span = document.createElement('span'); span.className = 'ad-pass-name'; chip.appendChild(span); }
+        span.textContent = byModel.get(model) || '';
+    });
+};
+document.addEventListener('change', e => { if (e.target && /_adetailer_\d+_model$/.test(e.target.id || '')) paintAdChipNames(); });
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => paintAdChipNames()); else setTimeout(() => paintAdChipNames(), 0);
+window.addEventListener('load', () => setTimeout(() => paintAdChipNames(), 300));
+
+// The toast a row produces, for its preview line.
+function adetailerLabelPreview(entry) {
+    const one = entry.singular || 'face', many = entry.plural || 'faces';
+    return `1 ${one} detected • 3 ${many} detected`;
+}
+// Updates one field of one row in place (a full re-render would drop focus mid-keystroke), and its preview.
 window.updateAdetailerLabelField = function(index, field, value) {
     const entries = getCustomAdetailerLabels();
     if (!entries[index]) return;
     entries[index][field] = value;
     setCustomAdetailerLabels(entries);
+    if (field === 'match') paintAdChipNames();
+    const preview = document.querySelectorAll('#adetailerLabelsList .ad-label-preview')[index];
+    if (preview) preview.textContent = adetailerLabelPreview(entries[index]);
 }
 
 // Passes 5-8: a second row of chips, hidden by default and toggled with this switch for all modes. Only the chip row is touched here; selectAdetailerPass() handles each pass's fields. Turning it off resets every mode to pass 1 so an extra pass isn't left selected and hidden.
@@ -1073,21 +1382,23 @@ async function warnAdetailerMaxTabs() {
 }
 
 
-// Config > Interface > Show Upload History: off hides that RECENT, stops it saving and, once confirmed, clears it.
-window.toggleUploadHistory = async function(key, on, el) {
-    const history = key === 'bojroAnalyzerHistory' ? window.AnalyzerHistory : window.EditHistory;
-    if (!on && history && (await history.list()).length) {
-        const ok = await window.appConfirm(`${key === 'bojroAnalyzerHistory' ? 'Analyze' : 'Inpaint'} history will be cleared.`,
-            { title: 'Show Upload History', okText: 'TURN OFF', cancelText: 'CANCEL', danger: true });
-        if (!ok) { if (el) el.checked = true; return; }
-        await history.clear();
+// Recent Uploads off: hides both RECENT buttons, stops saving and, once confirmed, clears them.
+window.toggleRecentUploads = async function(on, el) {
+    const histories = [window.AnalyzerHistory, window.EditHistory].filter(Boolean);
+    if (!on) {
+        const counts = await Promise.all(histories.map(async h => (await h.list()).length));
+        if (counts.some(n => n)) {
+            const ok = await window.appConfirm('Analyze and Crop & Edit upload history will be cleared.',
+                { title: 'Recent Uploads', okText: 'TURN OFF', cancelText: 'CANCEL', danger: true });
+            if (!ok) { if (el) el.checked = true; return; }
+            await Promise.all(histories.map(h => h.clear()));
+        }
     }
-    localStorage.setItem(key, on ? 'true' : 'false');
-    if (window.AnalyzerHistory) AnalyzerHistory.applyVisibility();
-    if (window.EditHistory) EditHistory.applyVisibility();
+    ['bojroAnalyzerHistory', 'bojroEditHistory'].forEach(k => localStorage.setItem(k, on ? 'true' : 'false'));
+    histories.forEach(h => h.applyVisibility());
 }
 
-// Config > Interface > Analyzer Sticky Bar. Applies immediately; an open panel closes when switched off.
+// Analyzer Sticky Bar: applies at once; an open panel closes when switched off.
 window.toggleAnalyzerStickyBar = function() {
     const isChecked = document.getElementById('cfgAnalyzerStickyBarSwitch').checked;
     localStorage.setItem('bojroAnalyzerStickyBar', isChecked ? 'true' : 'false');
@@ -1133,29 +1444,11 @@ window.toggleFluxCacheVisibility = function() {
     document.getElementById('fluxCacheSection')?.classList.toggle('hidden', !isChecked);
 }
 
-// Show Live Preview Toggle: gates the livePreviewCheck row (Generate tab) and the Live Preview rows indented below it (.lp-option-row). Turning it off also switches live preview off (toggleLivePreview(), which stops fetching).
-// Allow Live Preview On Mobile Data is deliberately not gated on livePreviewCheck, which is set on another screen; it is a standing preference.
-window.toggleLivePreviewButtonVisibility = function() {
-    const isChecked = document.getElementById('cfgShowLivePreviewSwitch').checked;
-    localStorage.setItem('bojroShowLivePreviewToggle', isChecked ? 'true' : 'false');
-    // reorganizeGenRowLayout() (utils.js) owns showing and positioning livePreviewToggleRow.
-    if (typeof reorganizeGenRowLayout === 'function') reorganizeGenRowLayout();
-    if (typeof updateInpPreviewToggleVisibility === 'function') updateInpPreviewToggleVisibility();
-    document.querySelectorAll('.lp-option-row').forEach(r => r.classList.toggle('hidden', !isChecked));
-    if (!isChecked) {
-        // Switching the feature off also clears the remembered live preview choice (see toggleLivePreview(), utils.js).
-        localStorage.setItem('bojroLivePreviewOn', 'false');
-        const mainToggle = document.getElementById('livePreviewCheck');
-        if (mainToggle && mainToggle.checked) {
-            mainToggle.checked = false;
-            if (typeof toggleLivePreview === 'function') toggleLivePreview();
-        }
-    }
-}
-
+// Not tied to the Preview switch.
 window.saveLivePreviewMobileDataAllowed = function() {
     const isChecked = document.getElementById('cfgLivePreviewMobileDataSwitch').checked;
     localStorage.setItem('bojroLivePreviewMobileDataAllowed', isChecked ? 'true' : 'false');
+    syncLpMobileMethodRow();
     if (typeof refreshLivePreviewToggleInteractivity === 'function') refreshLivePreviewToggleInteractivity();
 }
 
@@ -1173,6 +1466,37 @@ window.saveLivePreviewMobileDataAllowed = function() {
     if (sw) sw.checked = hide;
     // Keeps the native copy in step, e.g. after Restore Settings.
     send(hide);
+})();
+
+// Status bar icon of the progress and Generation Complete notifications (in the app only); the service reads the native copy.
+;(function () {
+    const KEY = 'bojroNotificationIcon';
+    const ICONS = ['logo', 'badge', 'bold', 'sparkles'];
+    const device = () => window.Capacitor?.Plugins?.ResolverDevice;
+    const saved = () => { const v = localStorage.getItem(KEY); return ICONS.includes(v) ? v : 'logo'; };
+    function show(icon) {
+        document.querySelectorAll('#cfgNotifIconRow .notif-icon-btn').forEach(b => {
+            const on = b.dataset.icon === icon;
+            b.classList.toggle('active', on);
+            b.setAttribute('aria-pressed', on ? 'true' : 'false');
+        });
+    }
+    async function sendToNative(icon) {
+        try { await device()?.setNotificationIcon({ icon }); } catch (e) { }
+    }
+    window.setNotificationIcon = function (icon) {
+        if (!ICONS.includes(icon)) return;
+        localStorage.setItem(KEY, icon);
+        show(icon);
+        sendToNative(icon);
+    };
+    (function init() {
+        show(saved());
+        if (!device()) return;
+        document.getElementById('cfgNotifIconRow')?.classList.remove('hidden');
+        // Keeps the native copy in step, e.g. after Reset App Configuration.
+        sendToNative(saved());
+    })();
 })();
 
 // Live Update progress notification (Android 16+, off by default); the service reads the native copy.
@@ -1213,4 +1537,43 @@ window.saveLivePreviewMobileDataAllowed = function() {
         // Keeps the native copy in step, e.g. after Reset App Configuration.
         sendToNative(on);
     })();
+})();
+
+// ---- Gallery columns (item 82) ----
+window.setGalleryColumns = function(c) {
+    localStorage.setItem('bojroGalleryCols', c);
+    applyGalleryLayout();
+};
+window.setGalleryWide = function(on) {
+    localStorage.setItem('bojroGalleryWide', on ? 'true' : 'false');
+    applyGalleryLayout();
+};
+function applyGalleryLayout() {
+    const c = localStorage.getItem('bojroGalleryCols') || 'auto', wide = localStorage.getItem('bojroGalleryWide') !== 'false';
+    ['3', '4', '5'].forEach(n => document.body.classList.toggle('gal-cols-' + n, c === n));
+    document.body.classList.toggle('gal-wide', wide);
+    document.querySelectorAll('#cfgGalleryCols .toggle-opt').forEach(b => b.classList.toggle('active', b.dataset.c === c));
+    const sw = document.getElementById('cfgGalleryWideSwitch');
+    if (sw) sw.checked = wide;
+    checkGalleryColumns();
+}
+// The columns the grid shows; a change re-pages the gallery so the last row stays full.
+function checkGalleryColumns() {
+    const grid = document.getElementById('savedGalleryGrid');
+    if (!grid || !grid.offsetParent) return;
+    const n = getComputedStyle(grid).gridTemplateColumns.split(' ').filter(Boolean).length || 3;
+    if (n === galleryColumnCount) return;
+    // Keep the first image shown on the page it lands on.
+    const first = (galleryPage - 1) * galleryPerPage();
+    galleryColumnCount = n;
+    galleryPage = Math.floor(first / galleryPerPage()) + 1;
+    if (typeof window.loadGallery === 'function') window.loadGallery();
+}
+(function () {
+    const go = () => {
+        applyGalleryLayout();
+        const grid = document.getElementById('savedGalleryGrid');
+        if (grid && window.ResizeObserver) new ResizeObserver(() => checkGalleryColumns()).observe(grid);
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', go); else go();
 })();

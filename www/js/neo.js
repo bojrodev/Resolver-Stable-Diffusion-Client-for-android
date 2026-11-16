@@ -191,13 +191,18 @@ const Neo = {
         // High-Res Fix Injection for Qwen
         const hrEl = document.getElementById('qwen_hr_enable');
         if (hrEl && hrEl.checked) {
+            // The default only for an empty box: 0 is a real value (Steps 0 = as many as the first pass).
+            const hrNum = (id, parse, fallback) => {
+                const v = parse(document.getElementById(id).value);
+                return Number.isNaN(v) ? fallback : v;
+            };
             payload.enable_hr = true;
-            payload.hr_scale = parseFloat(document.getElementById('qwen_hr_scale').value) || 1.5;
+            payload.hr_scale = hrNum('qwen_hr_scale', parseFloat, 1.5);
             payload.hr_upscaler = document.getElementById('qwen_hr_upscaler').value;
-            payload.hr_second_pass_steps = parseInt(document.getElementById('qwen_hr_steps').value) || 6;
-            payload.denoising_strength = parseFloat(document.getElementById('qwen_hr_denoise').value) || 0.4;
+            payload.hr_second_pass_steps = hrNum('qwen_hr_steps', parseInt, 6);
+            payload.denoising_strength = hrNum('qwen_hr_denoise', parseFloat, 0.4);
             // Note: 'hr_cfg' is often supported by Forge/A1111 payload even if not standard in original SD
-            payload.hr_cfg = parseFloat(document.getElementById('qwen_hr_cfg').value) || 1.0;
+            payload.hr_cfg = hrNum('qwen_hr_cfg', parseFloat, 1.0);
             // FIX: Add hr_additional_modules to prevent NoneType error in processing.py
             payload.hr_additional_modules = ["Use same choices"]; 
         }

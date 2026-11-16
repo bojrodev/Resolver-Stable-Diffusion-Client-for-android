@@ -57,16 +57,38 @@ function setDialogMessage(el, message, link) {
 }
 
 // --- IN-APP CONFIRM MODAL ---
-// Replaces the native confirm(). Promise-based, so callers use `await window.appConfirm(...)`.
+// Replaces the native confirm(): `await window.appConfirm(...)`; CANCEL or back closes it. options.checkbox adds a
+// checkbox (read with appConfirmChecked()).
+function setAppConfirmCheckbox(text) {
+    const row = document.getElementById('appConfirmCheckRow');
+    if (!row) return;
+    row.classList.toggle('hidden', !text);
+    document.getElementById('appConfirmModal')?.classList.toggle('has-check', !!text);
+    document.getElementById('appConfirmCheck').checked = false;
+    document.getElementById('appConfirmCheckText').textContent = text || '';
+}
+// extra: an element shown under the message (appConfirm()), e.g. images to untick; cleared otherwise.
+function setAppConfirmExtra(el) {
+    const box = document.getElementById('appConfirmExtra');
+    if (!box) return;
+    box.textContent = '';
+    if (el) box.appendChild(el);
+    box.classList.toggle('hidden', !el);
+}
+window.appConfirmChecked = () => document.getElementById('appConfirmCheck')?.checked === true;
 window.appConfirm = function(message, options = {}) {
     return new Promise((resolve) => {
         __appConfirmResolveFn = resolve;
+        __appConfirmKeepOpen = !!options.keepOpenOnOk;
         const titleEl = document.getElementById('appConfirmTitle');
         const msgEl = document.getElementById('appConfirmMessage');
         const okBtn = document.getElementById('appConfirmOkBtn');
         const cancelBtn = document.getElementById('appConfirmCancelBtn');
         if (titleEl) titleEl.textContent = options.title || 'Confirm';
+        setAppConfirmCheckbox(options.checkbox);
+        setAppConfirmExtra(options.extra);
         if (msgEl) setDialogMessage(msgEl, message, options.link);
+        document.getElementById('appConfirmModal')?.classList.toggle('no-sub', !message);
         if (okBtn) {
             okBtn.textContent = options.okText || 'CONFIRM';
             okBtn.style.background = options.danger ? '#f44336' : 'var(--accent-gradient)';
@@ -80,16 +102,29 @@ window.appConfirm = function(message, options = {}) {
         if (typeof lockBodyScroll === 'function') lockBodyScroll();
     });
 }
+// The page's background also behind the WebView (ResolverBootPlugin), so a reload doesn't flash black.
+window.paintNativeBg = function () {
+    try {
+        const c = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(getComputedStyle(document.body).backgroundColor);
+        if (!c) return;
+        const color = '#' + c.slice(1, 4).map(n => (+n).toString(16).padStart(2, '0')).join('');
+        Promise.resolve(window.Capacitor?.Plugins?.ResolverBoot?.background?.({ color })).catch(() => {});
+    } catch (e) {}
+};
 // Same modal as appConfirm() without the Cancel button (native alert() shape).
 window.appAlert = function(message, options = {}) {
     return new Promise((resolve) => {
         __appConfirmResolveFn = resolve;
+        __appConfirmKeepOpen = false;
+        setAppConfirmExtra(null);
         const titleEl = document.getElementById('appConfirmTitle');
         const msgEl = document.getElementById('appConfirmMessage');
         const okBtn = document.getElementById('appConfirmOkBtn');
         const cancelBtn = document.getElementById('appConfirmCancelBtn');
         if (titleEl) titleEl.textContent = options.title || 'Notice';
+        setAppConfirmCheckbox(null);
         if (msgEl) setDialogMessage(msgEl, message, options.link);
+        document.getElementById('appConfirmModal')?.classList.toggle('no-sub', !message);
         if (okBtn) {
             okBtn.textContent = options.okText || 'OK';
             okBtn.style.background = options.danger ? '#f44336' : 'var(--accent-gradient)';
@@ -99,9 +134,22 @@ window.appAlert = function(message, options = {}) {
         if (typeof lockBodyScroll === 'function') lockBodyScroll();
     });
 }
-window.__appConfirmResolve = function(result) {
+// With appConfirm(..., { keepOpenOnOk: true }), OK leaves the dialog up (its buttons disabled) until the caller's
+// closeAppConfirm(), so it can go in the same frame as the change it confirmed.
+let __appConfirmKeepOpen = false;
+window.closeAppConfirm = function() {
+    __appConfirmKeepOpen = false;
+    document.querySelectorAll('#appConfirmOkBtn, #appConfirmCancelBtn').forEach(b => { b.disabled = false; });
     document.getElementById('appConfirmModal')?.classList.add('hidden');
     if (typeof unlockBodyScroll === 'function') unlockBodyScroll();
+};
+window.__appConfirmResolve = function(result) {
+    if (result && __appConfirmKeepOpen) {
+        if (!__appConfirmResolveFn) return;
+        document.querySelectorAll('#appConfirmOkBtn, #appConfirmCancelBtn').forEach(b => { b.disabled = true; });
+    } else {
+        window.closeAppConfirm();
+    }
     if (__appConfirmResolveFn) {
         __appConfirmResolveFn(result);
         __appConfirmResolveFn = null;
@@ -110,22 +158,23 @@ window.__appConfirmResolve = function(result) {
 
 // --- BATTERY OPTIMIZATION HELPERS ---
 
-window.requestBatteryPerm = function() {
-    // FIX: Grab plugin dynamically to solve initialization race condition
-    const svc = (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.ResolverService) ? window.Capacitor.Plugins.ResolverService : ResolverService;
-
-    if (svc) {
-        svc.requestBatteryOpt();
-    } else {
-        console.log("ResolverService plugin not found");
-    }
-
+window.requestBatteryPerm = async function() {
     localStorage.setItem('bojroBatteryOpt', 'true');
     document.getElementById('batteryModal').classList.add('hidden');
-    if (Toast) Toast.show({
-        text: 'Opening Settings...',
-        duration: 'short'
-    });
+    const say = text => { if (typeof Toast !== 'undefined') Toast.show({ text, duration: 'short' }); };
+    // Asks Android first (item 75): nothing opens when Resolver is already exempt.
+    const device = window.Capacitor?.Plugins?.ResolverDevice;
+    if (device && device.requestBatteryExemption) {
+        try {
+            const r = await device.requestBatteryExemption();
+            say(r && r.already ? 'Background mode is already on' : r && r.opened ? 'Opening Settings...' : "Couldn't open Settings");
+            return;
+        } catch (e) { }
+    }
+    // An older app build: the old way.
+    const svc = window.Capacitor?.Plugins?.ResolverService || (typeof ResolverService !== 'undefined' ? ResolverService : null);
+    if (svc) svc.requestBatteryOpt();
+    say('Opening Settings...');
 }
 
 window.skipBatteryPerm = function() {
@@ -243,11 +292,11 @@ async function updateBatchNotification(title, force = false, body = "") {
     
     // 1. Calculate Progress %
     try {
-        if (body && body.includes(" / ")) {
-            const parts = body.split(" / ");
-            const current = parseInt(parts[0].replace(/\D/g, '')) || 0;
-            const total = parseInt(parts[1].replace(/\D/g, '')) || 1;
-            if (total > 0) progressVal = Math.floor((current / total) * 100);
+        // "Step 50 / 62 [1 face]": the numbers either side of the slash.
+        const m = body ? /(\d+)\s*\/\s*(\d+)/.exec(body) : null;
+        if (m) {
+            const current = parseInt(m[1], 10) || 0, total = parseInt(m[2], 10) || 1;
+            if (total > 0) progressVal = Math.min(100, Math.floor((current / total) * 100));
         }
     } catch (e) {
         progressVal = 0;
@@ -277,6 +326,8 @@ async function updateBatchNotification(title, force = false, body = "") {
         title = `${title.replace(/\.+$/, '')}: ${body.replace(/^Step /, '').replace(/\s*\/\s*/, '/')}`;
         body = "";
     }
+    // One line, as the button reads; nothing under it (item 53).
+    if (body) { title = `${title.replace(/\.+$/, '')}: ${body}`; body = ""; }
 
     if (svc) {
         try {
@@ -305,7 +356,8 @@ async function sendCompletionNotification(msg) {
                     body: msg,
                     id: 2002,
                     channelId: 'gen_complete_channel',
-                    smallIcon: "ic_launcher"
+                    // A drawable name (the plugin looks only there): the Notification icon chosen in Config > Experimental.
+                    smallIcon: { badge: 'ic_stat_badge', bold: 'ic_stat_bold', sparkles: 'ic_stat_sparkles' }[localStorage.getItem('bojroNotificationIcon')] || 'ic_stat_resolver'
                 }]
             });
         } catch (e) {}
@@ -319,7 +371,7 @@ const getHeaders = () => ({
     'ngrok-skip-browser-warning': 'true'
 });
 
-// <prefix>_YYMMDD_SEED.png. The seed is read from the image's embedded metadata (Forge writes it), so it works for fresh results and later saves from the viewer. prefix defaults to 'bojro' (Comfy passes 'comfy'). Falls back to a millisecond timestamp. The seed lookup is shared with the long-press "send seed" feature (engine.js).
+// <prefix>_YYMMDD_SEED.png (.jpg / .webp for those). The seed is read from the image's embedded metadata (Forge writes it), so it works for fresh results and later saves from the viewer. prefix defaults to 'bojro' (Comfy passes 'comfy'). Falls back to a millisecond timestamp. The seed lookup is shared with the long-press "send seed" feature (engine.js).
 async function extractSeedFromDataUrl(base64Data) {
     try {
         const blob = await (await fetch(base64Data)).blob();
@@ -340,7 +392,8 @@ async function buildOutputFileName(base64Data, prefix = 'bojro', tag = '', seedO
     const seed = seedOverride !== null && seedOverride !== undefined ? seedOverride : await extractSeedFromDataUrl(base64Data);
     // A resolved seed is never -1 (extractSeedFromDataUrl() excludes it).
     if (seed !== null) suffix = seed;
-    return `${prefix}_${dateStr}_${suffix}${tag ? '_' + tag : ''}.png`;
+    const ext = { 'image/jpeg': '.jpg', 'image/webp': '.webp' }[imageMimeFromBase64(base64Data)] || '.png';
+    return `${prefix}_${dateStr}_${suffix}${tag ? '_' + tag : ''}${ext}`;
 }
 
 let resolverSaveQueue = Promise.resolve();
@@ -366,7 +419,8 @@ async function uniqueResolverFileName(fileName) {
     return fileName;
 }
 
-async function saveToMobileGallery(base64Data, prefix = 'bojro', tag = '', seedOverride = null) {
+// quiet: no "Image saved" (the caller shows one for several). True once saved.
+async function saveToMobileGallery(base64Data, prefix = 'bojro', tag = '', seedOverride = null, quiet = false) {
     try {
         const isNative = window.Capacitor && window.Capacitor.isNative;
         const fileName = await buildOutputFileName(base64Data, prefix, tag, seedOverride);
@@ -384,7 +438,7 @@ async function saveToMobileGallery(base64Data, prefix = 'bojro', tag = '', seedO
             });
             resolverSaveQueue = run.catch(() => {});
             await run;
-            if (Toast) await Toast.show({
+            if (Toast && !quiet) await Toast.show({
                 text: 'Image saved',
                 duration: 'short',
                 position: 'bottom'
@@ -398,12 +452,14 @@ async function saveToMobileGallery(base64Data, prefix = 'bojro', tag = '', seedO
             document.body.removeChild(link);
         }
         markImageSavedToPhone(base64Data);
+        return true;
     } catch (e) {
         console.error("Save failed", e);
+        return false;
     }
 }
 
-// --- AUTO-DELETE WARNING (Config > Generation, on by default) ---
+// --- AUTO-DELETE WARNING (Config > History & Results, on by default) ---
 // Images saved to the phone, by a cheap key of their data (the last 500), for the warning's SAVED label.
 const SAVED_IMAGE_KEYS = 'bojroSavedImageKeys';
 function imageDataKey(data) {
@@ -419,31 +475,31 @@ function markImageSavedToPhone(data) {
     try { localStorage.setItem(SAVED_IMAGE_KEYS, JSON.stringify([...savedImageKeys().filter(k => k !== key), key].slice(-500))); } catch (e) {}
 }
 
-// Gallery images a job of newCount images would delete (oldest first), and how many of the new ones go too.
-function galleryDeletionPreview(newCount) {
+// Gallery images a job of newCount images would delete (oldest first), and how many of the new ones go too. With a limit
+// given (a lower Gallery Cache Limit), what that limit would delete now.
+function galleryDeletionPreview(newCount, newLimit) {
     return new Promise(resolve => {
-        const limit = getGalleryCacheLimit();
+        const limit = newLimit || getGalleryCacheLimit();
         const done = old => resolve({ old, newLost: Math.max(0, newCount - limit), limit });
-        if (!db || newCount <= 0) return done([]);
+        if (!db || (newCount <= 0 && !newLimit)) return done([]);
         try {
             const store = db.transaction(['images'], 'readonly').objectStore('images');
-            const countReq = store.count();
-            countReq.onsuccess = () => {
-                const total = countReq.result;
+            const favs = window.GalleryFavs ? GalleryFavs.ids() : new Set();
+            const keysReq = store.getAllKeys();
+            keysReq.onsuccess = () => {
+                const keys = keysReq.result.filter(k => !favs.has(k));
+                const total = keys.length;
                 const goes = Math.max(0, Math.min(total, total + newCount - limit));
                 if (!goes) return done([]);
-                // Oldest first, as pruneGalleryOverflow() deletes them.
+                // Oldest first, as pruneGalleryOverflow() deletes them; favourites never.
                 const old = [];
-                const cur = store.openCursor();
-                cur.onsuccess = e => {
-                    const c = e.target.result;
-                    if (!c || old.length >= goes) return done(old);
-                    old.push(c.value);
-                    c.continue();
-                };
-                cur.onerror = () => done(old);
+                keys.slice(0, goes).forEach((k, i) => {
+                    const r = store.get(k);
+                    r.onsuccess = () => { old[i] = r.result; if (old.filter(Boolean).length === goes) done(old); };
+                    r.onerror = () => done(old.filter(Boolean));
+                });
             };
-            countReq.onerror = () => done([]);
+            keysReq.onerror = () => done([]);
         } catch (e) { done([]); }
     });
 }
@@ -454,14 +510,15 @@ let autoDeleteAnswer = null;
 window.answerAutoDelete = function(ok) {
     if (autoDeleteAnswer) autoDeleteAnswer(ok);
 };
-// action: what the text says is about to happen ("Upscaling"); "Generating N images" by default.
-window.confirmAutoDelete = async function(newCount, action = null) {
+// action: what the text says is about to happen ("Upscaling"); "Generating N images" by default. newLimit: a lower
+// Gallery Cache Limit about to be set, warned about even when every image that goes is saved.
+window.confirmAutoDelete = async function(newCount, action = null, newLimit = 0) {
     if (localStorage.getItem('bojroAutoDeleteWarning') === 'false') return null;
     if (autoDeleteAnswer) autoDeleteAnswer(false);
-    let preview = await galleryDeletionPreview(newCount);
+    let preview = await galleryDeletionPreview(newCount, newLimit);
     const savedNow = new Set(savedImageKeys());
     const autoSave = document.getElementById('autoDlCheck')?.checked;
-    if (!preview.old.some(item => !savedNow.has(imageDataKey(item.data))) && !(preview.newLost && !autoSave)) return true;
+    if (newLimit ? !preview.old.length : !preview.old.some(item => !savedNow.has(imageDataKey(item.data))) && !(preview.newLost && !autoSave)) return true;
     const modal = document.getElementById('autoDeleteModal');
     const viewer = document.getElementById('fullScreenModal');
     const render = () => {
@@ -469,7 +526,7 @@ window.confirmAutoDelete = async function(newCount, action = null) {
         const n = old.length, plural = c => c === 1 ? '' : 's';
         const doing = action || `Generating ${newCount} image${plural(newCount)}`;
         let text = n
-            ? `${doing} will delete the ${n === 1 ? 'oldest image' : `${n} oldest images`} in the gallery (Gallery Cache Limit: ${limit}).`
+            ? `${doing} will delete the ${n === 1 ? 'oldest image' : `${n} oldest images`} in the gallery${newLimit ? '' : ` (Gallery Cache Limit: ${limit})`}.`
             : newLost ? `${doing} is over the Gallery Cache Limit of ${limit}.` : 'Nothing in the gallery will be deleted now.';
         if (newLost) text += ` The first ${newLost} of the new images will be deleted before it finishes too.`;
         document.getElementById('autoDeleteText').textContent = text;
@@ -503,7 +560,7 @@ window.confirmAutoDelete = async function(newCount, action = null) {
     const watch = new MutationObserver(async () => {
         if (!viewer.classList.contains('hidden') || !viewer.classList.contains('fs-from-autodelete')) return;
         viewer.classList.remove('fs-from-autodelete');
-        preview = await galleryDeletionPreview(newCount);
+        preview = await galleryDeletionPreview(newCount, newLimit);
         render();
     });
     watch.observe(viewer, { attributes: true, attributeFilter: ['class'] });
@@ -592,17 +649,21 @@ let imageSaveChain = Promise.resolve();
 let imageSavesPending = 0;
 let IMAGE_SAVE_TIMEOUT_MS = 15000;
 // `upscale` ({scale, seed}) marks an Upscale result; `badges` lists its gallery badges.
-function saveImageToDBInBackground(base64, upscale = null, badges = null) {
+// `wc`: the image's wildcard picks (Reroll, wcreroll.js).
+function saveImageToDBInBackground(base64, upscale = null, badges = null, wc = null) {
     imageSavesPending++;
     const saved = imageSaveChain.then(() => Promise.race([
-        saveImageToDB(base64, upscale, badges),
+        saveImageToDB(base64, upscale, badges, wc),
         new Promise(resolve => setTimeout(() => resolve(null), IMAGE_SAVE_TIMEOUT_MS))
     ])).catch(() => null);
-    imageSaveChain = saved.then(() => { imageSavesPending--; });
+    imageSaveChain = saved.then(() => {
+        imageSavesPending--;
+        if (!imageSavesPending && typeof scheduleGalleryRefresh === 'function') scheduleGalleryRefresh();
+    });
     return saved;
 }
 
-function saveImageToDB(base64, upscale = null, badges = null) {
+function saveImageToDB(base64, upscale = null, badges = null, wc = null) {
     return new Promise(async (resolve) => {
         // Anything that can throw here (e.g. db.transaction() on a closed connection) must resolve to null itself: an exception in an async executor leaves the promise unsettled and would stall the save queue.
         try {
@@ -614,16 +675,21 @@ function saveImageToDB(base64, upscale = null, badges = null) {
             const thumbnail = await generateThumbnail(base64);
             const tx = db.transaction(["images"], "readwrite");
             const store = tx.objectStore("images");
-            const req = store.add({
+            const rec = {
                 data: base64,
                 // null (not the full image) when generation failed; loadGallery() falls back to item.data.
                 thumbnail: thumbnail,
                 date: new Date().toLocaleString(),
+                ts: Date.now(),
                 ...(upscale ? { upscale } : {}),
-                ...(badges && badges.length ? { badges } : {})
-            });
+                ...(badges && badges.length ? { badges } : {}),
+                ...(wc ? { wc } : {})
+            };
+            const req = store.add(rec);
             req.onsuccess = (e) => {
                 resolve(e.target.result);
+                // History's light copy (gallerylite.js).
+                if (window.GalleryLite) GalleryLite.add({ ...rec, id: e.target.result });
                 // Keep the cache trimmed as images arrive.
                 pruneGalleryOverflow();
             };
@@ -645,7 +711,8 @@ function getGalleryCacheLimit() {
     return (!isNaN(saved) && saved > 0) ? saved : DEFAULT_GALLERY_CACHE_LIMIT;
 }
 
-// Runs on every edit (no SAVE button). Invalid input while typing isn't saved; enforceGalleryCacheLimitDefault() (boot.js) corrects it on leaving CFG. The setting is saved on every keystroke, but pruning and reloading the gallery is debounced (GALLERY_CACHE_DEBOUNCE_MS).
+// Saves the limit, then prunes and reloads the gallery (debounced, GALLERY_CACHE_DEBOUNCE_MS). Invalid input isn't saved;
+// enforceGalleryCacheLimitDefault() (boot.js) corrects it on leaving CFG.
 const GALLERY_CACHE_DEBOUNCE_MS = 400;
 let galleryCacheLimitDebounceTimer = null;
 window.saveGalleryCacheLimit = function(value, showToast = false) {
@@ -659,6 +726,19 @@ window.saveGalleryCacheLimit = function(value, showToast = false) {
             if (typeof loadGallery === 'function') loadGallery();
         });
     }, GALLERY_CACHE_DEBOUNCE_MS);
+};
+
+// The Config box, on leaving it: a lower limit that would delete gallery images asks first (Auto-Delete Warning);
+// CANCEL puts the old limit back.
+window.commitGalleryCacheLimit = async function(el) {
+    const n = parseInt(el.value), old = getGalleryCacheLimit();
+    if (isNaN(n) || n <= 0 || n === old) return;
+    if (n < old && await window.confirmAutoDelete(0, `Lowering the Gallery Cache Limit to ${n}`, n) === false) {
+        el.value = String(old);
+        el._numPrev = String(old);
+        return;
+    }
+    window.saveGalleryCacheLimit(n);
 };
 
 // Called on leaving CFG: corrects an invalid or 0 value back to the default (30) and saves it.
@@ -680,7 +760,7 @@ function loadGalleryCacheLimitUI() {
 const DEFAULT_GENERATION_POLLING_RATE = 200;
 // Floor matches the fastest rate used elsewhere (50ms): responsive without hammering the server.
 const MIN_GENERATION_POLLING_RATE = 50;
-// Polling while the app is in the background (Config > Generation Polling Rate (Background)).
+// Polling while the app is in the background (Config > Generation > Background Polling Rate).
 const DEFAULT_BACKGROUND_POLLING_RATE = 4000;
 // Android slows timers while the app is hidden, so faster checks gain nothing.
 const MIN_BACKGROUND_POLLING_RATE = 500;
@@ -767,129 +847,185 @@ function loadInpaintColorCorrectionUI() {
     });
 }
 
-// Show Abort/Clear View/the results area (inpResultsArea) only when an image is loaded (sourceImageB64), as canvasWrapper/upscaleWrapper do. Called wherever those wrappers' visibility changes (setInpaintTopMode and its editor.js fallback, two sites in comfy_logic.js).
+// Window titles shrink to stay on one line; run when a window opens or is added, and on resize.
+function fitModalTitles(scope) {
+    (scope || document).querySelectorAll('.modal:not(.hidden) .modal-header h3').forEach(h => {
+        if (getComputedStyle(h).whiteSpace !== 'nowrap') return;
+        h.style.fontSize = '';
+        let size = parseFloat(getComputedStyle(h).fontSize) || 17;
+        while (h.scrollWidth > h.clientWidth + 1 && size > 14) {
+            size -= 0.5;
+            h.style.fontSize = `${size}px`;
+        }
+    });
+}
+new MutationObserver(records => {
+    if (records.some(r => r.target.classList?.contains('modal') || [...(r.addedNodes || [])].some(n => n.classList?.contains('modal')))) fitModalTitles();
+}).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
+window.addEventListener('resize', () => fitModalTitles());
+
+// ABORT and CLEAR (inpResultsArea) show only with an image loaded, as canvasWrapper/upscaleWrapper do.
 function updateInpResultsAreaVisibility() {
     const el = document.getElementById('inpResultsArea');
     if (!el) return;
     el.classList.toggle('hidden', !sourceImageB64);
 }
 
-// Puts `wanted` inside `parent` in that order, moving nodes only if needed (repeat calls don't touch the DOM).
-function ensureChildren(parent, wanted) {
-    const current = Array.from(parent.children);
-    if (current.length === wanted.length && current.every((node, i) => node === wanted[i])) return;
-    wanted.forEach(node => parent.appendChild(node));
-}
-
-// Lays out the Auto-Save/Abort/Clear View/Preview area in one of two layouts.
-// Preview hidden (Show Live Preview Toggle off): Auto-Save sits under QUEUE, and Abort and Clear View sit under GENERATE at half its width each via .under-generate (style.css, pure CSS). genRow2 stays hidden. The Inpaint/img2img/Upscale tab uses the same class and structure.
-// Preview shown: Abort and Clear View take half of genRow1 each, and Auto-Save moves to genRow2 beside Preview.
-// Real DOM nodes are moved (listeners and inline handlers survive); ensureChildren() only moves nodes when the order is wrong.
-function reorganizeGenRowLayout() {
-    const row1 = document.getElementById('genRow1');
-    const row2 = document.getElementById('genRow2');
-    const autoSaveGroup = document.getElementById('autoSaveGroup');
-    const livePreviewGroup = document.getElementById('livePreviewToggleRow');
-    const abortBtn = document.getElementById('abortGenBtn');
-    const clearBtn = document.getElementById('clearViewBtn');
-    if (!row1 || !row2 || !autoSaveGroup || !livePreviewGroup || !abortBtn || !clearBtn) return;
-
-    const showPreview = localStorage.getItem('bojroShowLivePreviewToggle') === 'true';
-
-    if (showPreview) {
-        ensureChildren(row2, [autoSaveGroup, livePreviewGroup]);
-        ensureChildren(row1, [abortBtn, clearBtn]);
-        abortBtn.classList.remove('under-generate');
-        clearBtn.classList.remove('under-generate');
-        abortBtn.style.flex = '1';
-        clearBtn.style.flex = '1';
-        // Same 50/50 split as row1, so each toggle sits under its own button.
-        autoSaveGroup.style.flex = '1';
-        autoSaveGroup.style.minWidth = '';
-        livePreviewGroup.style.flex = '1';
-        // Centred within each half; the gap is set explicitly (space-between and centre alone don't give the right spacing).
-        autoSaveGroup.style.justifyContent = 'center';
-        autoSaveGroup.style.gap = '8px';
-        livePreviewGroup.style.justifyContent = 'center';
-        livePreviewGroup.style.gap = '8px';
-        row2.classList.remove('hidden');
-        livePreviewGroup.classList.remove('hidden');
-    } else {
-        ensureChildren(row1, [autoSaveGroup, abortBtn, clearBtn]);
-        // Auto-Save fills the slot under QUEUE; min-width:0 keeps the slot QUEUE's width on very narrow screens.
-        autoSaveGroup.style.flex = '1 1 0%';
-        autoSaveGroup.style.minWidth = '0';
-        // Back to the HTML's own layout: no justify-content, same 8px gap.
-        autoSaveGroup.style.justifyContent = '';
-        autoSaveGroup.style.gap = '8px';
-        // Abort/Clear View sized by the class alone - no inline flex.
-        abortBtn.style.flex = '';
-        clearBtn.style.flex = '';
-        abortBtn.classList.add('under-generate');
-        clearBtn.classList.add('under-generate');
-        row2.classList.add('hidden');
-        livePreviewGroup.classList.add('hidden');
+// JPEG / PNG / WEBP button (cycles; 7.4-checkpoint26): Forge's samples_format (a per-job override doesn't work: Forge resets it before encoding). Shows
+// only what Forge reports; checked on connecting, each job, resuming and a result in another format.
+window.ImageFormat = (() => {
+    let current = null, quality = null, busy = false;
+    const family = f => (f === 'jpg' || f === 'jpeg') ? 'jpg' : f;
+    const label = f => !f ? '—' : family(f) === 'jpg' ? 'JPEG' : f.toUpperCase();
+    function render() {
+        document.querySelectorAll('.fmt-btn').forEach(b => {
+            b.textContent = label(current);
+            b.classList.toggle('fmt-png', current === 'png');
+            b.classList.toggle('fmt-webp', current === 'webp');
+            b.classList.toggle('fmt-unknown', !current);
+        });
     }
-}
+    function note(f) {
+        const v = typeof f === 'string' && f ? f.toLowerCase() : null;
+        if (v !== current) { current = v; render(); }
+    }
+    // Config's JPEG quality box shows Forge's jpeg_quality (empty until Forge answers); not while it's being typed in.
+    function noteQuality(q) {
+        quality = Number.isFinite(q) ? q : null;
+        const box = document.getElementById('cfgJpegQuality');
+        if (box && document.activeElement !== box) box.value = quality ?? '';
+    }
+    function noteOptions(o) {
+        note(o ? o.samples_format : null);
+        noteQuality(o ? Number(o.jpeg_quality) : null);
+    }
+    async function call(opts) {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 8000);
+        try {
+            const res = await fetch(`${HOST}/sdapi/v1/options`, { ...opts, headers: getHeaders(), signal: ctrl.signal });
+            if (!res.ok) throw new Error('Status ' + res.status);
+            return opts.method === 'POST' ? null : ((await res.json()) || null);
+        } finally {
+            clearTimeout(t);
+        }
+    }
+    async function refresh() {
+        if (!HOST) return noteOptions(null);
+        try { noteOptions(await call({})); } catch (e) { noteOptions(null); }
+    }
+    const say = text => { if (typeof Toast !== 'undefined' && Toast) Toast.show({ text, duration: 'short' }); };
+    async function toggle() {
+        if (busy) return;
+        if (!current) {
+            busy = true;
+            await refresh();
+            busy = false;
+            if (!current) say("Couldn't reach Forge");
+            return;
+        }
+        // PNG > JPEG > WEBP (largest file to smallest), then round again.
+        const want = { png: 'jpg', jpg: 'webp' }[family(current)] || 'png';
+        busy = true;
+        let ok = false;
+        try {
+            await call({ method: 'POST', body: JSON.stringify({ samples_format: want }) });
+            const now = await call({});
+            noteOptions(now);
+            ok = current === want;
+        } catch (e) {
+            await refresh();
+        }
+        busy = false;
+        if (!ok) say("Couldn't change format");
+    }
+    // A result in another format than shown: ask Forge again.
+    function checkResult(b64) {
+        const f = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }[imageMimeFromBase64(b64)];
+        if (current && f && family(current) !== f) refresh();
+    }
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible' && typeof isEngineConnected !== 'undefined' && isEngineConnected) refresh();
+    });
+    async function setQuality(box) {
+        const v = parseInt(box.value, 10);
+        if (!(v >= 1 && v <= 100)) {
+            box.value = quality ?? '';
+            return say('JPEG quality must be 1-100');
+        }
+        if (v === quality) return;
+        try {
+            await call({ method: 'POST', body: JSON.stringify({ jpeg_quality: v }) });
+            noteOptions(await call({}));
+            if (quality !== v) say("Couldn't change JPEG quality");
+        } catch (e) {
+            box.value = quality ?? '';
+            say("Couldn't reach Forge");
+        }
+    }
+    return { note, refresh, toggle, setQuality, checkResult, get: () => current };
+})();
 
-// The Inpaint/img2img tab's Preview toggle (inpLivePreviewToggleRow), beside Abort. Shown when Show Live Preview Toggle is on, except in Upscale (no live preview). The slot stays put so Abort/Clear View never move. Called from boot, toggleLivePreviewButtonVisibility() (cfg.js) and setInpaintTopMode() (editor.js).
+// The Inpaint tab's settings row (JPEG, Auto-Save, Preview) sits above GENERATE or, in Upscale, above UPSCALE, where
+// Preview is hidden. Called from boot and setInpaintTopMode().
 function updateInpPreviewToggleVisibility() {
     const row = document.getElementById('inpLivePreviewToggleRow');
     if (!row) return;
-    const enabled = localStorage.getItem('bojroShowLivePreviewToggle') === 'true';
     const isUpscale = typeof currentInpaintTopMode !== 'undefined' && currentInpaintTopMode === 'upscale';
-    row.classList.toggle('hidden', !(enabled && !isUpscale));
+    row.classList.toggle('hidden', isUpscale);
+    const settings = document.getElementById('inpSettingsRow');
+    const btn = document.getElementById(isUpscale ? 'upscaleBtn' : 'inpGenBtn');
+    if (settings && btn) btn.parentElement.before(settings);
 }
+// Upscaler 2 Visibility shows only with an Upscaler 2 chosen.
+window.syncUpscaler2VisRow = function() {
+    const sel = document.getElementById('upscale_upscaler_2');
+    document.getElementById('upscaler2VisRow')?.classList.toggle('hidden', !sel || sel.value === 'None');
+};
 
-// Live Preview: the toggle sits in the shared Auto-Save/Abort row on the five main modes and, kept in step, beside Abort on the Inpaint/img2img tab (not Upscale). Both are gated by Show Live Preview Toggle (cfg.js); livePreviewCheck is the single source of truth for polling.
+// Live Preview: the toggle sits beside Auto-Save on the five main modes and, kept in step, on the Inpaint/img2img tab (not Upscale); livePreviewCheck is the single source of truth for polling.
 
 // Wraps the native ResolverService.getNetworkType(): 'wifi' | 'cellular' | 'ethernet' | 'other' | 'none' | 'unknown'. Defaults to 'wifi' without the native plugin (desktop browser testing).
 async function getCurrentNetworkType() {
     try {
         if (window.Capacitor?.Plugins?.ResolverService?.getNetworkType) {
             const result = await Capacitor.Plugins.ResolverService.getNetworkType();
-            return result?.type || 'wifi';
+            return (window.currentNetworkType = result?.type || 'wifi');
         }
     } catch (e) {}
     return 'wifi';
 }
 
-// The person's remembered on/off choice for Live Preview (bojroLivePreviewOn, written only when they tap a toggle; see toggleLivePreview()), separate from what the toggle shows: on disallowed mobile data it shows off but the choice is kept. Always false while the feature is hidden.
+// The person's remembered on/off choice for Live Preview (bojroLivePreviewOn, written only when they tap a toggle; see toggleLivePreview()), separate from what the toggle shows: on disallowed mobile data it shows off but the choice is kept. Off until first switched on.
 function getLivePreviewPreference() {
-    return localStorage.getItem('bojroLivePreviewOn') === 'true'
-        && localStorage.getItem('bojroShowLivePreviewToggle') === 'true';
+    return localStorage.getItem('bojroLivePreviewOn') === 'true';
 }
 
 // Re-evaluates whether the toggles are interactive. Off WiFi (mobile data not allowed): shown off, disabled and greyed out without touching the remembered choice; otherwise enabled and set to the remembered choice. Called at boot, on networkTypeChanged (initLivePreviewNetworkListener()) and when the "allow on mobile data" setting changes.
 async function refreshLivePreviewToggleInteractivity() {
     // Both the main tab's toggle and the Inpaint tab's mirror of it.
-    const pairs = ['livePreviewCheck', 'inpLivePreviewCheck']
-        .map(id => ({ toggle: document.getElementById(id), label: document.querySelector(`label[for="${id}"]`) }))
-        .filter(x => x.toggle);
-    if (!pairs.length) return;
+    const toggles = ['livePreviewCheck', 'inpLivePreviewCheck'].map(id => document.getElementById(id)).filter(Boolean);
+    if (!toggles.length) return;
     const networkType = await getCurrentNetworkType();
     const mobileDataAllowed = localStorage.getItem('bojroLivePreviewMobileDataAllowed') === 'true';
     const shouldBeInteractive = networkType === 'wifi' || mobileDataAllowed;
     if (!shouldBeInteractive) {
-        const wasOn = pairs.some(x => x.toggle.checked);
-        pairs.forEach(({ toggle, label }) => {
+        const wasOn = toggles.some(t => t.checked);
+        toggles.forEach(toggle => {
             toggle.checked = false;
             toggle.disabled = true;
-            // The label greys out with the switch (var(--text-muted), as Abort's disabled state).
-            if (label) label.style.color = 'var(--text-muted)';
         });
         if (wasOn && typeof toggleLivePreview === 'function') toggleLivePreview();
     } else {
         const wanted = getLivePreviewPreference();
-        pairs.forEach(({ toggle, label }) => {
+        toggles.forEach(toggle => {
             toggle.disabled = false;
             toggle.checked = wanted;
-            if (label) label.style.color = 'var(--text-main)';
         });
     }
 }
 
-// The toggle's on/off state is remembered across restarts. Only a real tap stores it (called with the switch that changed); code that turns the toggles off itself (mobile data, feature hidden) passes no source. See getLivePreviewPreference(). "Allow on mobile data" is a standing preference, never gated on this toggle (see toggleLivePreviewButtonVisibility(), cfg.js).
+// The toggle's on/off state is remembered across restarts. Only a real tap stores it (called with the switch that changed); code that turns the toggles off itself (mobile data) passes no source. See getLivePreviewPreference(). "Allow On Mobile Data" is a standing preference, never gated on this toggle.
 window.toggleLivePreview = function(source) {
     // The main toggle is the single source of truth (pollProgressOnce reads it); the Inpaint tab's switch mirrors it. Setting .checked in code fires no change event, so they can't loop.
     const main = document.getElementById('livePreviewCheck');
@@ -917,26 +1053,18 @@ function pruneGalleryOverflow() {
             const limit = getGalleryCacheLimit();
             const tx = db.transaction(["images"], "readwrite");
             const store = tx.objectStore("images");
-            const countReq = store.count();
-            countReq.onsuccess = () => {
-                const overflow = countReq.result - limit;
+            // Favourites (galleryfavs.js) neither count nor go.
+            const favs = window.GalleryFavs ? GalleryFavs.ids() : new Set();
+            const keysReq = store.getAllKeys();
+            keysReq.onsuccess = () => {
+                const keys = keysReq.result.filter(k => !favs.has(k));
+                const overflow = keys.length - limit;
                 if (overflow <= 0) return resolve();
-
-                let deleted = 0;
-                const cursorReq = store.openCursor();
-                cursorReq.onsuccess = (e) => {
-                    const cursor = e.target.result;
-                    if (!cursor || deleted >= overflow) {
-                        resolve();
-                        return;
-                    }
-                    store.delete(cursor.primaryKey);
-                    deleted++;
-                    cursor.continue();
-                };
-                cursorReq.onerror = () => resolve();
+                keys.slice(0, overflow).forEach(k => store.delete(k));
+                tx.oncomplete = () => resolve();
+                tx.onerror = tx.onabort = () => resolve();
             };
-            countReq.onerror = () => resolve();
+            keysReq.onerror = () => resolve();
         } catch (e) {
             console.error("Gallery prune failed:", e);
             resolve();
@@ -945,19 +1073,25 @@ function pruneGalleryOverflow() {
 }
 
 window.clearDbGallery = async function() {
-    const confirmed = await window.appConfirm("Delete entire history? This cannot be undone.", { title: 'Delete History', okText: 'DELETE', danger: true });
+    // Favourites stay unless the box (unticked each time) says otherwise.
+    const favs = window.GalleryFavs ? GalleryFavs.ids() : new Set();
+    const confirmed = await window.appConfirm("Delete entire history? This cannot be undone.", { title: 'Delete History', okText: 'DELETE', danger: true, checkbox: favs.size ? 'Delete favorites too' : null });
     if (confirmed) {
+        const withFavs = !favs.size || window.appConfirmChecked();
         const tx = db.transaction(["images"], "readwrite");
-        tx.objectStore("images").clear();
+        const store = tx.objectStore("images");
+        if (withFavs) store.clear();
+        else { const k = store.getAllKeys(); k.onsuccess = () => k.result.forEach(id => { if (!favs.has(id)) store.delete(id); }); }
         tx.oncomplete = () => {
-            isSelectionMode = false;
-            selectedImageIds.clear();
-            document.getElementById('galDeleteBtn').classList.add('hidden');
+            if (withFavs && window.GalleryFavs) GalleryFavs.save(new Set());
+            if (isSelectionMode) toggleGallerySelectionMode();
             galleryPage = 1;
-            // Delete All wipes every row, so both Generation Results strips are emptied outright.
+            // The Generation Results strips lose what was deleted (everything but kept favourites).
             ['gallery', 'inpGallery'].forEach(id => {
                 const el = document.getElementById(id);
-                if (el) el.innerHTML = '';
+                if (!el) return;
+                if (withFavs) el.innerHTML = '';
+                else el.querySelectorAll('.gen-result').forEach(img => { if (!favs.has(parseInt(img.dataset.dbId, 10))) img.remove(); });
             });
             if (typeof loadGallery === 'function') loadGallery();
         };
@@ -966,8 +1100,88 @@ window.clearDbGallery = async function() {
 
 // --- METADATA UTILS ---
 
+// Image type from base64 (or a data URL): Forge sends PNG, JPEG or WEBP, depending on its Image Format setting.
+function imageMimeFromBase64(b64) {
+    const s = String(b64 || '').replace(/^data:[^,]*,/, '');
+    if (s.startsWith('/9j/')) return 'image/jpeg';
+    if (s.startsWith('UklGR')) return 'image/webp';
+    return 'image/png';
+}
+function base64ToDataUrl(b64) {
+    return `data:${imageMimeFromBase64(b64)};base64,${b64}`;
+}
+
+// The EXIF UserComment text of a JPEG or WEBP (where Forge puts "parameters" for those formats), or null.
+function exifUserCommentFromBytes(b) {
+    try {
+        let tiff = -1;
+        if (b[0] === 0xFF && b[1] === 0xD8) {
+            let off = 2;
+            while (off + 4 <= b.length && b[off] === 0xFF) {
+                const marker = b[off + 1], len = (b[off + 2] << 8) | b[off + 3];
+                if (marker === 0xDA || marker === 0xD9) break;
+                if (marker === 0xE1 && String.fromCharCode(...b.subarray(off + 4, off + 8)) === 'Exif') { tiff = off + 10; break; }
+                off += 2 + len;
+            }
+        } else if (String.fromCharCode(...b.subarray(0, 4)) === 'RIFF' && String.fromCharCode(...b.subarray(8, 12)) === 'WEBP') {
+            let off = 12;
+            while (off + 8 <= b.length) {
+                const type = String.fromCharCode(...b.subarray(off, off + 4));
+                const len = b[off + 4] | (b[off + 5] << 8) | (b[off + 6] << 16) | (b[off + 7] << 24);
+                if (type === 'EXIF') {
+                    tiff = off + 8;
+                    if (String.fromCharCode(...b.subarray(tiff, tiff + 4)) === 'Exif') tiff += 6;
+                    break;
+                }
+                off += 8 + len + (len & 1);
+            }
+        }
+        if (tiff < 0) return null;
+        const le = b[tiff] === 0x49;
+        const u16 = o => le ? b[tiff + o] | (b[tiff + o + 1] << 8) : (b[tiff + o] << 8) | b[tiff + o + 1];
+        const u32 = o => (le ? (b[tiff + o] | (b[tiff + o + 1] << 8) | (b[tiff + o + 2] << 16) | (b[tiff + o + 3] << 24))
+            : ((b[tiff + o] << 24) | (b[tiff + o + 1] << 16) | (b[tiff + o + 2] << 8) | b[tiff + o + 3])) >>> 0;
+        const find = (ifd, tag) => {
+            const n = u16(ifd);
+            for (let i = 0; i < n; i++) {
+                const e = ifd + 2 + i * 12;
+                if (u16(e) === tag) return { count: u32(e + 4), at: u32(e + 4) <= 4 ? e + 8 : u32(e + 8) };
+            }
+            return null;
+        };
+        const exifPtr = find(u32(4), 0x8769);
+        if (!exifPtr) return null;
+        const uc = find(u32(exifPtr.at), 0x9286);
+        if (!uc || uc.count < 8) return null;
+        const data = b.subarray(tiff + uc.at, tiff + uc.at + uc.count);
+        const prefix = String.fromCharCode(...data.subarray(0, 8));
+        const body = data.subarray(8);
+        let text;
+        if (prefix === 'UNICODE\0') {
+            // UTF-16; Forge (piexif) writes big-endian, some tools little-endian.
+            let even = 0, odd = 0;
+            for (let i = 0; i + 1 < Math.min(body.length, 200); i += 2) { if (!body[i]) even++; if (!body[i + 1]) odd++; }
+            text = new TextDecoder(even >= odd ? 'utf-16be' : 'utf-16le').decode(body);
+        } else {
+            text = new TextDecoder().decode(body);
+        }
+        text = text.replace(/\0+$/, '').trim();
+        return text || null;
+    } catch (e) {
+        return null;
+    }
+}
+async function readExifText(blob) {
+    return exifUserCommentFromBytes(new Uint8Array(await blob.slice(0, 512 * 1024).arrayBuffer()));
+}
+function isPngBytes(b) {
+    return b.length >= 8 && [137, 80, 78, 71, 13, 10, 26, 10].every((v, i) => b[i] === v);
+}
+
 async function readPngMetadata(blob) {
     try {
+        // JPEG / WEBP: the EXIF comment.
+        if (!isPngBytes(new Uint8Array(await blob.slice(0, 8).arrayBuffer()))) return await readExifText(blob);
         const buffer = await blob.arrayBuffer();
         const view = new DataView(buffer);
         let offset = 8;
@@ -1085,9 +1299,41 @@ const SEARCH_LETTERS = { 'ß': 'ss', 'æ': 'ae', 'œ': 'oe', 'ø': 'o', 'ł': 'l
 function searchKey(text) {
     return String(text || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[ßæœøłđðþ]/g, c => SEARCH_LETTERS[c]);
 }
-// A search box's query: as searchKey(), with a trailing space ignored so "monster " still finds "monsters".
+// A search box's query: as searchKey(), leading spaces dropped and a trailing one kept (it marks the last word as
+// whole); '' for nothing but spaces.
 function searchQuery(text) {
-    return searchKey(text).trimEnd();
+    const k = searchKey(text);
+    return /\S/.test(k) ? k.replace(/^\s+/, '').replace(/\s+$/, ' ') : '';
+}
+// Words: runs of letters and digits; anything else separates them ("Style: name (series)", "hatsune_miku").
+const searchWords = s => s.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+// True when every query word matches a different word of the text, in any order: whole words, except the last one
+// typed (its start). loose: anywhere in the text, the fallback when nothing matches (searchFilter()).
+function searchMatches(text, query, loose = false) {
+    const words = searchWords(query);
+    if (!words.length) return true;
+    const key = searchKey(text);
+    if (loose) {
+        const t = searchWords(key).join(' ');
+        return words.every(w => t.includes(w));
+    }
+    const lastWhole = /[^\p{L}\p{N}]$/u.test(query);
+    const tw = searchWords(key);
+    const used = new Set();
+    // Whole words first, so the word being typed can't take one they need.
+    const order = words.map((w, i) => ({ w, whole: i < words.length - 1 || lastWhole })).sort((a, b) => b.whole - a.whole);
+    return order.every(({ w, whole }) => {
+        const i = tw.findIndex((t, j) => !used.has(j) && (whole ? t === w : t.startsWith(w)));
+        if (i < 0) return false;
+        used.add(i);
+        return true;
+    });
+}
+// The items with a text (textsOf(item) gives its texts) matching the query by words, or, if none does, anywhere.
+function searchFilter(items, textsOf, query) {
+    if (!query) return items;
+    const strict = items.filter(it => textsOf(it).some(t => searchMatches(t, query)));
+    return strict.length ? strict : items.filter(it => textsOf(it).some(t => searchMatches(t, query, true)));
 }
 
 // A full stop that ends an initial or a short title ("c.c.", "jr.") isn't a stray one, so it stays before a comma (ui.js).
@@ -1100,20 +1346,44 @@ const ELLIPSIS_TAG = /(^|,)([ \t]*)\.\.\.(?=[ \t]*(?:,|$))/g;
 // Full stops not attached to a word (at the start, or after a space, comma or opening bracket); not ".5".
 const LOOSE_STOPS = /(^|[\s,([])\.+(?!\d)/g;
 
-// Unmatched round brackets in a line of tags: a stray ")" goes, a missing ")" is added at the end of the tag (or of the line,
-// for a group with a weight like "(smile, happy:1.2"), and a pair escaped on one side only ("\(pokemon)") is escaped on both.
+// Unmatched brackets in a line of tags: stray closers go, missing ones are added at the tag's (or weighted group's)
+// end, and a half-escaped round pair is escaped on both sides.
 function repairTagBrackets(line) {
     const chars = [...line];
-    const open = []; // { i, esc }
-    const drop = new Set();
+    const open = []; // { i, esc, sq }
+    const drop = new Set(), opens = new Map(); // insert position -> "(" for a weight's group
     for (let i = 0; i < chars.length; i++) {
         const esc = chars[i - 1] === '\\';
         if (chars[i] === '(') open.push({ i, esc });
+        else if (chars[i] === '[' && !esc) open.push({ i, sq: true });
         else if (chars[i] === ')') {
-            const o = open.pop();
-            if (!o) { if (!esc) drop.add(i); continue; }
+            const at = open.map(o => !o.sq).lastIndexOf(true);
+            const o = at < 0 ? null : open.splice(at, 1)[0];
+            // No "(" for it: a tag with a weight ("open mouth:1.5)") gets one at its start; any other is dropped.
+            if (!o) {
+                if (esc) continue;
+                let start = i;
+                while (start > 0 && chars[start - 1] !== ',') start--;
+                const tag = chars.slice(start, i).join('');
+                if (/\p{L}\s*:\s*-?\d*\.?\d+\s*$/u.test(tag)) { const lead = tag.match(/^\s*/)[0].length; opens.set(start + lead, (opens.get(start + lead) || '') + '('); }
+                else drop.add(i);
+                continue;
+            }
             if (o.esc && !esc) chars[i] = '\\)';
             else if (!o.esc && esc) chars[o.i] = '\\(';
+        } else if (chars[i] === ']' && !esc) {
+            const at = open.map(o => !!o.sq).lastIndexOf(true);
+            if (at < 0) {
+                // Prompt editing or alternating missing its "[": put back at the tag's start.
+                let start = i;
+                while (start > 0 && chars[start - 1] !== ',') start--;
+                const tag = chars.slice(start, i).join('');
+                if (/^[^\[\]()]*\p{L}[^\[\]()]*(?::[^\[\]()]*)?:\s*-?\d*\.?\d+\s*$|^[^\[\]()|]*\p{L}[^\[\]()]*\|[^\[\]()]*\p{L}[^\[\]()]*$/u.test(tag)) {
+                    const lead = tag.match(/^\s*/)[0].length;
+                    opens.set(start + lead, (opens.get(start + lead) || '') + '[');
+                } else drop.add(i);
+            }
+            else open.splice(at, 1);
         }
     }
     const ends = new Map(); // insert position -> closers
@@ -1121,14 +1391,92 @@ function repairTagBrackets(line) {
         const rest = line.slice(o.i + 1);
         const comma = rest.search(/,/);
         const toLineEnd = comma < 0 || /:\s*-?\d*\.?\d+\s*$/.test(rest);
-        let at = toLineEnd ? chars.length : o.i + 1 + comma;
-        const closer = o.esc ? '\\)' : ')';
+        // A weight further on closes the group after it ("(A, B, C:1.5, D").
+        const weight = !o.sq && !o.esc && !toLineEnd ? /:\s*-?\d*\.?\d+(?=\s*(?:,|$))/.exec(rest) : null;
+        let at = toLineEnd ? chars.length : weight ? o.i + 1 + weight.index + weight[0].length : o.i + 1 + comma;
+        const closer = o.sq ? ']' : o.esc ? '\\)' : ')';
         ends.set(at, (ends.get(at) || '') + closer);
     }
     let out = '';
     for (let i = 0; i <= chars.length; i++) {
         if (ends.has(i)) out = out.replace(/[ \t]+$/, '') + ends.get(i);
+        if (opens.has(i)) out += opens.get(i);
         if (i < chars.length && !drop.has(i)) out += chars[i];
+    }
+    return out;
+}
+
+// Weights (Prompt Auto-Formatting): "(open mouth:1 5)" -> "(open mouth:1.5)", "(smile1.5)" -> "(smile:1.5)", a bare
+// "open mouth:1.5" outside brackets wrapped, and "((coat:1.5))" -> "(coat:1.5)" (extra brackets around one weighted
+// tag). Tags grouped in one bracket ("(A, B, C:1.5)") are left alone.
+function repairWeights(line, tagStyle) {
+    let out = line
+        .replace(/(\([^()\\]*?:)\s*(\d+)[ ,](\d+)\s*\)/g, '$1$2.$3)')
+        .replace(/(^|[^\\])\(([^():\\]*?\p{L})[ \t]*(\d+\.\d+)\)/gu, '$1($2:$3)');
+    for (let prev = null; prev !== out;) { prev = out; out = out.replace(/(^|[^\\])\(\((?!\\)([^()]*?:\s*-?\d*\.?\d+)\)\)/g, '$1($2)'); }
+    // Bare weights (tag-style prompts only): tags at bracket depth 0 ending in ":number" (a word before it, so "16:9" stays).
+    if (!tagStyle) return out;
+    let depth = 0, start = 0, res = '';
+    const flush = end => {
+        const tag = out.slice(start, end), m = /^(\s*)([^()\[\]{}:\u0000]*\p{L})[ \t]*:[ \t]*(-?\d*\.?\d+)(\s*)$/u.exec(tag);
+        res += m && !/::/.test(tag) ? `${m[1]}(${m[2]}:${m[3]})${m[4]}` : tag;
+    };
+    for (let i = 0; i < out.length; i++) {
+        // Escaped brackets count too: what's inside them is text, not a tag to wrap.
+        const c = out[i];
+        if (c === '(' || c === '[') depth++;
+        else if (c === ')' || c === ']') depth = Math.max(0, depth - 1);
+        else if (c === ',' && depth === 0) { flush(i); res += ','; start = i + 1; }
+    }
+    flush(out.length);
+    return res;
+}
+
+// Choices (Prompt Auto-Formatting): a tag with "|" missing one or both braces gets them ("pants|bare legs" ->
+// "{pants|bare legs}"). Not inside ( ) or [ ] (prompt editing's [cat|dog]), nor random:: / order:: tokens or ${...}.
+function repairChoices(line) {
+    if (line.indexOf('|') < 0) return line;
+    const open = (line.match(/\{/g) || []).length, close = (line.match(/\}/g) || []).length;
+    // Tags split on commas outside ( ) and [ ]; with balanced braces, outside { } too (a choice can hold commas).
+    const tags = [];
+    let p = 0, q = 0, c = 0, cur = '';
+    for (const ch of line) {
+        if (ch === '(') p++; else if (ch === ')') p = Math.max(0, p - 1);
+        else if (ch === '[') q++; else if (ch === ']') q = Math.max(0, q - 1);
+        else if (ch === '{') c++; else if (ch === '}') c = Math.max(0, c - 1);
+        if (ch === ',' && !p && !q && (open !== close || !c)) { tags.push(cur); cur = ''; } else cur += ch;
+    }
+    tags.push(cur);
+    return tags.map(t => {
+        if (t.indexOf('|') < 0 || /::|\$\{|\u0000|[\[\]]/.test(t)) return t;
+        // The "|" must be outside ( ) and [ ].
+        let d = 0, bare = false;
+        for (const ch of t) { if (ch === '(' || ch === '[') d++; else if (ch === ')' || ch === ']') d = Math.max(0, d - 1); else if (ch === '|' && !d) bare = true; }
+        if (!bare) return t;
+        const o = (t.match(/\{/g) || []).length, k = (t.match(/\}/g) || []).length;
+        const lead = t.match(/^\s*/)[0], body = t.slice(lead.length).replace(/\s+$/, ''), tail = t.slice(lead.length + body.length);
+        if (o === k) return o ? t : `${lead}{${body}}${tail}`;
+        return o > k ? `${lead}${body}${'}'.repeat(o - k)}${tail}` : `${lead}${'{'.repeat(k - o)}${body}${tail}`;
+    }).join(',');
+}
+
+// Commas beside BREAK taken out of text sent to Forge ("a, BREAK, b" -> "a BREAK b"; a line break stays one). Only
+// BREAK in capitals as a whole word, as Forge reads it.
+function breakForForge(text) {
+    if (typeof text !== 'string' || text.indexOf('BREAK') < 0) return text;
+    return text
+        .replace(/[ \t]*,([ \t]*\n?[ \t]*)(?=\bBREAK\b)/g, (m, sp) => (sp.includes('\n') ? sp : ' '))
+        .replace(/\bBREAK\b([ \t]*\n?[ \t]*),[ \t]*(\n?)/g, (m, sp, nl) => 'BREAK' + (sp.includes('\n') ? sp : nl || ' '));
+}
+// A request's payload with breakForForge() on its prompts (the job's own payload is left as it is).
+function payloadForForge(payload) {
+    const out = Object.assign({}, payload);
+    ['prompt', 'negative_prompt', 'hr_prompt', 'hr_negative_prompt'].forEach(k => { if (typeof out[k] === 'string') out[k] = breakForForge(out[k]); });
+    const ad = out.alwayson_scripts && out.alwayson_scripts.ADetailer;
+    if (ad && Array.isArray(ad.args)) {
+        out.alwayson_scripts = Object.assign({}, out.alwayson_scripts, { ADetailer: Object.assign({}, ad, {
+            args: ad.args.map(a => (a && typeof a === 'object' && !Array.isArray(a) ? Object.assign({}, a, { ad_prompt: breakForForge(a.ad_prompt), ad_negative_prompt: breakForForge(a.ad_negative_prompt) }) : a))
+        }) });
     }
     return out;
 }
@@ -1141,7 +1489,7 @@ function normaliseTag(tag) {
     if (t.startsWith('<')) return t.replace(/\s+/g, ' ').toLowerCase();
     if (t === '...') return t;
     t = repairTagBrackets(t).replace(LOOSE_STOPS, '$1').replace(STOP_RUN, '$1.').replace(/(^|[^.])\.(?=\s*\\?[):\]])/g, (m, pre, i, str) => strayFullStop(str.slice(0, i) + pre) ? pre : m);
-    for (let m; (m = t.match(/^\(((?:\\[()]|[^()])*?)(?::\s*-?\d*\.?\d+)?\)$/) || t.match(/^\[([^\[\]]*)\]$/));) t = m[1].trim();
+    for (let m; (m = t.match(/^\(((?:\\[()]|[^()])*?)(?::\s*-?\d*\.?\d+)?\)$/) || t.match(/^\[((?:[^\[\]]|\[[^\[\]]*\])*)\]$/));) t = m[1].trim();
     while (/[^.]\.$/.test(t) && strayFullStop(t.slice(0, -1))) t = t.slice(0, -1).trim();
     return t.replace(/\\([()])/g, '$1').replace(/_/g, ' ').replace(/(\p{L})\.\s*(?=\p{L})/gu, '$1 ').replace(/\s*([:|])\s*/g, '$1')
         .replace(/\s+/g, ' ').trim().toLowerCase();
@@ -1227,12 +1575,9 @@ function extractImportablePrompts(rawText) {
     return { pos: parsed.pos || '', neg: parsed.neg || '' };
 }
 
-// The same, from a file/blob. Only PNGs carry the text chunks readPngMetadata() reads; anything else is "no metadata".
+// The same, from a file/blob: PNG text chunks, or a JPEG / WEBP's EXIF comment (readPngMetadata()).
 async function readImportablePromptsFromBlob(blob) {
     try {
-        const head = new Uint8Array(await blob.slice(0, 8).arrayBuffer());
-        const pngSignature = [137, 80, 78, 71, 13, 10, 26, 10];
-        if (head.length < 8 || !pngSignature.every((b, i) => head[i] === b)) return null;
         return extractImportablePrompts(await readPngMetadata(blob));
     } catch (e) {
         return null;
@@ -1291,6 +1636,10 @@ async function scanPngHead(blob) {
 // A PNG's tEXt / iTXt / zTXt chunks as [{type, data}], or null.
 async function readPngTextChunks(blob) {
     try {
+        if (!isPngBytes(new Uint8Array(await blob.slice(0, 8).arrayBuffer()))) {
+            const text = await readExifText(blob);
+            return text ? [parametersITXtChunk(text)] : null;
+        }
         const scan = await scanPngHead(blob);
         if (!scan) return null;
         const out = [];
@@ -1302,6 +1651,74 @@ async function readPngTextChunks(blob) {
     } catch (e) {
         return null;
     }
+}
+
+// An iTXt "parameters" chunk (keyword, 0, uncompressed, method, empty language and translation, UTF-8 text).
+function parametersITXtChunk(text) {
+    const key = new TextEncoder().encode('parameters'), t = new TextEncoder().encode(text);
+    const data = new Uint8Array(key.length + 5 + t.length);
+    data.set(key, 0);
+    data.set(t, key.length + 5);
+    return { type: 'iTXt', data };
+}
+// The "parameters" text in text chunks, or null.
+function parametersFromTextChunks(chunks) {
+    try {
+        for (const chunk of chunks || []) {
+            const data = chunk.data;
+            const keyEnd = data.indexOf(0);
+            if (keyEnd < 0 || new TextDecoder('latin1').decode(data.subarray(0, keyEnd)) !== 'parameters') continue;
+            if (chunk.type === 'tEXt') return new TextDecoder('latin1').decode(data.subarray(keyEnd + 1));
+            if (chunk.type === 'iTXt' && data[keyEnd + 1] === 0) {
+                let p = data.indexOf(0, keyEnd + 3);
+                if (p >= 0) p = data.indexOf(0, p + 1);
+                if (p >= 0) return new TextDecoder().decode(data.subarray(p + 1));
+            }
+        }
+    } catch (e) {}
+    return null;
+}
+// A JPEG's width and height from its frame header, or null.
+function jpegSizeFromBytes(b) {
+    if (b[0] !== 0xFF || b[1] !== 0xD8) return null;
+    let off = 2;
+    while (off + 9 < b.length && b[off] === 0xFF) {
+        const m = b[off + 1], len = (b[off + 2] << 8) | b[off + 3];
+        if (m >= 0xC0 && m <= 0xCF && m !== 0xC4 && m !== 0xC8 && m !== 0xCC) return { height: (b[off + 5] << 8) | b[off + 6], width: (b[off + 7] << 8) | b[off + 8] };
+        off += 2 + len;
+    }
+    return null;
+}
+// Puts `text` in a JPEG's EXIF UserComment as Forge does (replacing any EXIF), with Size set to the JPEG's size.
+async function embedJpegParameters(dataUrl, text) {
+    const bytes = new Uint8Array(await (await fetch(dataUrl)).arrayBuffer());
+    const size = jpegSizeFromBytes(bytes);
+    if (size) text = text.replace(/Size: \d+x\d+(?![\s\S]*Size: \d+x\d+)/, `Size: ${size.width}x${size.height}`);
+    const body = [0x55, 0x4E, 0x49, 0x43, 0x4F, 0x44, 0x45, 0];
+    for (let i = 0; i < text.length; i++) { const c = text.charCodeAt(i); body.push(c >> 8, c & 255); }
+    // Big-endian TIFF: IFD0 with the Exif pointer, the Exif IFD with UserComment, then the comment.
+    const tiff = [0x4D, 0x4D, 0, 42, 0, 0, 0, 8,
+        0, 1, 0x87, 0x69, 0, 4, 0, 0, 0, 1, 0, 0, 0, 26, 0, 0, 0, 0,
+        0, 1, 0x92, 0x86, 0, 7, ...[24, 16, 8, 0].map(s => (body.length >>> s) & 255), 0, 0, 0, 44, 0, 0, 0, 0, ...body];
+    const app1Len = 2 + 6 + tiff.length;
+    if (app1Len > 65535) return dataUrl;
+    const app1 = new Uint8Array([0xFF, 0xE1, app1Len >> 8, app1Len & 255, 0x45, 0x78, 0x69, 0x66, 0, 0, ...tiff]);
+    // Drop any existing EXIF (APP1 "Exif") segment.
+    const parts = [bytes.subarray(0, 2), app1];
+    let off = 2;
+    while (off + 4 <= bytes.length && bytes[off] === 0xFF && bytes[off + 1] !== 0xDA) {
+        const len = (bytes[off + 2] << 8) | bytes[off + 3];
+        const isExif = bytes[off + 1] === 0xE1 && String.fromCharCode(...bytes.subarray(off + 4, off + 8)) === 'Exif';
+        if (!isExif) parts.push(bytes.subarray(off, off + 2 + len));
+        off += 2 + len;
+    }
+    parts.push(bytes.subarray(off));
+    return await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(new Blob(parts, { type: 'image/jpeg' }));
+    });
 }
 
 // The seed in the "parameters" chunk, or null.
@@ -1375,6 +1792,13 @@ function patchParametersChunkSize(chunk, width, height) {
 async function embedPngTextChunks(dataUrl, chunks) {
     try {
         if (!chunks || !chunks.length) return dataUrl;
+        // A JPEG result (Forge set to JPEG) gets the text in its EXIF instead.
+        const mime = imageMimeFromBase64(dataUrl);
+        if (mime === 'image/jpeg') {
+            const text = parametersFromTextChunks(chunks);
+            return text ? await embedJpegParameters(dataUrl, text) : dataUrl;
+        }
+        if (mime !== 'image/png') return dataUrl;
         const blob = await (await fetch(dataUrl)).blob();
         const scan = await scanPngHead(blob);
         if (!scan || !scan.width || !scan.height) return dataUrl;
@@ -1403,6 +1827,13 @@ async function embedPngTextChunks(dataUrl, chunks) {
 
 function gcd(a, b) {
     return b ? gcd(b, a % b) : a;
+}
+// Analyze's Ratio: a preset ratio when within 4% of one (1280x832 shows 3:2), else the exact one (9:20).
+function ratioLabel(w, h, d) {
+    d = d || gcd(w, h);
+    const r = w / h, exact = `${w / d}:${h / d}`;
+    const near = [[1, 1], [3, 2], [4, 3], [16, 9], [2, 3], [3, 4], [9, 16]].find(([a, b]) => Math.abs(r / (a / b) - 1) <= 0.04);
+    return near ? near.join(':') : exact;
 }
 
 // Inpaint and img2img share inp_prompt/inp_neg, so a saved default prompt/negative for 'inp' is keyed per sub-mode. Other modes key on their own name.

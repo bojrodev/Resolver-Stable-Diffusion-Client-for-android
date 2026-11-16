@@ -1,7 +1,7 @@
 {
-  "version": "2.9",
+  "version": "3.0",
   "isNativeRequired": true,
   "nativeUrl": "https://github.com/bojrodev/Resolver-Stable-Diffusion-Client-for-android/releases",
   "url": "https://github.com/bojrodev/Resolver-Stable-Diffusion-Client-for-android/releases/download/v2.7-bunglesmixed/bugfixota28on27.zip",
-  "note": "Bungles QOL Update!"
+  "note": "Resolver v3.0 is here!\n\n• Wildcards system with Civitai & library import\n• Forge Couple regions\n• Prompt history, colors & tag autocomplete\n• LoRA variants, groups & weight sliders\n• Backup & Restore, gallery favorites & compare\n• New sliding dock with haptics\n• 40+ bug fixes\n\nNew APK required: install over your current app. Your images and settings stay."
 }

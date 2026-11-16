@@ -27,6 +27,12 @@ window.normalizeBatchField = function(el) {
     }
 }
 
+// Tapping into a seed box showing -1 (random) empties it, so a seed can be pasted straight in; left empty it goes back
+// to -1 (normalizeSeedField()).
+document.addEventListener('focusin', e => {
+    const el = e.target;
+    if (el && el.matches && el.matches('input[onblur*="normalizeSeedField"]') && el.value.trim() === '-1') el.value = '';
+}, true);
 // As normalizeBatchField, for seed fields: an empty value means -1 (random). Uses parseSeedValue since 0 is a valid seed.
 window.normalizeSeedField = function(el) {
     if (typeof parseSeedValue === 'function') el.value = parseSeedValue(el.value);
@@ -124,37 +130,39 @@ window.setMode = function(mode) {
     if (animaCont) animaCont.classList.add('hidden');
     if (kreaCont) kreaCont.classList.add('hidden');
 
+    // The idle label for this tab; a running or busy button keeps its step count or BUSY.
+    const setGenIdleLabel = t => { const b = document.getElementById('genBtn'); if (b && !b.disabled && !b.classList.contains('gen-busy')) b.innerText = t; };
     // --- MODE SWITCHING LOGIC ---
     if (mode === 'flux') {
         root.setAttribute('data-mode', 'flux');
         btnFlux.classList.add('active');
         fluxRow.classList.remove('hidden');
         fluxCont.classList.remove('hidden');
-        document.getElementById('genBtn').innerText = getGenerateButtonLabel('flux');
+        setGenIdleLabel(getGenerateButtonLabel('flux'));
     } else if (mode === 'qwen') {
         root.setAttribute('data-mode', 'qwen');
         if (btnQwen) btnQwen.classList.add('active');
         if (qwenRow) qwenRow.classList.remove('hidden');
         if (qwenCont) qwenCont.classList.remove('hidden');
-        document.getElementById('genBtn').innerText = getGenerateButtonLabel('qwen');
+        setGenIdleLabel(getGenerateButtonLabel('qwen'));
     } else if (mode === 'anima') {
         root.setAttribute('data-mode', 'anima');
         if (btnAnima) btnAnima.classList.add('active');
         if (animaRow) animaRow.classList.remove('hidden');
         if (animaCont) animaCont.classList.remove('hidden');
-        document.getElementById('genBtn').innerText = "GENERATE";
+        setGenIdleLabel("GENERATE");
     } else if (mode === 'krea') {
         root.setAttribute('data-mode', 'krea');
         if (btnKrea) btnKrea.classList.add('active');
         if (kreaRow) kreaRow.classList.remove('hidden');
         if (kreaCont) kreaCont.classList.remove('hidden');
-        document.getElementById('genBtn').innerText = "GENERATE";
+        setGenIdleLabel("GENERATE");
     } else {
         root.removeAttribute('data-mode');
         btnXL.classList.add('active');
         xlRow.classList.remove('hidden');
         xlCont.classList.remove('hidden');
-        document.getElementById('genBtn').innerText = "GENERATE";
+        setGenIdleLabel("GENERATE");
     }
 
     const unifiedTitle = "RESOLVER";
@@ -287,8 +295,8 @@ function extractLoraTags(text) {
 
 // Removes duplicate tags, matched loosely (normaliseTag(), so "smile" and "(smile:1.2)" are one tag). The first is kept, in its
 // place, but takes a later copy's weight if it has none. Commas and line breaks both separate tags; a removed tag's
-// separator merges into the one before it, so line breaks are kept. Prompt keywords (BREAK, AND...) and numbers can repeat,
-// and part of a bracket group spanning commas ("(smile, happy:1.2)") is never touched. Returns the count.
+// separator merges into the one before it, so line breaks are kept. Prompt keywords (BREAK, AND...), numbers, wildcards
+// and bracket groups spanning commas ("(smile, happy:1.2)") are left alone. Returns the count.
 const REPEATABLE_TAG = /^(AND|BREAK|ADDROW|ADDCOL|-?\d+(\.\d+)?)$/;
 function mergeTagSeparators(a, b) {
     const lines = Math.max((a.match(/\n/g) || []).length, (b.match(/\n/g) || []).length);
@@ -302,10 +310,14 @@ function removeDuplicateTagsFrom(el) {
     const kept = [];
     let removedCount = 0;
     const weighted = t => /^[([]/.test(t) && /[)\]]$/.test(t);
+    // Inside a {a|b} choice (wcengine.js) nothing is a duplicate.
+    let inChoice = 0;
     for (let i = 0; i < pieces.length; i += 2) {
         const item = { tag: pieces[i], sep: pieces[i + 1] || '' };
         const tag = item.tag.trim();
-        const whole = tag && !REPEATABLE_TAG.test(tag) && repairTagBrackets(tag) === tag;
+        const was = inChoice;
+        inChoice = Math.max(0, inChoice + (tag.match(/(^|[^\\])\{/g) || []).length - (tag.match(/(^|[^\\])\}/g) || []).length);
+        const whole = tag && !was && !/[{}|]/.test(tag) && !REPEATABLE_TAG.test(tag) && !/__[A-Za-z0-9(-]/.test(tag) && !/^(random|order)::/i.test(tag) && repairTagBrackets(tag) === tag;
         const key = whole ? normaliseTag(tag) : null;
         const first = key && seen.get(key);
         if (first && kept.length) {
@@ -357,18 +369,36 @@ function tightenBracketColons(line) {
     return out;
 }
 
-// Spacing fixes, line by line so line breaks stay; <...> (LoRAs) is left alone. Spaces after commas, none before them,
+// Spacing fixes, line by line so line breaks stay; <...> (LoRAs), __...__ (wildcards), style:: and random:: / order::
+// tokens are left alone. Spaces after commas, none before them,
 // inside brackets or doubled; empty tags and empty brackets go, and a comma inside a bracket moves out of it.
 // tagStyle (SDXL/Anima tags): a period beside a comma goes, one between letters is a missed space, underscores between
 // letters become spaces, spaces around "|", and around ":" inside brackets (weights), go, and "name (series)" brackets
 // are escaped so Forge reads them as text. Otherwise (natural language) a missing space after a full stop is added.
+// An emoticon tag: eyes, maybe a nose, a mouth (:) ;-) :d :3 >:( or escaped :\) ), or a face round an underscore (>_< ^_^).
+const EMOTICON_TAG = /(^|,)([ \t]*)(>?[:;=8][-'^o]?(?:\\[)(\]\[]|[)(\]\[DdPpOo3|\/<>*$@])|[^\s,_]_[^\s,_])(?=[ \t]*(?:,|\n|$))/gm;
+// Its brackets escaped, so Forge reads them as text (not emphasis); ones already escaped left alone.
+const escapeEmoticon = e => e.replace(/(^|[^\\])([()\[\]])/g, '$1\\$2');
 function formatPromptText(text, tagStyle) {
     const loras = [];
     // Empty lines go first (collapseBlankLines(), utils.js, keeps a comma-only line's comma), and any a rule below empties after.
-    const s = collapseBlankLines(String(text == null ? '' : text)).replace(/<[^<>\n]*>/g, m => `\u0000${loras.push(m) - 1}\u0000`);
-    const out = s.split('\n').map(line => {
+    // Choices missing a brace are completed first (tag-style prompts), so the whole choice is held aside below
+    // (repairChoices(), utils.js).
+    const s = collapseBlankLines(String(text == null ? '' : text)).split('\n').map(l => (tagStyle ? repairChoices(l) : l)).join('\n')
+        // With AND: a weight ending a part (before AND, or at the end, commas after or not) is the part's: held aside.
+        .replace(/\bAND\b/.test(String(text || '')) ? /[ \t]*:[ \t]*[-+]?(?:\d+\.?\d*|\.\d+)(?=[ \t]*(?:\bAND\b|[\s,]*$(?![\s\S])))/g : /$^/, m => `\u0000${loras.push(m) - 1}\u0000`)
+        // Emoticon tags (;) :d >_< ^_^ ...) held aside first, as they are (tag-style prompts).
+        .replace(EMOTICON_TAG, (m, pre, sp, emo) => (tagStyle ? `${pre}${sp}\u0000${loras.push(escapeEmoticon(emo)) - 1}\u0000` : m)).replace(/<[^<>\n]*>|__[A-Za-z0-9(-](?:(?!__)[A-Za-z0-9_ ()-])*?__|__[A-Za-z0-9(-](?:(?!__)[A-Za-z0-9_ ()-])*?(?:\([^()\n]*=[^()\n]*\))?\[[^\[\]\n]*\]__|__[A-Za-z0-9(-](?:(?!__)[A-Za-z0-9_ ()-])*?\([^()\n]*=[^()\n]*\)__|style::[^,\n<>]+|(?:random|order)::[^,\n<>]+|\$?\{(?:[^{}\n]|\{(?:[^{}\n]|\{[^{}\n]*\})*\})*\}/gi, m => `\u0000${loras.push(m) - 1}\u0000`);
+    const lines = s.split('\n');
+    const lastText = lines.map(l => /\S/.test(l)).lastIndexOf(true);
+    const out = lines.map((line, i) => {
+        // Tags: one ending a line has its comma before the break (not after BREAK, nor on the last line with text), added
+        // first so the rules below tidy it.
+        if (tagStyle && i < lastText && !/(,|\bBREAK)[ \t]*$/.test(line) && /\S/.test(line)) line = line.replace(/[ \t]*$/, ',');
         // A "..." tag is held aside so the full-stop rules leave it alone.
         if (tagStyle) line = repairTagBrackets(line).replace(ELLIPSIS_TAG, '$1$2\u0001').replace(STOP_RUN, '$1.');
+        // Weights: "(a:1 5)", "(smile1.5)", "a:1.5" outside brackets, "((a:1.5))" (repairWeights(), utils.js).
+        line = repairWeights(line, tagStyle);
         // Brackets first, so what an empty one leaves behind is tidied by the rules below.
         for (let prev = null; prev !== line;) {
             prev = line;
@@ -410,6 +440,8 @@ function formatPromptText(text, tagStyle) {
             // No space before a full stop ("cat ." -> "cat."), and one after it (two letters before it, so "e.g." stays).
             line = line.replace(/(?<=\S)[ \t]+\.(?![.\d])/g, '.').replace(/(\p{L}{2})\.(?=\p{L})/gu, '$1. ');
         }
+        // Again, now the full stop rules have run ("b:1.1...." is "b:1.1" only now), before the comma spacing.
+        line = repairWeights(line, tagStyle);
         line = line
             .replace(/[ \t]+,/g, ',')
             .replace(/,(?:[ \t]*,)+/g, ',')
@@ -436,7 +468,10 @@ function formatPromptText(text, tagStyle) {
         prev = end;
         end = end.replace(/(^|[^.])\.(\s*)$/, (m, pre, sp, i, str) => strayFullStop(str.slice(0, i) + pre) ? pre + sp : m).replace(/[ \t]+$/, '');
     }
-    return end.replace(/\u0000(\d+)\u0000/g, (m, i) => loras[+i]);
+    // A full stop taken off the end can leave a bare weight ("b:1.1." -> "b:1.1").
+    if (tagStyle) end = end.split('\n').map(l => repairWeights(l, true)).join('\n');
+    // A choice held aside: no spaces around its "|" ("{pants | bare legs}" -> "{pants|bare legs}"); not ${...}.
+    return end.replace(/\u0000(\d+)\u0000/g, (m, i) => (/^\{[\s\S]*\|[\s\S]*\}$/.test(loras[+i]) ? loras[+i].replace(/[ \t]*\|[ \t]*/g, '|') : loras[+i]));
 }
 
 // Tag-style prompt modes only (xl, anima, inp/img2img via 'inp'); flux/qwen/krea are natural-language. img2img shares inp_prompt/inp_neg.
@@ -463,12 +498,39 @@ function ensureTrailingCommaOn(el) {
     return true;
 }
 
+// Wildcards in a box: "__" alone goes, "__pose" is closed when that wildcard exists, and unknown ones go (with Wildcards
+// on). Returns the text and how many went.
+const WC_FULL = /__([A-Za-z0-9(-](?:(?!__)[A-Za-z0-9_ ()-])*?)(\([^()\n]*=[^()\n]*\))?(\[[^\[\]\n]*\])?__/g;
+function tidyWildcards(text) {
+    const W = window.Wildcards;
+    if (!W || !W.enabled || !W.enabled() || !W._parts || !/__/.test(text)) return { text, removed: 0 };
+    const key = W._parts.nameKey, have = new Set(W._parts.read().map(w => key(w.name)));
+    let removed = 0;
+    // Unfinished ones: a tag that starts with "__" and doesn't end with it.
+    let out = text.replace(/(^|[,\n])([ \t]*)__((?:(?!__)[A-Za-z0-9 _()-])*?)[ \t]*(?=,|\n|$)/g, (m, pre, sp, name) => {
+        if (/__$/.test(m.trim()) && name) return m;
+        if (name && have.has(key(name))) return `${pre}${sp}__${name.trim()}__`;
+        removed++;
+        return pre;
+    });
+    out = out.replace(WC_FULL, (m, name) => (have.has(key(name)) ? m : (removed++, '')));
+    return { text: out, removed };
+}
+// Tags in lower case (SDXL, Anima): not BREAK / AND / ADDROW..., <lora:...>, style::NAME or embedding names.
+function lowerTags(text) {
+    return text.replace(/(<[^<>\n]*>|\b(?:BREAK|AND|ADDROW|ADDCOL|ADDBASE|ADDCOMM)\b|style::[^,\n<>]+)|[^<]+?(?=<|\bBREAK\b|\bAND\b|\bADD(?:ROW|COL|BASE|COMM)\b|style::|$)/g, (m, keep) => keep ? m
+        : m.replace(/[\p{L}\p{N}_.-]+/gu, w => (typeof promptEmbeddingNames !== 'undefined' && promptEmbeddingNames.has(w.toLowerCase()) ? w : w.toLowerCase())));
+}
+
 // One box: formatPromptText(), then in tag-style modes duplicate tags and the closing comma. Returns the duplicates removed and whether it changed.
 function tidyPromptBox(el, realMode) {
     if (!el || !el.value) return { removed: 0, changed: false };
     const before = el.value;
     const tagStyle = usesAutoComma(realMode);
     const dedupe = DEDUPE_TAG_MODES.includes(realMode);
+    const wc = tidyWildcards(el.value);
+    if (wc.text !== el.value) el.value = wc.text;
+    if (tagStyle) el.value = lowerTags(el.value);
     // Format, then remove duplicates; a removal can leave something new to tidy (or a new duplicate), so it repeats while it does.
     let removed = 0;
     for (let i = 0; i < 4; i++) {
@@ -483,6 +545,7 @@ function tidyPromptBox(el, realMode) {
         // A closing comma left with no space after it ("smile.," tidied to "smile,") gets the usual ", ".
         if (el.value.endsWith(',')) el.value += ' ';
     }
+    if (wc.removed && typeof Toast !== 'undefined') Toast.show({ text: `Removed ${wc.removed} unknown wildcard${wc.removed === 1 ? '' : 's'}`, duration: 'short' });
     return { removed, changed: el.value !== before };
 }
 
@@ -498,6 +561,71 @@ window.dedupePromptTagsOnBlur = function(mode, field) {
     }
     if (removed > 0 && Toast) Toast.show({ text: `Removed ${removed} duplicate prompt${removed === 1 ? '' : 's'}`, duration: 'short' });
 }
+
+// What a job sends, after its wildcards are picked: duplicate tags out (the box's own were taken out before).
+window.dedupeJobPayload = function(job) {
+    const pl = job && job.payload;
+    if (!pl || !promptFormatOn()) return 0;
+    if (Object.keys(pl.alwayson_scripts || {}).some(k => /couple/i.test(k))) return 0;
+    // Formatted as the box is, now the wildcards have put their text in.
+    const tagStyle = usesAutoComma(normalizeDedupeMode(job.mode));
+    ['prompt', 'negative_prompt', 'hr_prompt', 'hr_negative_prompt'].forEach(k => {
+        if (typeof pl[k] === 'string' && pl[k]) pl[k] = formatPromptText(pl[k], tagStyle);
+    });
+    if (!DEDUPE_TAG_MODES.includes(normalizeDedupeMode(job.mode))) return 0;
+    let removed = 0;
+    ['prompt', 'negative_prompt', 'hr_prompt', 'hr_negative_prompt'].forEach(k => {
+        if (typeof pl[k] !== 'string' || !pl[k]) return;
+        const box = { value: pl[k] };
+        const r = removeDuplicateTagsFrom(box);
+        if (r) { pl[k] = box.value; removed += r; }
+    });
+    if (removed && typeof dlog === 'function') dlog(`sent prompt: ${removed} duplicate tag(s) removed`);
+    return removed;
+};
+
+// What a job sends: tags in the negative taken out of the prompt (Config > Prompts, on by default), and ~word (any
+// prompt tag ending in that word, always) taken out of the prompt and then the negative. Line by line, so Forge
+// Couple's regions keep their lines; <...> tags stay. The negative keeps its own tags. Returns how many went.
+window.negBlocksOn = () => localStorage.getItem('bojroNegBlocks') !== 'false';
+// A tag without its brackets and weight: ((smile)) and (smile:1.2) as smile (normaliseTag() keeps double brackets).
+const bareTag = x => { const k = normaliseTag(x); return !k || k[0] === '<' ? k : normaliseTag(k.replace(/^[(\[]+/, '').replace(/(?::\s*-?[\d.]+)?[)\]]+$/, '')); };
+function blockByNegative(pos, neg, on) {
+    if (typeof neg !== 'string' || !neg.trim()) return { pos, neg, n: 0 };
+    const tags = new Set(), ends = [], tilde = new Set();
+    neg.split(/[,\n]/).forEach(x => {
+        const k = bareTag(x);
+        if (!k || k[0] === '<') return;
+        if (k[0] === '~') { tilde.add(normaliseTag(x)); const w = k.slice(1).trim(); if (w) ends.push(w); } else if (on) tags.add(k);
+    });
+    if (tilde.size) neg = neg.split('\n').map(l => removeTagsFromText(l, tilde)).join('\n').replace(/\n{3,}/g, '\n\n').trim();
+    let n = 0;
+    if ((tags.size || ends.length) && typeof pos === 'string' && pos) {
+        const hit = k => !!k && k[0] !== '<' && (tags.has(k) || ends.some(w => k === w || k.endsWith(' ' + w)));
+        pos = pos.split('\n').map(line => {
+            const out = new Set();
+            // removeTagsFromText() compares the tag as normaliseTag() gives it.
+            line.split(',').forEach(x => { const rest = textAfterLoraTags(x); if (hit(bareTag(x))) out.add(normaliseTag(x)); else if (rest && hit(bareTag(rest))) out.add(normaliseTag(rest)); });
+            if (!out.size) return line;
+            n += out.size;
+            return removeTagsFromText(line, out);
+        }).join('\n');
+    }
+    return { pos, neg, n };
+}
+window.negativeBlocksJob = function(job) {
+    const pl = job && job.payload;
+    if (!pl) return 0;
+    const on = negBlocksOn();
+    let n = 0;
+    const pair = (o, a, b) => { const r = blockByNegative(o[a], o[b], on); if (typeof o[a] === 'string') o[a] = r.pos; if (typeof o[b] === 'string') o[b] = r.neg; n += r.n; };
+    pair(pl, 'prompt', 'negative_prompt');
+    if (typeof pl.hr_negative_prompt === 'string' && pl.hr_negative_prompt) pair(pl, 'hr_prompt', 'hr_negative_prompt');
+    const ad = pl.alwayson_scripts?.ADetailer?.args;
+    if (Array.isArray(ad)) ad.forEach(u => { if (u && typeof u === 'object') pair(u, 'ad_prompt', 'ad_negative_prompt'); });
+    if (n && typeof dlog === 'function') dlog(`sent prompt: ${n} tag(s) in the negative taken out of the prompt`);
+    return n;
+};
 
 // Same tidy-up for ADetailer prompt/negative boxes.
 const AD_TAG_FIELD_RE = /^(xl|flux|qwen|anima|krea|inp|img2img)_adetailer_(\d+)_(prompt|neg)$/;
@@ -535,7 +663,7 @@ window.dedupePromptTagsForMode = function(mode) {
     const p = tidyPromptBox(document.getElementById(`${realMode}_prompt`), realMode);
     const n = tidyPromptBox(document.getElementById(`${realMode}_neg`), realMode);
     const adPrefix = realMode === 'inp' && (mode === 'img2img' || currentInpaintTopMode === 'img2img') ? 'img2img' : mode;
-    const total = p.removed + n.removed + tidyAdetailerBoxes(adPrefix, true);
+    const total = p.removed + n.removed + tidyAdetailerBoxes(adPrefix, true) + (window.ForgeCouple ? ForgeCouple.tidyAll(realMode) : 0);
     if (p.changed) savePrompt(realMode);
     if (n.changed) saveNegativePrompt(realMode);
     if ((total > 0 || p.changed || n.changed) && realMode === 'inp' && typeof saveCurrentInpaintModeStateLive === 'function') saveCurrentInpaintModeStateLive();
@@ -583,6 +711,9 @@ window.saveNegativeAsNewDefault = function(mode) {
 
 // Empties the prompt box
 window.clearPrompt = function(mode) {
+    // Reroll's kept picks and All combinations go with the prompt (wcreroll.js, moresettings.js).
+    if (window.WcReroll && WcReroll.disarm) WcReroll.disarm(mode);
+    if (window.MoreSettings && MoreSettings.combosOff) MoreSettings.combosOff(mode);
     const el = document.getElementById(`${mode}_prompt`);
     if (el) {
         el.value = "";
@@ -673,6 +804,8 @@ window.normalizeMaxMasksField = function(el) {
 
 // Replaces the prompt box with this mode's default (a saved custom default first, as loadSavedPrompts()).
 window.insertDefaultPrompt = function(mode) {
+    if (window.WcReroll && WcReroll.disarm) WcReroll.disarm(mode);
+    if (window.MoreSettings && MoreSettings.combosOff) MoreSettings.combosOff(mode);
     const el = document.getElementById(`${mode}_prompt`);
     if (el) {
         const customDefault = localStorage.getItem(`bojro_custom_default_${defaultKeyMode(mode)}`);
@@ -814,12 +947,13 @@ function computeWallpaperRes() {
     const ratio = window.screen.width / window.screen.height;
     const landscapeRatio = Math.max(ratio, 1 / ratio);
 
-    const targetArea = 1024 * 1024;
+    // About 1.06MP, as the 1MP presets.
+    const targetArea = 1.06 * 1024 * 1024;
     let w = Math.sqrt(targetArea * landscapeRatio);
     let h = Math.sqrt(targetArea / landscapeRatio);
 
-    w = Math.max(8, Math.round(w / 8) * 8);
-    h = Math.max(8, Math.round(h / 8) * 8);
+    w = Math.max(16, Math.round(w / 16) * 16);
+    h = Math.max(16, Math.round(h / 16) * 16);
 
     return { w: h, h: w }; // swapped: w/h above are landscape; portrait (what tapping WP actually sets) is the reverse
 }
@@ -857,13 +991,75 @@ window.setWallpaperRes = function(mode) {
     window.setRes(mode, res.w, res.h);
 }
 
+// Auto-Save: autoDlCheck (main tabs) is the one read; inpAutoDlCheck (Inpaint tab) mirrors it.
 function loadAutoDlState() {
-    const c = document.getElementById('autoDlCheck');
-    if (c) c.checked = localStorage.getItem('bojroAutoSave') === 'true';
+    const on = localStorage.getItem('bojroAutoSave') === 'true';
+    ['autoDlCheck', 'inpAutoDlCheck'].forEach(id => { const c = document.getElementById(id); if (c) c.checked = on; });
 }
-window.saveAutoDlState = () => localStorage.setItem('bojroAutoSave', document.getElementById('autoDlCheck').checked);
+window.saveAutoDlState = (from) => {
+    const on = (from || document.getElementById('autoDlCheck')).checked;
+    ['autoDlCheck', 'inpAutoDlCheck'].forEach(id => { const c = document.getElementById(id); if (c) c.checked = on; });
+    localStorage.setItem('bojroAutoSave', on);
+};
 
 // --- CONFIG MODALS (LoRA & POWER) ---
+
+// A text box's X (as the LoRA search's): shown while it has text, clears it and keeps the keyboard up.
+window.initClearField = function (input) {
+    const btn = input.parentElement && input.parentElement.querySelector('.clear-field-btn');
+    if (!btn || input._clearField) return;
+    input._clearField = true;
+    const sync = () => btn.classList.toggle('hidden', !input.value);
+    const desc = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+    Object.defineProperty(input, 'value', {
+        configurable: true,
+        get() { return desc.get.call(this); },
+        set(v) { desc.set.call(this, v); sync(); }
+    });
+    input.addEventListener('input', sync);
+    // Pressed without taking focus from the box, so a name box isn't committed by losing it.
+    btn.addEventListener('pointerdown', e => e.preventDefault());
+    btn.addEventListener('mousedown', e => e.preventDefault());
+    btn.addEventListener('click', () => {
+        input.value = '';
+        input.focus();
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    sync();
+};
+
+// A LoRA's slider range, [min, max]: 0.5 to 1.5 unless both ends are different numbers; the wrong way round, they're swapped.
+window.loraSliderRange = function (cfg) {
+    let a = parseFloat(cfg && cfg.sliderMin), b = parseFloat(cfg && cfg.sliderMax);
+    if (!Number.isFinite(a) || !Number.isFinite(b) || a === b) return [0.5, 1.5];
+    return a < b ? [a, b] : [b, a];
+};
+
+// Slider Name and Weight Range show while Slider is on.
+window.syncLoraSliderSwitch = function () {
+    const on = document.getElementById('cfgLoraSliderSwitch');
+    const all = window.ForgeCouple && ForgeCouple.allSliders && ForgeCouple.allSliders();
+    document.getElementById('cfgLoraSliderNameRow')?.classList.toggle('hidden', !(on && on.checked) && !all);
+};
+
+// The LoRA's own thumbnail picked in its settings, saved with SAVE (undefined: unchanged; null: the server's again).
+let cfgPendingThumb;
+// RESET pressed: the sidecar's { weight, trigger } it filled in, kept with SAVE (null: not pressed).
+let cfgPendingReset = null;
+// Its new name, saved with SAVE (undefined: unchanged; '' puts back its own).
+let cfgPendingName;
+const loraRowThumb = name => window.LoraManager ? document.getElementById(`thumb-${window.LoraManager.simpleHash(name)}`) : null;
+function paintLoraConfigThumb(loraName) {
+    const img = document.getElementById('cfgLoraThumbImg');
+    if (!img) return;
+    const LM = window.LoraManager;
+    img.src = (LM && LM.thumbFor(loraName)) || 'icon.png';
+    // Not shown yet this session: fetched as the list does.
+    if (LM && !LM.thumbFor(loraName)) {
+        const lora = (LM.allLoras || []).find(l => l.name === loraName);
+        if (lora) LM.smartLoadThumbnail(img, lora);
+    }
+}
 
 function injectConfigModal() {
     if (document.getElementById('loraConfigModal')) return;
@@ -871,40 +1067,84 @@ function injectConfigModal() {
     div.id = 'loraConfigModal';
     div.className = 'modal hidden';
     div.innerHTML = `
-        <div class="modal-content" style="max-height: 85vh; overflow-y: auto;">
+        <div class="modal-content pin-scroll" style="max-height: 85vh; overflow-y: auto;">
             <div class="modal-header">
-                <h3 id="cfgLoraTitle" onclick="enterLoraNameEditMode()" style="max-width:70%; cursor:text; font-size:16px; text-transform:none;" title="Tap to rename">Config</h3>
-                <input type="text" id="cfgLoraTitleEdit" class="hidden" onblur="commitLoraNameEdit()" onkeydown="if(event.key==='Enter'){event.preventDefault(); this.blur();}" style="flex:1; margin: 0 8px; font-size:16px; font-weight:700;">
+                <h3 id="cfgLoraTitle" onclick="enterLoraNameEditMode()" style="max-width:70%; cursor:text; font-size:var(--fs-window-title); text-transform:none; white-space:normal;" title="Tap to rename">Config</h3>
+                <div class="clear-field" style="flex:1; margin: 0 8px;">
+                    <input type="text" id="cfgLoraTitleEdit" class="hidden" onblur="commitLoraNameEdit()" onkeydown="if(event.key==='Enter'){event.preventDefault(); this.blur();}" style="font-size:16px; font-weight:700;">
+                    <button type="button" class="clear-field-btn hidden" aria-label="Clear"><i data-lucide="x" width="16" height="16"></i></button>
+                </div>
                 <div class="row" style="width:auto; gap:8px; flex-shrink:0;">
-                    <button id="cfgResetNameBtn" class="btn-icon hidden" style="width:28px; height:28px;" onclick="resetLoraOverrides()" title="Reset name, weight, and trigger text to defaults">
-                        <i data-lucide="rotate-ccw" width="14" height="14"></i>
+                    <button id="cfgResetNameBtn" class="card-btn card-btn-accent hidden" onclick="resetLoraOverrides()" title="Reset this LoRA's settings to defaults">
+                        <i data-lucide="rotate-ccw" width="16" height="16"></i>
                     </button>
-                    <button class="close-btn" onclick="closeConfigModal()">×</button>
                 </div>
             </div>
-            <div class="col" style="gap: 15px; padding: 10px 0;">
+            <div class="col" style="gap: 15px; padding: 10px 0 0;">
                 <div>
                     <label style="display:flex; justify-content:space-between;">
                         <span>Preferred Weight</span>
-                        <span id="cfgWeightDisplay" style="color:var(--accent-primary);">1.0</span>
+                        <span id="cfgWeightDisplay" class="slider-val">1.0</span>
                     </label>
-                    <div class="slider-fake-thumb-wrap" style="margin-top:5px;"><input type="range" id="cfgWeight" class="orange-slider thumb-only-slider" min="-2" max="2" step="0.05" value="1" oninput="updateWeightDisplay(this.value)"><div class="slider-fake-thumb" data-for="cfgWeight"></div></div>
+                    <div class="slider-fake-thumb-wrap" style="margin-top:11px;"><input type="range" id="cfgWeight" class="orange-slider thumb-only-slider" min="-2" max="2" step="0.05" value="1" oninput="updateWeightDisplay(this.value)"><div class="slider-fake-thumb" data-for="cfgWeight"></div></div>
                 </div>
                 <div>
-                    <label>Activation / Trigger Text</label>
+                    <label for="cfgTrigger">Prompt</label>
                     <textarea id="cfgTrigger" rows="3" placeholder="trigger, words, here" style="margin-top:5px;"></textarea>
                 </div>
-                <div class="row" style="justify-content:space-between; align-items:center;">
-                    <label for="cfgLoraLink" style="margin:0;">Link to ADetailer</label>
-                    <input type="checkbox" id="cfgLoraLink" class="bojro-switch" checked>
+                <div class="lora-cfg-thumb-row">
+                    <button type="button" class="lv-thumb-pick lora-cfg-thumb" id="cfgLoraThumbPick" title="Choose a thumbnail">
+                        <img id="cfgLoraThumbImg" src="icon.png">
+                        <span class="lv-thumb-badge"><i data-lucide="image-plus" width="13" height="13"></i></span>
+                    </button>
+                    <input type="file" id="cfgLoraThumbInput" accept="image/*" class="hidden">
+                    <div class="lora-cfg-switches">
+                        <div class="row" style="justify-content:space-between; align-items:center;">
+                            <label for="cfgLoraLink" class="opt-name">Link to ADetailer</label>
+                            <input type="checkbox" id="cfgLoraLink" class="bojro-switch" checked>
+                        </div>
+                        <div class="row" style="justify-content:space-between; align-items:center; gap:10px;">
+                            <label class="opt-name">Type</label>
+                            <select id="cfgLoraType" style="display:none;"><option value="">None</option><option value="artstyle">Artstyle</option><option value="background">Background</option><option value="character">Character</option><option value="characterpack">Character pack</option><option value="clothing">Clothing</option><option value="concept">Concept</option><option value="other">Other</option><option value="pose">Pose</option><option value="slider">Slider</option><option value="tool">Tool</option></select><button type="button" class="model-picker-trigger hidden lora-cfg-type" data-target="cfgLoraType" data-kind="lora-type" data-custom-order=",artstyle,background,character,characterpack,clothing,concept,other,pose,slider,tool" data-modal-title="LoRA Type" onclick="openModelPicker(this)"><span class="model-picker-trigger-primary"></span><span class="model-picker-trigger-subtitle hidden"></span></button>
+                        </div>
+                        <div class="row" style="justify-content:space-between; align-items:center;">
+                            <label for="cfgLoraSliderSwitch" class="opt-name">Slider</label>
+                            <input type="checkbox" id="cfgLoraSliderSwitch" class="bojro-switch" onchange="syncLoraSliderSwitch()">
+                        </div>
+                        <div class="row" style="justify-content:space-between; align-items:center;">
+                            <label for="cfgLoraVariantsSwitch" class="opt-name">Variants</label>
+                            <input type="checkbox" id="cfgLoraVariantsSwitch" class="bojro-switch" onchange="LoraVariants.syncLoraSwitches()">
+                        </div>
+                        <div id="cfgLoraVariantsAddRow" class="row hidden" style="justify-content:space-between; align-items:center; padding-left:14px;">
+                            <label for="cfgLoraVariantsAddSwitch" class="opt-name">Show Add Variant</label>
+                            <input type="checkbox" id="cfgLoraVariantsAddSwitch" class="bojro-switch" checked>
+                        </div>
+                    </div>
                 </div>
-                <div style="border-top: 1px solid var(--border-color); padding-top: 10px;">
+                <div id="cfgLoraSliderNameRow" class="row hidden" style="gap:10px; align-items:flex-start;">
+                    <div class="col" style="flex:1; min-width:0;">
+                        <label for="cfgLoraSliderName">Slider Name</label>
+                        <div class="clear-field" style="margin-top:5px;">
+                            <input type="text" id="cfgLoraSliderName" maxlength="12" placeholder="Max 12 characters">
+                            <button type="button" class="clear-field-btn hidden" aria-label="Clear"><i data-lucide="x" width="16" height="16"></i></button>
+                        </div>
+                    </div>
+                    <div class="col" style="flex:none;">
+                        <label for="cfgLoraSliderMin">Weight Range</label>
+                        <div class="row lora-cfg-range" style="margin-top:5px;">
+                            <input type="number" id="cfgLoraSliderMin" step="0.5" placeholder="0.5" aria-label="Lowest weight">
+                            <span>–</span>
+                            <input type="number" id="cfgLoraSliderMax" step="0.5" placeholder="1.5" aria-label="Highest weight">
+                        </div>
+                    </div>
+                </div>
+                <div class="inset-card">
                     <div class="row" onclick="toggleGeneric('grp-lora-overrides', 'arr-lora-overrides', 'bojro_vis_lora_overrides')" style="justify-content:space-between; align-items:center; cursor:pointer;">
-                        <label style="font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; cursor:pointer; margin:0;">Overrides</label>
-                        <i id="arr-lora-overrides" data-lucide="chevron-down" width="14" height="14" style="transition: transform 0.2s;"></i>
+                        <label style="cursor:pointer; font-size:13px; margin:0;">OVERRIDES</label>
+                        <i id="arr-lora-overrides" data-lucide="chevron-down" width="16" height="16" style="transition: transform 0.2s;"></i>
                     </div>
                     <div id="grp-lora-overrides">
-                    <div class="row" style="margin-top:8px;">
+                    <div class="row" style="margin-top:12px;">
                         <div class="col"><label>Sampler</label><div class="row"><select id="cfgLoraOverrideSampler" style="display:none;"><option value="">Not Set</option></select><button type="button" class="model-picker-trigger hidden" data-target="cfgLoraOverrideSampler" data-kind="sampler" data-pin-first="" data-modal-title="Select Sampler" onclick="openModelPicker(this)"><span class="model-picker-trigger-primary"></span><span class="model-picker-trigger-subtitle hidden"></span></button></div></div>
                         <div class="col"><label>Schedule</label><div class="row"><select id="cfgLoraOverrideScheduler" style="display:none;"><option value="">Not Set</option></select><button type="button" class="model-picker-trigger hidden" data-target="cfgLoraOverrideScheduler" data-kind="schedule" data-pin-first="" data-modal-title="Select Schedule" onclick="openModelPicker(this)"><span class="model-picker-trigger-primary"></span><span class="model-picker-trigger-subtitle hidden"></span></button></div></div>
                     </div>
@@ -913,16 +1153,27 @@ function injectConfigModal() {
                         <div class="col"><label>CFG</label><input type="number" id="cfgLoraOverrideCfg" placeholder="Default" step="0.5"></div>
                     </div>
                     <div style="margin-top: 10px;">
-                        <label for="cfgLoraAdditionalNegative">Additional Negative Prompts</label>
-                        <textarea id="cfgLoraAdditionalNegative" rows="2" placeholder="bad hands, extra fingers" style="margin-top:5px;"></textarea>
+                        <label for="cfgLoraAdditionalNegative">Negative</label>
+                        <textarea id="cfgLoraAdditionalNegative" rows="3" placeholder="bad hands, extra fingers" style="margin-top:5px;"></textarea>
                     </div>
                     </div>
                 </div>
-                <button id="cfgSaveBtn" class="btn-small" style="background: var(--accent-gradient); color: white; margin-top:10px;">SAVE CONFIG</button>
+                <div class="row pin-foot" style="gap:10px; margin-top:4px;">
+                    <button type="button" class="btn-small btn-cancel" style="flex:1;" onclick="closeConfigModal()">CANCEL</button>
+                    <button id="cfgSaveBtn" class="btn-small btn-save" style="flex:1;">SAVE</button>
+                </div>
             </div>
         </div>
     `;
     document.body.appendChild(div);
+    div.querySelectorAll('.clear-field > input').forEach(initClearField);
+    // Tapping outside closes it, as CANCEL does (the tap starting and ending outside, as for the other windows, boot.js).
+    let downOnBackdrop = false;
+    div.addEventListener('pointerdown', e => { downOnBackdrop = e.target === div; });
+    div.addEventListener('click', e => {
+        if (downOnBackdrop && e.target === div) window.closeConfigModal();
+        downOnBackdrop = false;
+    });
     // Preferred Weight is a thumb-only slider like the Inpaint ones (editor.js), in 0.05 steps. Wired here because the modal is built on demand, after editor.js ran its init.
     if (typeof initThumbOnlySlider === 'function') initThumbOnlySlider('cfgWeight');
     // Overrides starts collapsed and remembers its state like other collapsible sections. Done in JS because inline <script> doesn't run for innerHTML markup.
@@ -956,7 +1207,35 @@ function populateLoraOverrideSelectors() {
 window.openLoraSettings = async (e, loraName, loraPath) => {
     e.stopPropagation();
     const modal = document.getElementById('loraConfigModal');
+    if (typeof applyPromptBoxHeights === 'function') applyPromptBoxHeights();
+    // Kept invisible until filled in for this LoRA, so the last one's values and size don't flash (shown after 400ms
+    // regardless, if its config is slow to come).
+    modal.style.visibility = 'hidden';
+    modal.classList.add('no-anim');
+    // Shown, then switches slide again two frames later (after they've been drawn in place).
+    const reveal = () => requestAnimationFrame(() => { modal.style.visibility = ''; requestAnimationFrame(() => requestAnimationFrame(() => modal.classList.remove('no-anim'))); });
+    const revealTimer = setTimeout(reveal, 400);
+    if (window.LoraVariants) window.LoraVariants.renderLoraSwitches(loraName);
+    cfgPendingThumb = undefined;
+    cfgPendingName = undefined;
+    cfgPendingReset = null;
+    paintLoraConfigThumb(loraName);
+    const thumbInput = document.getElementById('cfgLoraThumbInput');
+    document.getElementById('cfgLoraThumbPick').onclick = e => window.LoraVariants.thumbMenu(e.currentTarget, thumbInput);
+    thumbInput.onchange = async () => {
+        const file = thumbInput.files && thumbInput.files[0];
+        thumbInput.value = '';
+        if (!file || !window.LoraVariants) return;
+        try {
+            cfgPendingThumb = await window.LoraVariants.makeThumb(file);
+            document.getElementById('cfgLoraThumbImg').src = cfgPendingThumb;
+        } catch (err) {
+            if (typeof Toast !== 'undefined') Toast.show({ text: err.message, duration: 'short' });
+        }
+    };
     modal.classList.remove('hidden');
+    // From the top each time, not where the last LoRA's was scrolled to.
+    modal.querySelectorAll('.modal-content, .modal-content *').forEach(el => { if (el.scrollTop) el.scrollTop = 0; });
     // Lock body scroll while this modal's text fields have the keyboard up (as other picker modals).
     if (typeof lockBodyScroll === 'function') lockBodyScroll();
 
@@ -987,15 +1266,36 @@ window.openLoraSettings = async (e, loraName, loraPath) => {
     document.getElementById('cfgLoraOverrideSteps').value = cfg.overrideSteps || '';
     document.getElementById('cfgLoraOverrideCfg').value = cfg.overrideCfg || '';
     document.getElementById('cfgLoraAdditionalNegative').value = cfg.additionalNegative || '';
+    // Its type (random::<type>, randomtokens.js; Slider is a type too, for the Sliders filter) and Slider.
+    // A type this list doesn't have (from a newer or older version) is shown and kept, not saved back as None.
+    const typeSel = document.getElementById('cfgLoraType'), t = cfg.type || '';
+    typeSel.querySelectorAll('option[data-kept]').forEach(o => o.remove());
+    if (t && ![...typeSel.options].some(o => o.value === t)) typeSel.insertAdjacentHTML('beforeend', `<option value="${t.replace(/[^a-z0-9_-]/gi, '')}" data-kept>${t.replace(/[^a-z0-9_ -]/gi, '')}</option>`);
+    typeSel.value = t;
+    document.getElementById('cfgLoraSliderSwitch').checked = !!cfg.slider;
+    if (typeof initModelPickers === 'function') initModelPickers();
+    if (typeof updateModelPickerTriggerText === 'function') updateModelPickerTriggerText('cfgLoraType');
+    document.getElementById('cfgLoraSliderName').value = cfg.sliderName || '';
+    document.getElementById('cfgLoraSliderName').placeholder = (typeof splitLoraName === 'function' ? splitLoraName(displayName)[0] : displayName).slice(0, 12);
+    document.getElementById('cfgLoraSliderMin').value = loraSliderRange(cfg)[0];
+    document.getElementById('cfgLoraSliderMax').value = loraSliderRange(cfg)[1];
+    syncLoraSliderSwitch();
+    if (window.LoraVariants) window.LoraVariants.renderLoraSwitches(loraName);
     // The selects are hidden (see populateLoraOverrideSelectors), so refresh the visible trigger button's text after setting .value.
     if (typeof updateModelPickerTriggerText === 'function') {
         updateModelPickerTriggerText('cfgLoraOverrideSampler');
         updateModelPickerTriggerText('cfgLoraOverrideScheduler');
     }
+    clearTimeout(revealTimer);
+    reveal();
 
     document.getElementById('cfgSaveBtn').onclick = () => {
-        // SAVE CONFIG also commits a mid-rename (commitLoraNameEdit() is a no-op if the name box isn't open).
-        commitLoraNameEdit({ silent: true });
+        // SAVE also closes a mid-rename (commitLoraNameEdit() is a no-op if the name box isn't open), then keeps the name.
+        commitLoraNameEdit();
+        if (cfgPendingName !== undefined && window.LoraManager) window.LoraManager.saveUserRename(loraName, cfgPendingName);
+        cfgPendingName = undefined;
+        const reset = cfgPendingReset;
+        cfgPendingReset = null;
 
         const newWeight = document.getElementById('cfgWeight').value;
         const newTrigger = document.getElementById('cfgTrigger').value;
@@ -1005,7 +1305,13 @@ window.openLoraSettings = async (e, loraName, loraPath) => {
         const overrideSteps = document.getElementById('cfgLoraOverrideSteps').value;
         const overrideCfg = document.getElementById('cfgLoraOverrideCfg').value;
         const additionalNegative = document.getElementById('cfgLoraAdditionalNegative').value.trim();
+        const type = document.getElementById('cfgLoraType').value;
+        const slider = document.getElementById('cfgLoraSliderSwitch').checked;
+        const sliderName = document.getElementById('cfgLoraSliderName').value.trim().slice(0, 12);
+        const [sliderMin, sliderMax] = loraSliderRange({ sliderMin: document.getElementById('cfgLoraSliderMin').value, sliderMax: document.getElementById('cfgLoraSliderMax').value });
+        const loraEntry = window.LoraManager && (window.LoraManager.allLoras || []).find(l => l.name === loraName);
         if (window.LoraManager) window.LoraManager.setLoraLinkEnabled(loraName, linkEnabled);
+        if (window.LoraVariants) window.LoraVariants.saveLoraSwitches(loraName);
         loraConfigs[loraName] = {
             weight: parseFloat(newWeight),
             trigger: newTrigger,
@@ -1017,9 +1323,31 @@ window.openLoraSettings = async (e, loraName, loraPath) => {
             overrideSteps,
             overrideCfg,
             // Tags appended to the Negative box when this LoRA is added and removed when toggled off (LoraManager.applyAdditionalNegative()/removeAdditionalNegative(), lora.js). The object is rebuilt on every save, so it must be listed here.
-            additionalNegative
+            additionalNegative,
+            // type: character, artstyle, ... (random::<type>, randomtokens.js); slider: a weight slider under the prompt while
+            // it's in (lorasliders.js); sliderAlias, the tag's alias, for before the LoRA list loads.
+            type,
+            slider,
+            sliderName,
+            sliderMin,
+            sliderMax,
+            sliderAlias: loraEntry ? window.LoraManager.resolveTagIdentifier(loraEntry) : loraName
         };
+        // Reset and saved unchanged: the sidecar's settings again, not an override, so later edits on the PC show.
+        const c = loraConfigs[loraName];
+        if (reset && String(c.weight) === String(parseFloat(reset.weight)) && c.trigger === reset.trigger && !overrideSampler && !overrideScheduler
+            && !overrideSteps && !overrideCfg && !additionalNegative && !type && !slider && !sliderName) {
+            loraConfigs[loraName] = { weight: reset.weight, trigger: reset.trigger };
+        }
         localStorage.setItem('bojroLoraConfigs', JSON.stringify(loraConfigs));
+        if (cfgPendingThumb !== undefined && window.LoraVariants) {
+            window.LoraVariants.setParentThumb(loraName, cfgPendingThumb);
+            const rowImg = loraRowThumb(loraName);
+            if (rowImg) rowImg.src = cfgPendingThumb || (window.LoraManager && window.LoraManager.thumbnailMemCache[loraName]) || 'icon.png';
+        }
+        cfgPendingThumb = undefined;
+        if (window.LoraSliders) window.LoraSliders.refreshAll();
+        if (window.LoraVariants) window.LoraVariants.refreshList();
         modal.classList.add('hidden');
         // Closes through closeConfigModal(), which calls unlockBodyScroll() to match lockBodyScroll() on open.
         if (typeof unlockBodyScroll === 'function') unlockBodyScroll();
@@ -1030,13 +1358,15 @@ window.openLoraSettings = async (e, loraName, loraPath) => {
     };
 }
 
-// Show the reset button whenever any override exists (display rename, or saved weight/trigger), since resetLoraOverrides() clears both.
+// Show the reset button whenever any override exists (display rename, saved weight/trigger, chosen thumbnail), since
+// resetLoraOverrides() puts back all of them (with SAVE).
 function updateLoraResetBtnVisibility(loraName) {
     const resetBtn = document.getElementById('cfgResetNameBtn');
     if (!resetBtn) return;
     const hasNameOverride = !!(window.LoraManager && window.LoraManager.userRenames.hasOwnProperty(loraName));
     const hasConfigOverride = !!(loraConfigs[loraName] && loraConfigs[loraName].userEdited);
-    resetBtn.classList.toggle('hidden', !(hasNameOverride || hasConfigOverride));
+    const hasThumb = !!(window.LoraVariants && window.LoraVariants.parentThumb(loraName));
+    resetBtn.classList.toggle('hidden', !(hasNameOverride || hasConfigOverride || hasThumb));
 }
 
 // Tapping the name opens it for editing (no separate pencil button).
@@ -1046,35 +1376,28 @@ window.enterLoraNameEditMode = function() {
     const loraName = window.currentConfigLoraName;
     if (!loraName) return;
     // innerText respects CSS text-transform (the title is uppercase), so read the real display name from LoraManager.
-    editEl.value = window.LoraManager ? window.LoraManager.getDisplayName({ name: loraName }) : titleEl.innerText;
+    editEl.value = cfgPendingName !== undefined ? cfgPendingName : window.LoraManager ? window.LoraManager.getDisplayName({ name: loraName }) : titleEl.innerText;
     titleEl.classList.add('hidden');
     editEl.classList.remove('hidden');
     editEl.focus();
     editEl.select();
 }
 
-// Tapping away from the name box saves the rename (also done by SAVE CONFIG); a no-op if the box isn't open. options.silent skips the "Name saved" toast for the SAVE CONFIG path.
-window.commitLoraNameEdit = function(options = {}) {
+// Tapping away from the name box closes it, showing the new name; it's kept with SAVE. A no-op if the box isn't open.
+window.commitLoraNameEdit = function() {
     const titleEl = document.getElementById('cfgLoraTitle');
     const editEl = document.getElementById('cfgLoraTitleEdit');
     const loraName = window.currentConfigLoraName;
     if (!loraName || editEl.classList.contains('hidden')) return;
 
-    if (window.LoraManager) window.LoraManager.saveUserRename(loraName, editEl.value);
-    const newDisplayName = window.LoraManager ? window.LoraManager.getDisplayName({ name: loraName }) : editEl.value;
-    titleEl.innerText = newDisplayName;
-
-    // Update the visible list row too, if it's currently rendered
-    if (window.LoraManager) {
-        const nameId = `name-${window.LoraManager.simpleHash(loraName)}`;
-        const nameEl = document.getElementById(nameId);
-        if (nameEl) nameEl.textContent = newDisplayName;
-    }
+    cfgPendingName = editEl.value.trim();
+    // Blank: its own name (the server's, or the file name).
+    const L = window.LoraManager;
+    const ownName = L ? ((L.nameCache[loraName]) || loraName.replace(/_/g, ' ')) : loraName;
+    titleEl.innerText = cfgPendingName || ownName;
 
     titleEl.classList.remove('hidden');
     editEl.classList.add('hidden');
-    updateLoraResetBtnVisibility(loraName);
-    if (!options.silent && Toast) Toast.show({ text: 'Name saved', duration: 'short' });
 }
 
 // Discards an uncommitted name edit (shared by resetLoraOverrides() and the hardware back button) without saving it.
@@ -1087,31 +1410,31 @@ window.discardLoraNameEditIfOpen = function() {
     }
 }
 
-// Resets a LoRA to defaults: display name, weight and trigger text.
+// Resets a LoRA to defaults: name, thumbnail and every setting.
 window.resetLoraOverrides = async function() {
     const loraName = window.currentConfigLoraName;
     const loraPath = window.currentConfigLoraPath;
     if (!loraName || !window.LoraManager) return;
+    const L = window.LoraManager;
 
-    // Discard an uncommitted name edit so the next blur doesn't commit it as a rename.
-    const titleEl = document.getElementById('cfgLoraTitle');
     window.discardLoraNameEditIfOpen();
+    cfgPendingName = '';
+    document.getElementById('cfgLoraTitle').innerText = L.nameCache[loraName] || loraName.replace(/_/g, ' ');
 
-    window.LoraManager.saveUserRename(loraName, ''); // empty clears the override
-
-    // Clear this before loadSidecarConfig(), which returns the cached entry if one exists.
+    // The sidecar's settings, read past the saved ones (loadSidecarConfig() returns those if there are any), which stay
+    // until SAVE.
+    const saved = loraConfigs[loraName];
     delete loraConfigs[loraName];
-    localStorage.setItem('bojroLoraConfigs', JSON.stringify(loraConfigs));
-
-    const revertedName = window.LoraManager.getDisplayName({ name: loraName });
-    titleEl.innerText = revertedName;
-
-    const nameId = `name-${window.LoraManager.simpleHash(loraName)}`;
-    const nameEl = document.getElementById(nameId);
-    if (nameEl) nameEl.textContent = revertedName;
-
-    // Re-fetch from the sidecar now that the override is gone, and update the open modal.
-    const freshCfg = await loadSidecarConfig(loraName, loraPath);
+    let freshCfg;
+    try {
+        freshCfg = await loadSidecarConfig(loraName, loraPath);
+    } finally {
+        if (saved) loraConfigs[loraName] = saved; else delete loraConfigs[loraName];
+        localStorage.setItem('bojroLoraConfigs', JSON.stringify(loraConfigs));
+    }
+    // The window was closed or moved to another LoRA meanwhile.
+    if (window.currentConfigLoraName !== loraName) return;
+    cfgPendingReset = { weight: freshCfg.weight, trigger: freshCfg.trigger };
     document.getElementById('cfgWeight').value = freshCfg.weight;
     document.getElementById('cfgWeightDisplay').innerText = freshCfg.weight;
     if (typeof syncThumbOnlySliderPosition === 'function') syncThumbOnlySliderPosition('cfgWeight');
@@ -1121,16 +1444,28 @@ window.resetLoraOverrides = async function() {
     document.getElementById('cfgLoraOverrideSteps').value = '';
     document.getElementById('cfgLoraOverrideCfg').value = '';
     document.getElementById('cfgLoraAdditionalNegative').value = '';
+    document.getElementById('cfgLoraType').value = '';
+    if (typeof updateModelPickerTriggerText === 'function') updateModelPickerTriggerText('cfgLoraType');
+    document.getElementById('cfgLoraSliderSwitch').checked = false;
+    document.getElementById('cfgLoraSliderName').value = '';
+    document.getElementById('cfgLoraSliderMin').value = 0.5;
+    document.getElementById('cfgLoraSliderMax').value = 1.5;
+    syncLoraSliderSwitch();
     if (typeof updateModelPickerTriggerText === 'function') {
         updateModelPickerTriggerText('cfgLoraOverrideSampler');
         updateModelPickerTriggerText('cfgLoraOverrideScheduler');
     }
-
-    updateLoraResetBtnVisibility(loraName);
-    if (Toast) Toast.show({ text: 'Reset to defaults', duration: 'short' });
+    // The server's thumbnail in place of a chosen one.
+    cfgPendingThumb = null;
+    const img = document.getElementById('cfgLoraThumbImg');
+    if (img) {
+        img.src = L.thumbnailMemCache[loraName] || 'icon.png';
+        if (!L.thumbnailMemCache[loraName] && typeof L.readCachedThumb === 'function') L.readCachedThumb(img, loraName);
+    }
+    document.getElementById('cfgResetNameBtn')?.classList.add('hidden');
 }
 
-// Closing the editor (X or hardware back via boot.js) discards a mid-rename, as resetLoraOverrides().
+// Closing the editor (CANCEL, tapping outside or hardware back via boot.js) discards a new name and a picked thumbnail.
 window.closeConfigModal = () => {
     window.discardLoraNameEditIfOpen();
     document.getElementById('loraConfigModal').classList.add('hidden');
@@ -1147,6 +1482,7 @@ window.openLlmModal = (mode) => {
     // Locks the page behind the window, once per open.
     if (llmModalEl.classList.contains('hidden') && typeof lockBodyScroll === 'function') lockBodyScroll();
     llmModalEl.classList.remove('hidden');
+    if (window.Scene) Scene.fixTab();
     
     const inputEl = document.getElementById('llmInput');
     const outputEl = document.getElementById('llmOutput');
@@ -1157,8 +1493,7 @@ window.openLlmModal = (mode) => {
     outputEl.value = llmState[mode].output;
     persistentCheck.checked = llmState[mode].persistent;
     
-    if (llmState[mode].persistent) resetBtn.classList.remove('hidden');
-    else resetBtn.classList.add('hidden');
+    resetBtn.disabled = !llmState[mode].persistent;
 
     let savedSys = llmSettings.system_xl;
     if (activeLlmMode === 'flux') savedSys = llmSettings.system_flux;
@@ -1168,7 +1503,6 @@ window.openLlmModal = (mode) => {
     document.getElementById('llmSystemPrompt').value = savedSys || "";
     
     updateLlmButtonState();
-    if (!inputEl.value) inputEl.focus();
     
     if (typeof lucide !== 'undefined') lucide.createIcons();
 
@@ -1192,13 +1526,8 @@ window.toggleLlmPersistent = function() {
     const isChecked = document.getElementById('llmPersistentCheck').checked;
     llmState[activeLlmMode].persistent = isChecked;
     
-    const resetBtn = document.getElementById('llmResetBtn');
-    if (isChecked) {
-        resetBtn.classList.remove('hidden');
-    } else {
-        resetBtn.classList.add('hidden');
-        llmState[activeLlmMode].history = []; 
-    }
+    document.getElementById('llmResetBtn').disabled = !isChecked;
+    if (!isChecked) llmState[activeLlmMode].history = [];
 }
 
 window.resetLlmHistory = async function() {
@@ -1301,6 +1630,20 @@ window.setAdetailerFilterMethod = function(mode, n, value) {
     saveAdetailer(mode);
 }
 
+// MASK MERGE (ad_mask_merge_invert): NONE / MERGE / MERGE + INVERT buttons over a hidden <select>, as Mask Filter.
+const AD_MERGE_BUTTONS = { none: 'None', merge: 'Merge', invert: 'Merge and Invert' };
+window.syncAdetailerMaskMergeButtons = function(mode, n) {
+    const select = document.getElementById(`${mode}_adetailer_${n}_mask_merge`);
+    const value = select ? select.value : 'None';
+    Object.entries(AD_MERGE_BUTTONS).forEach(([key, v]) => document.getElementById(`${mode}_adetailer_${n}_merge_${key}`)?.classList.toggle('active', value === v));
+}
+window.setAdetailerMaskMerge = function(mode, n, value) {
+    const select = document.getElementById(`${mode}_adetailer_${n}_mask_merge`);
+    if (select) select.value = value;
+    syncAdetailerMaskMergeButtons(mode, n);
+    saveAdetailer(mode);
+}
+
 window.saveAdetailer = function(mode) {
     let anyEnabled = false;
     for (let n = 1; n <= 8; n++) {
@@ -1381,6 +1724,7 @@ window.initAdetailer = function() {
             loadVal('mask_merge', 'None');
             loadVal('filter_method', 'Area');
             syncAdetailerFilterMethodButtons(mode, n);
+            syncAdetailerMaskMergeButtons(mode, n);
             // The model list is populated by populateAdetailerControlNetModels() (network.js); this restores only weight/guidance.
             loadVal('cn_weight', 1.0);
             loadVal('cn_guidance_start', 0.0);
@@ -1468,26 +1812,17 @@ window.initGlobalUiState = function() {
     initGenericSectionClosed('grp-krea-neveroom', 'arr-krea-neveroom', 'bojro_vis_krea_neveroom');
     initGenericSectionClosed('grp-inp-neveroom', 'arr-inp-neveroom', 'bojro_vis_inp_neveroom');
     initGenericSectionClosed('grp-img2img-neveroom', 'arr-img2img-neveroom', 'bojro_vis_img2img_neveroom');
-    initGenericSectionClosed('grp-vram-lowbits', 'arr-vram-lowbits', 'bojro_vis_vram_lowbits');
     
-    // CFG tab sections: all open by default except System. The page was regrouped, so the old per-section keys (cfg_app, cfg_ui, cfg_local_ip, cfg_local_ports, cfg_res, cfg_module_pairs) are no longer read.
-    initGenericSection('cfg-connection', 'arr-cfg-connection', 'bojro_vis_cfg_connection');
-    initGenericSection('cfg-interface', 'arr-cfg-interface', 'bojro_vis_cfg_interface');
-    initGenericSection('cfg-generation', 'arr-cfg-generation', 'bojro_vis_cfg_generation');
-    initGenericSection('cfg-models', 'arr-cfg-models', 'bojro_vis_cfg_models');
-    initGenericSection('cfg-extensions', 'arr-cfg-extensions', 'bojro_vis_cfg_extensions');
-    initGenericSection('cfg-experimental', 'arr-cfg-experimental', 'bojro_vis_cfg_experimental');
-    initGenericSectionClosed('cfg-sys', 'arr-cfg-sys', 'bojro_vis_cfg_sys');
-}
-
-// Auto-Collapse Config Sections: switching it on closes every open Config section but Interface (where the switch is).
-window.setCfgOneSection = function(on) {
-    localStorage.setItem('bojroCfgOneSection', on ? 'true' : 'false');
-    if (!on) return;
-    document.querySelectorAll('#view-cfg .cfg-accordion-content:not(.hidden)').forEach(section => {
-        if (section.id !== 'cfg-interface') toggleGeneric(section.id, 'arr-' + section.id, 'bojro_vis_' + section.id.replace(/-/g, '_'));
+    // Config sections start closed, one open at most (toggleGeneric()).
+    let cfgOpen = false;
+    document.querySelectorAll('#view-cfg .cfg-accordion-content').forEach(section => {
+        const key = 'bojro_vis_' + section.id.replace(/-/g, '_');
+        initGenericSectionClosed(section.id, 'arr-' + section.id, key);
+        if (section.classList.contains('hidden')) return;
+        if (cfgOpen) toggleGeneric(section.id, 'arr-' + section.id, key);
+        cfgOpen = true;
     });
-};
+}
 
 // --- GENERIC SECTION TOGGLER (PERSISTENT) ---
 // initGenericSection()/initGenericSectionClosed() live in an early inline <script> after <body> opens, because sections call them before this file loads.
@@ -1498,8 +1833,9 @@ window.toggleGeneric = function(contentId, arrowId, storageKey) {
     const isHidden = content.classList.contains('hidden');
 
     if (isHidden) {
-        // Auto-Collapse Config Sections (Config > Interface): close the other open Config section as this one opens.
-        if (content.classList.contains('cfg-accordion-content') && localStorage.getItem('bojroCfgOneSection') === 'true') {
+        // Config: one section open at a time (not while searching).
+        const cfgOne = content.classList.contains('cfg-accordion-content') && !document.getElementById('cfgSearch')?.value.trim();
+        if (cfgOne) {
             document.querySelectorAll('#view-cfg .cfg-accordion-content:not(.hidden)').forEach(other => {
                 if (other === content) return;
                 toggleGeneric(other.id, 'arr-' + other.id, 'bojro_vis_' + other.id.replace(/-/g, '_'));
@@ -1508,7 +1844,7 @@ window.toggleGeneric = function(contentId, arrowId, storageKey) {
         content.classList.remove('hidden');
         // Keep the opened section in view: its header no higher than the top (a section closing above moves it up),
         // and as much of its content as fits above the dock.
-        if (localStorage.getItem('bojroCfgOneSection') === 'true' && content.classList.contains('cfg-accordion-content')) {
+        if (cfgOne) {
             const headerTop = content.previousElementSibling?.getBoundingClientRect().top ?? 0;
             const dockTop = document.querySelector('.glass-dock')?.getBoundingClientRect().top ?? window.innerHeight;
             const hiddenBelow = content.getBoundingClientRect().bottom - (dockTop - 8);
@@ -1527,48 +1863,158 @@ window.toggleGeneric = function(contentId, arrowId, storageKey) {
 }
 
 
-// Add this at the very bottom of ui.js
-// Caps a list in a window at the whole rows that fit on screen: no part row at the bottom and none peeking in.
-// perRow is the number of items per row (3 for the SAAC grid). Re-run on resize, as the keyboard changes the room.
-window.fitListToWholeRows = function (list, items, perRow = 1) {
+// True just after a text box lost focus (the keyboard going) while the window is still shorter than the tallest it has
+// been at this width: its new size hasn't come through yet. Fitted again 0.4s and 1.6s after the box lost focus.
+let fullWindowHeight = { width: 0, height: 0 };
+let textBoxLeftAt = 0;
+const isTextBox = el => el && (el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && /^(text|search|number|email|url|password|tel)$/i.test(el.type || 'text')));
+document.addEventListener('focusout', e => {
+    if (!isTextBox(e.target)) return;
+    textBoxLeftAt = Date.now();
+    [400, 1600].forEach(ms => setTimeout(() => { if (typeof fitAllLists === 'function') fitAllLists(); }, ms));
+});
+function windowAwaitingFullHeight() {
+    const w = window.innerWidth, h = window.innerHeight;
+    if (fullWindowHeight.width !== w) fullWindowHeight = { width: w, height: 0 };
+    fullWindowHeight.height = Math.max(fullWindowHeight.height, h);
+    return !isTextBox(document.activeElement) && Date.now() - textBoxLeftAt < 1500 && h < fullWindowHeight.height - 50;
+}
+// The most a window can grow to: the screen less a margin when its window is centred (it moves up as it grows),
+// otherwise the space below its top.
+function roomBelowWindowTop(content, box) {
+    const ps = content.parentElement && getComputedStyle(content.parentElement);
+    const centred = ps && ps.display === 'flex' && ps.flexDirection === 'column' && ps.justifyContent === 'center';
+    return centred ? window.innerHeight - 20 : window.innerHeight - box.top - 10;
+}
+
+// A window's max-height in px: a length, a percentage of its parent's inner height, or calc(N% + Mpx).
+function maxHeightOf(content, cs) {
+    const m = cs.maxHeight, pct = /([\d.]+)%/.exec(m), add = /\+\s*([\d.]+)px/.exec(m);
+    if (!pct) return parseFloat(m);
+    const ps = getComputedStyle(content.parentElement);
+    const inner = content.parentElement.clientHeight - parseFloat(ps.paddingTop) - parseFloat(ps.paddingBottom);
+    return +pct[1] / 100 * inner + (add ? +add[1] : 0);
+}
+
+// Fits a list in a window to the whole rows that fit on screen. perRow: items per row; maxItems caps a one-per-row
+// list; fewer shows that many fewer. Not shrunk while a text box has focus or the keyboard is up.
+window.fitListToWholeRows = function (list, items, perRow = 1, maxItems = 0, fewer = 0) {
     const wrap = list && list.parentElement;
     const content = list && list.closest('.modal-content');
     if (!wrap || !content || !content.getClientRects().length) return;
+    if (wrap.style.maxHeight && (isTextBox(document.activeElement) || (typeof isKeyboardUp === 'function' && isKeyboardUp()) || windowAwaitingFullHeight())) return;
+    const before = wrap.style.maxHeight;
+    fitListRows(list, items, perRow, maxItems, fewer, wrap, content);
+    if (window.dbg && wrap.style.maxHeight !== before) {
+        window.dbg(`list ${list.id || '?'} fitted ${before || 'none'} -> ${wrap.style.maxHeight || 'none'} (window ${window.innerHeight}, viewport ${Math.round(window.visualViewport ? window.visualViewport.height : 0)}, screen ${screen.height})`);
+    }
+};
+function fitListRows(list, items, perRow, maxItems, fewer, wrap, content) {
     if (items.length <= perRow) { wrap.style.maxHeight = ''; return; }
+    if (perRow === 1) return fitListToWholeItems(list, items, wrap, content, maxItems, fewer);
     const first = items[0].getBoundingClientRect();
     const stride = items[perRow].getBoundingClientRect().top - first.top;
     if (!(stride > 0) || !(first.height > 0)) return;
     const gap = Math.max(0, stride - first.height);
     const padTop = first.top - list.getBoundingClientRect().top + list.scrollTop;
     const cs = getComputedStyle(content);
-    let maxContent = parseFloat(cs.maxHeight);
-    if (cs.maxHeight.endsWith('%')) {
-        const ps = getComputedStyle(content.parentElement);
-        maxContent = maxContent / 100 * (content.parentElement.clientHeight - parseFloat(ps.paddingTop) - parseFloat(ps.paddingBottom));
-    }
+    let maxContent = maxHeightOf(content, cs);
     const box = content.getBoundingClientRect();
-    maxContent = Math.min(maxContent > 0 ? maxContent : Infinity, window.innerHeight - box.top - 10);
+    maxContent = Math.min(maxContent > 0 ? maxContent : Infinity, roomBelowWindowTop(content, box));
     const room = maxContent - (box.height - wrap.getBoundingClientRect().height);
     // Space under the last item; the slack below the last whole row is chosen so the list is clean at both ends of its scroll.
     const last = items[items.length - 1].getBoundingClientRect();
     const endPad = list.scrollHeight - (last.bottom - list.getBoundingClientRect().top + list.scrollTop);
     const low = Math.max(0, endPad - padTop), high = Math.min(gap, gap + endPad - padTop);
     const slack = low <= high ? (low + high) / 2 : gap / 2;
-    const rows = Math.max(1, Math.floor((room - padTop - first.height - slack) / stride) + 1);
+    let rows = Math.max(1, Math.floor((room - padTop - first.height - slack) / stride) + 1);
+    // maxItems: no more rows than they fill.
+    if (maxItems > 0) rows = Math.min(rows, Math.ceil(maxItems / perRow));
+    if (items.length <= rows * perRow) { wrap.style.maxHeight = ''; return; }
     wrap.style.maxHeight = Math.round(padTop + (rows - 1) * stride + first.height + slack) + 'px';
-};
+}
 
-let fitListsTimer = 0;
-window.addEventListener('resize', () => {
+// One item per row, any heights: as many whole items as fit, with a little space before the next; the bottom padding
+// is set so the list also ends cleanly when scrolled to the end.
+function fitListToWholeItems(list, items, wrap, content, maxItems = 0, fewer = 0) {
+    const cs = getComputedStyle(content);
+    let maxContent = maxHeightOf(content, cs);
+    const box = content.getBoundingClientRect();
+    maxContent = Math.min(maxContent > 0 ? maxContent : Infinity, roomBelowWindowTop(content, box));
+    let room = Math.floor(maxContent - (box.height - wrap.getBoundingClientRect().height));
+    // The last item's own bottom margin left out, so the list ends where its last item does (plus the padding below).
+    list.classList.add('fit-whole-items');
+    if (list.dataset.padBase === undefined) list.dataset.padBase = parseFloat(getComputedStyle(list).paddingBottom) || 0;
+    const padBase = +list.dataset.padBase;
+    list.style.paddingBottom = padBase + 'px';
+    const origin = list.getBoundingClientRect().top - list.scrollTop;
+    const rows = [...items].map(el => { const r = el.getBoundingClientRect(); return { top: r.top - origin, bottom: r.bottom - origin }; });
+    const total = list.scrollHeight;
+    // No further than the gap after the last item allowed.
+    if (maxItems && rows.length > maxItems) room = Math.min(room, Math.floor(rows[maxItems].top));
+    if (total <= room) { wrap.style.maxHeight = ''; return; }
+    // No item crosses the line at y: with 1px to spare where items have gaps between them, within half a pixel where
+    // they touch.
+    const minGap = Math.min(...rows.slice(1).map((r, i) => r.top - rows[i].bottom));
+    const spare = minGap >= 2 ? 1 : -0.5;
+    const clearAt = y => {
+        // The last item starting above y + spare (items are in order and don't overlap) must end by y - spare.
+        let lo = 0, hi = rows.length - 1, i = -1;
+        while (lo <= hi) { const mid = (lo + hi) >> 1; if (rows[mid].top < y + spare) { i = mid; lo = mid + 1; } else hi = mid - 1; }
+        return i < 0 || rows[i].bottom <= y - spare;
+    };
+    const pick = maxAdd => {
+        let best = null;
+        for (let h = room; h > 0 && h > room - 400; h--) {
+            if (!clearAt(h)) continue;
+            const whole = rows.filter(r => r.bottom <= h);
+            if (!whole.length) continue;
+            if (best && whole.length < best.count) break;
+            const last = whole[whole.length - 1], next = rows[whole.length];
+            let add = -1;
+            if (maxAdd < 0) add = Math.max(0, Math.round(h - last.bottom));
+            else for (let a = 0; a <= maxAdd; a++) if (clearAt(total + a - h)) { add = a; break; }
+            if (add < 0) continue;
+            const gap = next ? next.top - last.bottom : 0;
+            const score = Math.abs(h - last.bottom - gap / 2) + add / 4;
+            if (!best || score < best.score) best = { h, add, count: whole.length, score };
+        }
+        return best;
+    };
+    // Clean at the end with up to 12px of extra padding, else the end gets the top's gap under its last item.
+    const most = () => { const clean = pick(12), loose = pick(-1); return !clean || (loose && loose.count > clean.count) ? loose : clean; };
+    let best = most();
+    // fewer: that many whole items fewer, the list ending before the first of them.
+    if (best && fewer && best.count > fewer) {
+        room = Math.floor(rows[best.count - fewer].top);
+        best = most();
+    }
+    if (!best) { wrap.style.maxHeight = room + 'px'; return; }
+    list.style.paddingBottom = (padBase + best.add) + 'px';
+    wrap.style.maxHeight = best.h + 'px';
+}
+
+let fitListsTimer = 0, fitListsLateTimer = 0;
+function fitAllLists() {
+    if (window.LoraManager) window.LoraManager.fitListHeight();
+    if (window.StyleManager) window.StyleManager.fitListHeight();
+    if (window.SaacManager && typeof window.SaacManager.refitGrid === 'function') window.SaacManager.refitGrid();
+    if (typeof fitCheckpointListHeight === 'function') fitCheckpointListHeight();
+    if (typeof fitFolderManagerList === 'function') fitFolderManagerList();
+    if (typeof fitDataUsageListHeight === 'function') fitDataUsageListHeight();
+    if (typeof fitImg2imgPresetListHeight === 'function') fitImg2imgPresetListHeight();
+}
+// Fitted soon after a change of size, and again once things have settled.
+const refitLists = () => {
     clearTimeout(fitListsTimer);
-    fitListsTimer = setTimeout(() => {
-        if (window.LoraManager) window.LoraManager.fitListHeight();
-        if (window.StyleManager) window.StyleManager.fitListHeight();
-        if (window.SaacManager && typeof window.SaacManager.refitGrid === 'function') window.SaacManager.refitGrid();
-        if (typeof fitCheckpointListHeight === 'function') fitCheckpointListHeight();
-        if (typeof fitDataUsageListHeight === 'function') fitDataUsageListHeight();
-    }, 150);
-});
+    clearTimeout(fitListsLateTimer);
+    fitListsTimer = setTimeout(fitAllLists, 150);
+    fitListsLateTimer = setTimeout(fitAllLists, 600);
+};
+window.addEventListener('resize', () => { windowAwaitingFullHeight(); refitLists(); });
+windowAwaitingFullHeight();
+// The keyboard coming and going (it doesn't always resize the window).
+if (window.visualViewport) window.visualViewport.addEventListener('resize', refitLists);
 
 if (window.StyleManager && typeof window.StyleManager.init === 'function') {
     window.StyleManager.init();
@@ -1648,6 +2094,8 @@ if (window.StyleManager && typeof window.StyleManager.init === 'function') {
         update();
     }
     document.querySelectorAll('.has-scroll-indicator').forEach(setUp);
+    // For lists made later (the LoRA group picker, loragroups.js).
+    window.attachScrollIndicator = setUp;
 })();
 
 // The title's glitch repaints every frame, which makes scrolling stutter; it pauses while scrolling or off screen.
