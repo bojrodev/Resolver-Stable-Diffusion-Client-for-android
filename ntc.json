@@ -1,5 +1,5 @@
 {
-  "id": "v3.0-release note",
+  "id": "v3.0-release-note",
   "title": "Resolver v3.0 Released",
   "message": "Resolver v3.0 is out thanks to bungles, our biggest update yet: Wildcards, Forge Couple, prompt history, LoRA variants & groups, Backup & Restore, a new dock and 40+ fixes. Huge thanks to Bungles for the v3.0 patch! It needs a new APK: install it over your current app and your images, history and settings stay as they are.",
   "type": "info",
