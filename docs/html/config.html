@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Config · Resolver Docs</title>
+<meta name="description" content="Every setting in Resolver's Config tab, searchable: what it does and its default, section by section.">
+<link rel="icon" href="assets/img/favicon.png">
+<script>try{var t=localStorage.getItem('rdocs-theme'),a=localStorage.getItem('rdocs-accent');if(t&&t!=='system')document.documentElement.dataset.theme=t;if(a)document.documentElement.dataset.accent=a;}catch(e){}</script>
+<link rel="stylesheet" href="assets/css/docs.css">
+</head>
+<body data-page="config">
+<main class="content">
+
+<p class="crumbs"><a href="index.html">Docs</a> / Settings</p>
+<h1>Config</h1>
+<p class="lead">The <i data-lucide="settings" style="width:18px;height:18px;vertical-align:-3px"></i> tab holds every setting, in 13 sections that open and close. All of them are below with their defaults: search, or pick a section.</p>
+
+<div class="split">
+    <div>
+        <h2 id="using">Finding a setting in the app</h2>
+        <ul>
+            <li>The <b>Search settings…</b> box at the top of Config finds any option by name and opens its section, with the match marked. The × clears it.</li>
+            <li>Tap a section’s header to open or close it; the app remembers which are open.</li>
+            <li>Changes are saved at once: there is no Save button.</li>
+            <li>Options shown <i>under</i> another (indented below) appear only while that one is on.</li>
+        </ul>
+        <div class="callout tip"><i data-lucide="rotate-ccw"></i><div><b>Undo everything</b><p><span class="ui plain">System Settings → RESET APP CONFIGURATION</span> puts every option back to its default. Your connections, prompts, History, styles, LoRA settings and presets are kept.</p></div></div>
+    </div>
+    <figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/tab-config.webp" alt="The Config tab" loading="lazy" width="412" height="892"></div></div><figcaption>The Config tab, sections closed.</figcaption></figure>
+</div>
+
+<h2 id="all">Every setting</h2>
+<div data-widget="cfgexplorer" class="no-toc">
+    <div class="cfgx-bar">
+        <div class="faq-tools" style="margin:0"><input type="search" placeholder="Search settings: e.g. seed, vram, preview, badges…" aria-label="Search settings"></div>
+        <div class="cfgx-chips" role="group" aria-label="Sections"></div>
+        <span class="cfgx-count" aria-live="polite"></span>
+    </div>
+    <div class="cfgx-list"></div>
+</div>
+
+</main>
+<script src="assets/js/lucide.js"></script>
+<script src="assets/js/config-data.js"></script>
+<script src="assets/js/site.js"></script>
+<script src="assets/js/docs.js"></script>
+</body>
+</html>

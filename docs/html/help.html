@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Troubleshooting &amp; FAQ · Resolver Docs</title>
+<meta name="description" content="Answers to common problems: connecting, generating, memory, background, images, wildcards, Magic Prompt and updates, plus the Debug Log and Data Usage tools.">
+<link rel="icon" href="assets/img/favicon.png">
+<script>try{var t=localStorage.getItem('rdocs-theme'),a=localStorage.getItem('rdocs-accent');if(t&&t!=='system')document.documentElement.dataset.theme=t;if(a)document.documentElement.dataset.accent=a;}catch(e){}</script>
+<link rel="stylesheet" href="assets/css/docs.css">
+</head>
+<body data-page="help">
+<main class="content">
+
+<p class="crumbs"><a href="index.html">Docs</a> / Help</p>
+<h1>Troubleshooting &amp; FAQ</h1>
+<p class="lead">Something not working? Type a word from the problem below; the matching answers open.</p>
+
+<h2 id="faq">Questions and answers</h2>
+<div class="faq no-toc" data-widget="faq">
+    <div class="faq-tools"><input type="search" placeholder="e.g. connect, out of memory, screen off, wildcard…" aria-label="Search the answers"><button class="mini-btn" data-faq-all>Open all</button></div>
+
+    <details><summary><span class="faq-tag">Connect</span>INITIALIZE ENGINE says FAILED</summary><div>
+        <ol>
+            <li>Is Forge running on the PC, started with <code>--listen --api</code>? See <a href="getting-started.html#forge">Set up Forge</a>.</li>
+            <li>Are phone and PC on the same Wi-Fi? Mobile data or a guest network can’t reach the PC.</li>
+            <li>Is the IP right? It’s the PC’s IPv4 address (like <code>192.168.1.20</code>), never <code>127.0.0.1</code>. It can change after a router restart.</li>
+            <li>Open <code>http://YOUR-IP:7860/docs</code> in the phone’s browser. If that fails too, Windows Firewall is likely blocking port 7860: allow Python on private networks.</li>
+        </ol>
+        <p>More in <a href="getting-started.html#trouble">Connection problems</a>.</p></div></details>
+    <details><summary><span class="faq-tag">Connect</span>It connects at home but not when I’m out</summary><div><p>At home the app uses your local address, which doesn’t work outside your network. Use <b>REMOTE</b> mode with a tunnel (ngrok, Cloudflare): <a href="dev-power.html#remote">Using Resolver away from home</a>.</p></div></details>
+    <details><summary><span class="faq-tag">Connect</span>The lists (checkpoints, LoRAs, samplers) are empty</summary><div><p>They come from Forge when you connect. Tap <b>INITIALIZE ENGINE</b> again once Forge has fully loaded. For LoRAs added since, use the <i data-lucide="refresh-cw" style="width:14px;height:14px;vertical-align:-2px"></i> refresh in the LoRA window.</p></div></details>
+    <details><summary><span class="faq-tag">Connect</span>“The connection to the server timed out (error 524)”</summary><div><p>A tunnel (Cloudflare especially) gave up waiting for a long job; the image was likely made but couldn’t be collected. Look in Forge’s output folder, use fewer steps or smaller batches over the tunnel, or a tunnel without that limit.</p></div></details>
+
+    <details><summary><span class="faq-tag">Generate</span>“Please select a model first.”</summary><div><p>The tab has no checkpoint chosen. Open <b>Active Checkpoint</b> on that tab and pick one. Each model tab keeps its own.</p></div></details>
+    <details><summary><span class="faq-tag">Generate</span>“Forge is busy with another job”</summary><div><p>Forge is already generating, perhaps from its own web page or another device. Wait for it to finish, or stop it there. Resolver never sends a second job on top.</p></div></details>
+    <details><summary><span class="faq-tag">Generate</span>Out of memory, or very slow</summary><div>
+        <ul>
+            <li>Tap the bin beside GENERATE (<b>Clear VRAM</b>) to unload models, then try again.</li>
+            <li>Lower the size or Batch size, or turn off Hi-Res Fix.</li>
+            <li>Set <span class="ui plain">Config → Generation → VRAM profile</span> to <b>Low</b>.</li>
+            <li>Turn on <b>Show low bits</b> and <b>Show Never OOM</b> in <span class="ui plain">Config → Models</span> and use them. See <a href="generate.html#memory">Modules, memory and speed</a>.</li>
+            <li>Magic Prompt’s model uses VRAM too: use a smaller one or unload it.</li>
+        </ul></div></details>
+    <details><summary><span class="faq-tag">Generate</span>Images come out grey, noisy or burnt</summary><div><p>Usually settings that don’t suit the checkpoint: check its recommended steps, CFG and sampler (Lightning / Turbo models need few steps and CFG 1–2). Set them once in the <a href="generate.html#ckpt-manager">Checkpoint Manager</a> so they apply whenever you pick it. A LoRA for another model family (SD 1.5 on SDXL) also breaks images.</p></div></details>
+    <details><summary><span class="faq-tag">Generate</span>“Load a reference image for ControlNET, or disable it.”</summary><div><p>A ControlNet unit is on without a picture. Add one in the ControlNet section (or send one from the viewer: <span class="ui plain">Send → ControlNet</span>), or switch the unit off.</p></div></details>
+    <details><summary><span class="faq-tag">Generate</span>A LoRA has no effect</summary><div><p>Check that its tag is in the prompt (<code>&lt;lora:name:0.8&gt;</code>), that it was made for this model family, and that its trigger words are there. In <a href="analyze.html">Analyze</a>, a LoRA marked “not installed” isn’t on your PC.</p></div></details>
+
+    <details><summary><span class="faq-tag">Background</span>Generation stops when the screen is off</summary><div>
+        <ol>
+            <li>Allow background mode: <span class="ui plain">Config → System Settings → IGNORE BATTERY OPTIMIZATIONS</span>.</li>
+            <li>In the phone’s own battery settings, set Resolver to <i>Unrestricted</i>.</li>
+            <li>Allow its notifications: the progress notification is what keeps it running.</li>
+        </ol>
+        <p>See <a href="background.html">Background &amp; Notifications</a>.</p></div></details>
+    <details><summary><span class="faq-tag">Background</span>No “Generation Complete” notification</summary><div><p>It only comes while the app is in the background, and needs notifications allowed for Resolver (Android 13+ asks). Check the phone hasn’t silenced the <i>Generation Complete</i> channel.</p></div></details>
+    <details><summary><span class="faq-tag">Background</span>I closed the app and Forge kept generating</summary><div><p>That’s the default: Forge finishes what it was given. Turn on <span class="ui plain">Config → Generation → Abort on close or disconnect</span> to stop it when the app is swiped away.</p></div></details>
+
+    <details><summary><span class="faq-tag">Images</span>My older images disappeared from History</summary><div><p>History keeps the newest 30 by default (<span class="ui plain">Gallery cache limit</span>). Raise it, star images you want to keep (favorites are never removed), and keep <b>Auto-delete warning</b> on so you’re asked first. See <a href="history.html#limit">How many images are kept</a>.</p></div></details>
+    <details><summary><span class="faq-tag">Images</span>Where are saved images on the phone?</summary><div><p>Auto-Save and Download put them in the phone’s storage, named like <code>bojro_261117_1234567.png</code>. Your gallery app shows them. Backups go to <b>Documents</b>.</p></div></details>
+    <details><summary><span class="faq-tag">Images</span>Analyze shows no prompt for an image</summary><div><p>The file has no settings in it: many sites and chat apps strip them. Images made by Forge keep them (PNG text, or EXIF in JPEG / WEBP). After upscaling, tick <b>Copy Metadata from Source</b>.</p></div></details>
+    <details><summary><span class="faq-tag">Images</span>The live preview doesn’t show</summary><div><p>Turn on <b>Preview</b> beside GENERATE. On mobile data it’s off unless <span class="ui plain">Config → Live Preview → Allow on mobile data</span> is on. Try another <b>Preview method</b> (TAESD looks best).</p></div></details>
+
+    <details><summary><span class="faq-tag">Prompts</span>A wildcard is sent as <code>__name__</code> text</summary><div><p>Wildcards are off (<span class="ui plain">Config → Prompts → Wildcards</span>), or no wildcard has that name: <b>TRY</b> and <b>CHECK</b> in the Wildcards window show why. With auto-formatting on, unknown wildcards are removed instead.</p></div></details>
+    <details><summary><span class="faq-tag">Prompts</span>Something I didn’t write keeps appearing</summary><div><p>A LoRA’s trigger words, a style, a default prompt or a wildcard may add it. To keep it out regardless, write <code>~word</code> in the negative. See <a href="prompting.html#negative">The negative box</a>.</p></div></details>
+    <details><summary><span class="faq-tag">Prompts</span>My bracket is red</summary><div><p>It has no partner: a <code>(</code> without <code>)</code> or the other way round. Forge would read the rest of the prompt differently. See <a href="prompting.html#colors">the colors</a>.</p></div></details>
+
+    <details><summary><span class="faq-tag">Magic Prompt</span>LINK fails, or the model list is empty</summary><div><p>Check the model server runs and accepts network connections (LM Studio: <i>Serve on Local Network</i>), that a model is loaded, and the <b>LLM</b> port in Config (1234 for LM Studio, 11434 for Ollama).</p></div></details>
+    <details><summary><span class="faq-tag">Magic Prompt</span>Describe says “This model can’t read images”</summary><div><p>Describe needs a vision model (Qwen2.5-VL, Gemma 3, LLaVA…). Pick one in DESCRIBE’s own settings.</p></div></details>
+
+    <details><summary><span class="faq-tag">App</span>How do updates work?</summary><div><p>The app checks for updates when it starts (and with <span class="ui plain">Config → System Settings → UPDATE CHECK</span>). <b>Update Available</b> shows what’s new: <span class="ui">INSTALL UPDATE</span>, <span class="ui">LATER</span> or <span class="ui">SKIP</span> this version. Most updates install inside the app; a few need a new APK, which opens the download page. Your images and settings are kept. Turn the notices off with <b>Update notifications</b>.</p></div></details>
+    <details><summary><span class="faq-tag">App</span>I changed a lot of settings and want the defaults back</summary><div><p><span class="ui plain">Config → System Settings → RESET APP CONFIGURATION</span>. Your content is kept. See <a href="backup.html#reset">Reset</a>.</p></div></details>
+    <details><summary><span class="faq-tag">App</span>Moving to a new phone</summary><div><p>BACK UP on the old phone (tick History Favorites if you want those images), copy the file over, install Resolver, then RESTORE. See <a href="backup.html">Backup &amp; Restore</a>.</p></div></details>
+    <details><summary><span class="faq-tag">App</span>Does Resolver send my prompts or images anywhere?</summary><div><p>Your prompts and images go only to your own servers: Forge, ComfyUI, your model server and the Dev Power app, at the addresses you set. Apart from those, the app reads GitHub for update checks and the notice board, Civitai only when you search or import wildcards there (and the Bungles library when you tap CHECK), and Hugging Face once for Character Select’s data when you turn SAAC on. Everything else stays on the phone.</p></div></details>
+
+    <div class="faq-empty">No answer matches. Try fewer or other words, or turn on the Debug Log below.</div>
+</div>
+
+<h2 id="diagnostics">Diagnostics</h2>
+<div class="split">
+    <div>
+        <p>Two tools in <span class="ui plain">Config → Diagnostics</span> help find what’s going on:</p>
+        <div class="opts">
+            <dl class="opt"><dt>Debug log</dt><dd>Records jobs, network calls and background events with times. <span class="ui">DEBUG LOG</span> shows it; <i data-lucide="copy" style="width:14px;height:14px;vertical-align:-2px"></i> copies it to share in a bug report, <i data-lucide="trash-2" style="width:14px;height:14px;vertical-align:-2px"></i> clears it. <b>V</b> / <b>H</b> mark whether the app was in view or hidden. It’s kept in memory only, so it starts empty each time the app opens.</dd></dl>
+            <dl class="opt"><dt>Data usage tracker</dt><dd>Roughly how much data each Generate, queue and Upscale job used (request and reply bodies; not headers or compression). <span class="ui">DATA USAGE</span> lists the jobs; <b>Floating data counter</b> keeps a total on screen.</dd></dl>
+        </div>
+        <div class="callout tip"><i data-lucide="bug"></i><div><b>Reporting a bug</b><p>Turn on the Debug log, make the problem happen, copy the log, and open an issue on <a href="https://github.com/bojrodev/Resolver-Stable-Diffusion-Client-for-android/issues" target="_blank" rel="noopener">GitHub</a> with it and your Android and Forge versions.</p></div></div>
+    </div>
+    <div class="col" style="display:flex;flex-direction:column;gap:18px">
+        <figure class="shot" style="margin:0"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/debug-log.webp" alt="Debug Log" loading="lazy" width="412" height="892"></div></div><figcaption>The Debug Log.</figcaption></figure>
+        <figure class="shot" style="margin:0"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/data-usage.webp" alt="Data Usage" loading="lazy" width="412" height="892"></div></div><figcaption>Data Usage.</figcaption></figure>
+    </div>
+</div>
+
+</main>
+<script src="assets/js/lucide.js"></script>
+<script src="assets/js/site.js"></script>
+<script src="assets/js/docs.js"></script>
+</body>
+</html>

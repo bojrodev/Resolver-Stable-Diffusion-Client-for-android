@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Generate · Resolver Docs</title>
+<meta name="description" content="The Generate tab: model tabs, checkpoints, prompts, every generation setting, Hi-Res Fix and the buttons that start, stop and queue jobs.">
+<link rel="icon" href="assets/img/favicon.png">
+<script>try{var t=localStorage.getItem('rdocs-theme'),a=localStorage.getItem('rdocs-accent');if(t&&t!=='system')document.documentElement.dataset.theme=t;if(a)document.documentElement.dataset.accent=a;}catch(e){}</script>
+<link rel="stylesheet" href="assets/css/docs.css">
+</head>
+<body data-page="generate">
+<main class="content">
+
+<p class="crumbs"><a href="index.html">Docs</a> / Create</p>
+<h1>Generate</h1>
+<p class="lead">The tab you’ll use most: pick a model, write what you want, adjust the settings, and generate. This page goes through every part of it, top to bottom.</p>
+
+<h2 id="map">The tab at a glance</h2>
+<p>Tap a number on the screenshot, or a row in the list, to see what that part does.</p>
+<div class="hotspots" data-widget="hotspots">
+    <div class="phone"><div class="screen"><img src="assets/img/shots/gen-sdxl.webp" alt="The Generate tab, connected, on SDXL" width="412" height="892"></div></div>
+    <ol class="hs-list">
+        <li data-x="50" data-y="12"><b>INITIALIZE ENGINE</b><span class="more">Connects to Forge and loads its models. It glows and says <span class="ui">INITIALIZED</span> once connected. See <a href="getting-started.html#states">Getting Started</a>.</span></li>
+        <li data-x="19" data-y="19.5"><b>Dev Power row</b><span class="more">Wake your PC (power button), PWK and KILL! for the services on it, through the Bojro Dev Power helper on your PC. Hidden with <span class="ui plain">Config → Interface → Show Dev Power</span>.</span></li>
+        <li data-x="50" data-y="26.5"><b>Model tabs</b><span class="more">SDXL, Anima, Qwen, Flux and Krea. Each keeps its own checkpoint, prompts and settings. <a href="#models">More below</a>.</span></li>
+        <li data-x="50" data-y="37"><b>Active Checkpoint</b><span class="more">The model file Forge uses for this tab. Tap to pick from the checkpoints of this tab’s type. <a href="#checkpoint">More below</a>.</span></li>
+        <li data-x="36" data-y="43.3"><b>Prompt tools</b><span class="more">Save the prompt as this tab’s default, put the default back in, clear the box, and open the Prompt Guide (?). <a href="#prompt">More below</a>.</span></li>
+        <li data-x="68" data-y="43.3"><b>Scene optimization</b><span class="more">The wand: lets Magic Prompt’s AI model choose wildcard options that suit each other and the picture.</span></li>
+        <li data-x="86" data-y="43.3"><b>PROMPT (Magic Prompt)</b><span class="more">Opens Magic Prompt: a local AI model writes or extends your prompt, or describes an image.</span></li>
+        <li data-x="8" data-y="47.6"><b>Wildcards button</b><span class="more">The <code>{ }</code> button in the box opens your wildcards to insert one (<code>__name__</code>).</span></li>
+        <li data-x="55" data-y="52"><b>Prompt box</b><span class="more">What you want in the picture. Colors show LoRAs, weights, brackets and wildcards; it grows as you type.</span></li>
+        <li data-x="23" data-y="59.8"><b>+ LORA</b><span class="more">Opens your LoRAs to add one to the prompt. See <a href="loras-styles.html">LoRAs &amp; Styles</a>.</span></li>
+        <li data-x="65" data-y="59.8"><b>STYLES</b><span class="more">Saved prompt presets you can tap in and out. See <a href="loras-styles.html#styles">Styles</a>.</span></li>
+        <li data-x="91.5" data-y="59.8"><b>Recent Prompts</b><span class="more">This tab’s last 20 prompts, with the styles, LoRAs and sliders they used.</span></li>
+        <li data-x="50" data-y="69.5"><b>Negative</b><span class="more">What you don’t want (blur, watermarks, extra fingers…). Has its own save / default / clear buttons.</span></li>
+        <li data-x="50" data-y="79.2"><b>Hi-Res Fix</b><span class="more">Generates, then enlarges and refines the image in a second pass. <a href="#hires">More below</a>.</span></li>
+        <li data-x="50" data-y="86.5"><b>Generation Params</b><span class="more">Sampler, steps, CFG, size, batch, seed and more. <a href="#params">More below</a>.</span></li>
+        <li data-x="50" data-y="93.4"><b>Dock</b><span class="more">Switches between the app’s tabs. Tap, or slide your finger along it and let go.</span></li>
+    </ol>
+</div>
+<p class="muted" style="font-size:14px">Further down the tab (not in this view): optional sections such as ADetailer, ControlNet and Forge Couple (see <a href="extensions.html">Extensions</a>), then the format, Auto-Save and Preview buttons, and the <a href="#generating">buttons that start and stop jobs</a>.</p>
+
+<h2 id="models">The five model tabs</h2>
+<p>Different model families need different settings, so each has its own tab with its own color. A tab remembers everything (checkpoint, prompts, settings) while you use the others. Pick a model to see its tab and what’s special about it:</p>
+<div class="models no-toc" data-widget="models">
+    <div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/gen-sdxl.webp" alt="The selected model tab" width="412" height="892"></div></div>
+    <div>
+        <div class="model-tabs">
+            <button data-model="xl" style="--c:#ff9800">SDXL</button><button data-model="anima" style="--c:#00c853">ANIMA</button><button data-model="qwen" style="--c:#ff007f">QWEN</button><button data-model="flux" style="--c:#00e5ff">FLUX</button><button data-model="krea" style="--c:#b026ff">KREA</button>
+        </div>
+        <div data-panel="xl"><h3 style="margin-top:0">SDXL <span class="chip">orange</span></h3><p>For SDXL and its family (Pony, Illustrious, NoobAI…). The most complete tab.</p><ul><li>Starts at Euler a · Karras · 20 steps · CFG 7 · 1024×1024.</li><li>The only tab with a <b>Refiner</b> and a separate <b>Hi-Res checkpoint</b>.</li><li>Has Tiling, Forge Couple, ADetailer and ControlNet.</li></ul></div>
+        <div data-panel="anima" hidden><h3 style="margin-top:0">Anima <span class="chip">green</span></h3><p>For Anima models.</p><ul><li>Starts at Euler · Normal · 25 steps · CFG 5.</li><li><b>Modules Override</b>: VAE and text encoder.</li><li>Has Tiling, Forge Couple, ADetailer and ControlNet (with SDXL, from the “[SDXL/Anima]” switches in Config).</li></ul></div>
+        <div data-panel="qwen" hidden><h3 style="margin-top:0">Qwen <span class="chip">pink</span></h3><p>“Optimized for Z-Image Turbo”: fast models that need few steps.</p><ul><li>Starts at LCM · Normal · <b>8 steps · CFG 1</b>.</li><li><b>Modules Override</b>: VAE and Qwen text encoder.</li><li>ADetailer and ControlNet come from the “[other]” switches in Config.</li></ul></div>
+        <div data-panel="flux" hidden><h3 style="margin-top:0">Flux <span class="chip">cyan</span></h3><p>“Optimized for Flux GGUF”: Flux checkpoints, often as GGUF files.</p><ul><li>Starts at Euler · Simple · 20 steps · CFG 1, plus <b>Distilled CFG</b> 3.5 (Flux’s own guidance).</li><li><b>Modules Override</b>: VAE, CLIP and T5.</li><li>Can show <b>Flux Cache (FBC)</b> for speed. Hi-Res has no separate negative.</li></ul></div>
+        <div data-panel="krea" hidden><h3 style="margin-top:0">Krea <span class="chip">purple</span></h3><p>For Flux Krea models.</p><ul><li>Starts at Euler · Normal · 25 steps · CFG 5.</li><li><b>Modules Override</b>: VAE and text encoder.</li><li>ADetailer and ControlNet come from the “[other]” switches in Config.</li></ul></div>
+    </div>
+</div>
+<div class="tbl-wrap"><table class="tbl">
+    <thead><tr><th></th><th>SDXL</th><th>Anima</th><th>Qwen</th><th>Flux</th><th>Krea</th></tr></thead>
+    <tbody>
+        <tr><td>Modules Override</td><td class="no">–</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+        <tr><td>Refiner, Hi-Res checkpoint</td><td class="yes">✓</td><td class="no">–</td><td class="no">–</td><td class="no">–</td><td class="no">–</td></tr>
+        <tr><td>Tiling (seamless)</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">–</td><td class="no">–</td><td class="no">–</td></tr>
+        <tr><td>Forge Couple</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">–</td><td class="no">–</td><td class="no">–</td></tr>
+        <tr><td>Distilled CFG, Flux Cache</td><td class="no">–</td><td class="no">–</td><td class="no">–</td><td class="yes">✓</td><td class="no">–</td></tr>
+        <tr><td>ADetailer, ControlNet</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+    </tbody>
+</table></div>
+<div class="callout tip"><i data-lucide="eye-off"></i><div><b>Only use some models?</b><p>Hide the tabs you don’t need in <span class="ui plain">Config → Interface → Visible tabs</span>.</p></div></div>
+
+<h2 id="checkpoint">Choosing a checkpoint</h2>
+<p>Tap <b>Active Checkpoint</b> to pick the model file. Each tab only lists checkpoints of its own type: the app recognises the type from the file, and you can correct it in the Checkpoint Manager. Before you connect, the tab shows its last checkpoint dimmed.</p>
+<h3 id="ckpt-manager">Checkpoint Manager</h3>
+<p>Open it from <span class="ui plain">Config → Models → Checkpoint Manager → MANAGE</span>. It lists every checkpoint with its thumbnail; search at the top, refresh on the right. Tap one to set it up:</p>
+<div class="shot-row">
+    <figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/checkpoint-manager.webp" alt="Checkpoint Manager" loading="lazy" width="412" height="892"></div></div><figcaption>Checkpoint Manager.</figcaption></figure>
+    <figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/checkpoint-config.webp" alt="A checkpoint's settings" loading="lazy" width="412" height="892"></div></div><figcaption>One checkpoint’s settings.</figcaption></figure>
+</div>
+<div class="opts">
+    <dl class="opt"><dt>Model Type<small>Auto, or SDXL · Anima · Qwen · Flux · Krea</small></dt><dd>Which tab lists this checkpoint. “Auto (SDXL)” means the app recognised it as SDXL; pick another type if it guessed wrong.</dd></dl>
+    <dl class="opt"><dt>Preferred VAE / Text Encoder / CLIP / T5</dt><dd>Modules to use with this checkpoint (the fields shown depend on its type). Applied when you select it.</dd></dl>
+    <dl class="opt"><dt>Low Bits</dt><dd>The weight precision for this checkpoint (see <a href="#memory">Low Bits</a>).</dd></dl>
+    <dl class="opt"><dt>Hide in Inpaint / img2img</dt><dd>Leaves this checkpoint out of the Inpaint tab’s list, e.g. a model that doesn’t inpaint well.</dd></dl>
+    <dl class="opt"><dt>Defaults when selected<small>Sampler · Schedule · Steps · CFG · Clip Skip</small></dt><dd>Settings put in for you when you choose this checkpoint on a tab. Leave a field on “Not Set” / “Default” to keep the tab’s own value. A LoRA’s own overrides win over these.</dd></dl>
+</div>
+
+<h2 id="prompt">Writing the prompt</h2>
+<div class="split">
+    <div>
+        <p>The <b>Prompt</b> box is what you want; <b>Negative</b> is what you don’t. Both have the same small buttons:</p>
+        <div class="opts">
+            <dl class="opt"><dt><i data-lucide="save" style="width:16px;height:16px;vertical-align:-3px"></i> Save Current as Default</dt><dd>Remembers this text as the tab’s default.</dd></dl>
+            <dl class="opt"><dt><i data-lucide="refresh-cw" style="width:16px;height:16px;vertical-align:-3px"></i> Insert Default</dt><dd>Puts the saved default back in the box.</dd></dl>
+            <dl class="opt"><dt><i data-lucide="trash-2" style="width:16px;height:16px;vertical-align:-3px"></i> Clear</dt><dd>Empties the box.</dd></dl>
+            <dl class="opt"><dt>? Prompt Guide</dt><dd>A built-in guide to the prompt syntax: weights, brackets, BREAK, AND, LoRAs, wildcards, with colored examples.</dd></dl>
+        </div>
+    </div>
+    <figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/gen-prompt.webp" alt="Prompt and negative boxes" loading="lazy" width="412" height="892"></div></div><figcaption>Prompt, LoRA, Styles and Negative.</figcaption></figure>
+</div>
+<p>Under the prompt: <span class="ui">+ LORA</span> and <span class="ui">STYLES</span> (see <a href="loras-styles.html">LoRAs &amp; Styles</a>), <span class="ui">SAAC</span> when it’s turned on, and <a href="prompting.html#history"><b>Recent Prompts</b></a> (the clock). How to write prompts, with weights, brackets and wildcards, has its own page: <a href="prompting.html">Prompting</a>.</p>
+<div class="callout note"><i data-lucide="palette"></i><div><b>The colors in the box</b><p>Prompt boxes color what they recognise: <span style="color:#ffab40">&lt;lora:…&gt;</span> tags, <span style="color:#9ccc65">weights</span>, each level of brackets, wildcards, and brackets without a partner in red. Turn it off in <span class="ui plain">Config → Prompts → Color-coded prompts</span>.</p></div></div>
+
+<h2 id="params">Generation Params</h2>
+<div class="split">
+    <div>
+        <p>The core settings. The two small buttons in the header <b>save</b> the current values as this tab’s default and <b>load</b> that default back.</p>
+        <div class="opts">
+            <dl class="opt"><dt>Sampler</dt><dd>The method that turns noise into a picture step by step. Euler a and DPM++ 2M are good all-rounders; fast models use their own (LCM on Qwen).</dd></dl>
+            <dl class="opt"><dt>Schedule</dt><dd>How the noise is reduced across the steps (Karras, Normal, Simple…). Usually leave the tab’s default.</dd></dl>
+            <dl class="opt"><dt>Steps</dt><dd>How many refinement passes. More is slower; past a point it adds little. 20–30 is typical, Turbo/Lightning models need 4–8.</dd></dl>
+            <dl class="opt"><dt>CFG</dt><dd>How closely to follow the prompt. Too low looks vague, too high looks burnt. SDXL ~5–7; Turbo and Flux models 1.</dd></dl>
+            <dl class="opt"><dt>Distilled <small>Flux only</small></dt><dd>Flux’s built-in guidance (3.5 by default), used instead of CFG.</dd></dl>
+            <dl class="opt"><dt>Width · Height</dt><dd>Picture size in pixels. Use the presets below for sizes the models handle well.</dd></dl>
+            <dl class="opt"><dt>Batch Size &amp; Count</dt><dd><b>Size</b>: images made at once (uses more memory). <b>Count</b>: how many times to repeat. Size 2 × Count 3 = 6 images.</dd></dl>
+            <dl class="opt"><dt>Seed</dt><dd>The starting noise. <code>-1</code> (the dice) means random each time; the same seed with the same settings gives the same picture.</dd></dl>
+        </div>
+    </div>
+    <figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/gen-params.webp" alt="Generation Params with More Settings open" loading="lazy" width="412" height="892"></div></div><figcaption>Generation Params, MORE SETTINGS open.</figcaption></figure>
+</div>
+
+<h3 id="size">Picture size presets</h3>
+<p>The presets give good sizes for each shape. Try them (these are the app’s own numbers):</p>
+<div class="card" data-widget="aspect">
+    <div class="ar">
+        <div>
+            <div class="ar-controls">
+                <div><span class="ar-lbl">Size</span><div class="seg"><button data-mp="1MP">1MP</button><button data-mp="2MP">2MP</button></div></div>
+                <div><span class="ar-lbl">Shape</span><div class="seg"><button data-r="1:1">1:1</button><button data-r="3:2">3:2</button><button data-r="4:3">4:3</button><button data-r="16:9">16:9</button><button data-wall title="Phone screen" aria-label="Phone screen"><i data-lucide="smartphone" style="width:16px;height:16px"></i></button></div></div>
+                <div><span class="ar-lbl">Turn</span><div class="seg"><button data-flip title="Flip" aria-label="Flip"><i data-lucide="arrow-left-right" style="width:16px;height:16px"></i> FLIP</button></div></div>
+            </div>
+            <p class="ar-dims"></p>
+            <p class="ar-note"></p>
+        </div>
+        <div class="ar-stage"><div class="ar-box"></div></div>
+    </div>
+</div>
+<ul>
+    <li><b>1MP / 2MP</b> rows: the same shapes at about one or two megapixels.</li>
+    <li><b>Phone</b> <i data-lucide="smartphone" style="width:15px;height:15px;vertical-align:-2px"></i>: your phone’s own screen shape, in portrait: a wallpaper that fits exactly.</li>
+    <li><b>Flip</b> <i data-lucide="arrow-left-right" style="width:15px;height:15px;vertical-align:-2px"></i>: swaps width and height (3:2 becomes 2:3, portrait).</li>
+</ul>
+
+<h3 id="more-settings">More Settings</h3>
+<div class="opts">
+    <dl class="opt"><dt>Variation Seed · Strength</dt><dd>A second seed mixed in by <b>Strength</b> (0–1): keep the picture’s composition but vary details. The dice picks a random one; the arrow resets strength to 0.</dd></dl>
+    <dl class="opt"><dt>All combinations</dt><dd>Generates every combination of your prompt’s choices and wildcards instead of random picks (the count shows beside the switch). Big sets are split into runs of “Combinations per run” (Config → Prompts).</dd></dl>
+    <dl class="opt"><dt>Refiner · Switch At <small>SDXL</small></dt><dd>Switches to a second checkpoint for the last part of the steps: 0.8 means the refiner does the final 20%.</dd></dl>
+    <dl class="opt"><dt>Tiling (seamless) <small>SDXL, Anima</small></dt><dd>Makes the picture repeat seamlessly at its edges, for textures and patterns.</dd></dl>
+</div>
+
+<h2 id="hires">Hi-Res Fix</h2>
+<div class="split flip">
+    <div>
+        <p>Makes a bigger, sharper picture: it generates at the normal size, then enlarges it and runs a second, lighter pass to add detail. Turn it on with the switch in its header.</p>
+        <div class="opts">
+            <dl class="opt"><dt>Upscaler</dt><dd>How the first image is enlarged. “Latent” stays inside the model; ESRGAN-type upscalers (4x-UltraSharp…) enlarge the picture itself.</dd></dl>
+            <dl class="opt"><dt>Scale By</dt><dd>How much bigger (1–4×; 1.5 by default).</dd></dl>
+            <dl class="opt"><dt>Denoise</dt><dd>How much the second pass may change (0–1). 0.3–0.5 adds detail; higher redraws more.</dd></dl>
+            <dl class="opt"><dt>Steps · HR CFG</dt><dd>Steps and CFG for the second pass. <code>0</code> steps means the same as the main steps.</dd></dl>
+            <dl class="opt"><dt>More Settings</dt><dd>A different <b>Sampler</b>, <b>Schedule</b>, <b>Prompt</b> and <b>Negative</b> for the second pass (and a <b>Checkpoint</b> on SDXL). Left on “Same as main”, nothing extra is sent.</dd></dl>
+        </div>
+    </div>
+    <figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/gen-hires.webp" alt="Hi-Res Fix settings" loading="lazy" width="412" height="892"></div></div><figcaption>Hi-Res Fix, switched on.</figcaption></figure>
+</div>
+
+<h2 id="memory">Modules, memory and speed</h2>
+<div class="split">
+    <div>
+        <p>Optional sections for tuning what Forge loads. The last three are hidden until you turn them on in <span class="ui plain">Config → Models</span>.</p>
+        <div class="opts">
+            <dl class="opt"><dt>Modules Override<small>Anima · Qwen · Flux · Krea</small></dt><dd>Which VAE and text encoders (CLIP, T5, Qwen TE) to load with the checkpoint. “Automatic” lets Forge decide.</dd></dl>
+            <dl class="opt"><dt>Low Bits<small>Show low bits</small></dt><dd>The weight precision: <code>bnb-nf4</code>, <code>float8-e4m3fn</code>, <code>bnb-fp4</code>, <code>float8-e5m2</code>, each also “(fp16 LoRA)”. Lower uses less memory and can be faster, at a small cost in quality.</dd></dl>
+            <dl class="opt"><dt>Never OOM<small>Show Never OOM</small></dt><dd><b>Tiled VAE Decode</b> and <b>UNet Always Offload</b>: slower, but avoids “out of memory” on smaller graphics cards.</dd></dl>
+            <dl class="opt"><dt>Flux Cache (FBC)<small>Show Flux cache · Flux tab</small></dt><dd>First Block Cache speeds Flux up by reusing work between steps. <b>Threshold</b> (0.15): higher is faster but can lose detail. <b>Skip Start</b> (1): steps at the start that are never skipped.</dd></dl>
+        </div>
+    </div>
+    <figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/gen-flux-extras.webp" alt="Flux tab with Low Bits and Modules Override" loading="lazy" width="412" height="892"></div></div><figcaption>Flux: Low Bits and Modules Override.</figcaption></figure>
+</div>
+
+<h2 id="generating">Generating</h2>
+<div class="split flip">
+    <div>
+        <p>At the bottom of the tab:</p>
+        <div class="opts">
+            <dl class="opt"><dt>PNG / JPEG / WEBP</dt><dd>The <b>format</b> Forge saves in. Tap to cycle; JPEG and WEBP are much smaller. It changes Forge’s own setting, so it also applies to jobs from Forge’s web page. Quality is in Config → Generation.</dd></dl>
+            <dl class="opt"><dt>AUTO-SAVE</dt><dd>Saves every new image to your phone’s storage as soon as it arrives, as well as to History.</dd></dl>
+            <dl class="opt"><dt>PREVIEW</dt><dd>Live Preview: watch the picture form while it generates (options in Config → Live Preview).</dd></dl>
+            <dl class="opt"><dt><i data-lucide="trash-2" style="width:16px;height:16px;vertical-align:-3px"></i> Clear VRAM</dt><dd>Unloads the models from your graphics card’s memory, e.g. before another program needs it. Asks first, showing how much is in use.</dd></dl>
+            <dl class="opt"><dt><i data-lucide="list-plus" style="width:16px;height:16px;vertical-align:-3px"></i> Add to queue</dt><dd>Saves the job, with all its settings, to the <b>Queue</b> tab to run later with others.</dd></dl>
+            <dl class="opt"><dt>GENERATE</dt><dd>Starts now. The button shows progress; images appear below it and in History.</dd></dl>
+            <dl class="opt"><dt>ABORT · SKIP · CLEAR</dt><dd><b>ABORT</b> stops the job. <b>SKIP</b> (while more of a batch is coming) drops the current image and moves on. <b>CLEAR</b> empties the results shown here; History keeps them.</dd></dl>
+        </div>
+    </div>
+    <figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/gen-bottom.webp" alt="Bottom of the Generate tab" loading="lazy" width="412" height="892"></div></div><figcaption>The bottom of the tab.</figcaption></figure>
+</div>
+<div class="callout tip"><i data-lucide="moon"></i><div><b>Lock your phone, it keeps going</b><p>Once started, a job carries on with the screen off or the app in the background, with its progress in a notification. Buttons that would start another kind of job are dimmed (<b>BUSY</b>) until it’s done.</p></div></div>
+
+<h2 id="defaults">What the tab remembers</h2>
+<ul>
+    <li><b>Everything, per tab:</b> prompts, checkpoint, settings and open sections stay as you left them, even after closing the app.</li>
+    <li><b>Your defaults:</b> the save buttons on the prompt, negative and Generation Params store a starting point you can bring back with one tap.</li>
+    <li><b>Checkpoint defaults:</b> settings attached to a checkpoint (in the Checkpoint Manager) are put in when you choose it.</li>
+</ul>
+
+</main>
+<script src="assets/js/lucide.js"></script>
+<script src="assets/js/site.js"></script>
+<script src="assets/js/docs.js"></script>
+</body>
+</html>

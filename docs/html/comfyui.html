@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ComfyUI · Resolver Docs</title>
+<meta name="description" content="Run your own ComfyUI workflows from the phone: templates, the controls Resolver builds for them, masking, the live monitor and outputs.">
+<link rel="icon" href="assets/img/favicon.png">
+<script>try{var t=localStorage.getItem('rdocs-theme'),a=localStorage.getItem('rdocs-accent');if(t&&t!=='system')document.documentElement.dataset.theme=t;if(a)document.documentElement.dataset.accent=a;}catch(e){}</script>
+<link rel="stylesheet" href="assets/css/docs.css">
+</head>
+<body data-page="comfyui">
+<main class="content">
+
+<p class="crumbs"><a href="index.html">Docs</a> / Advanced</p>
+<h1>ComfyUI</h1>
+<p class="lead">If you build workflows in ComfyUI, Resolver can run them. Load a workflow as a template and the app makes phone-sized controls for its prompts, models, sampler, size and input images.</p>
+
+<h2 id="enable">Switching it on</h2>
+<ol class="steps">
+    <li><b>Start ComfyUI so the phone can reach it</b><span class="muted">With <code>--listen --enable-cors-header</code>. See <a href="getting-started.html#comfy">Set up ComfyUI</a>.</span></li>
+    <li><b>Check the port</b><span class="muted"><span class="ui plain">Config → Connection → Local ports → Comfy</span>: 8188 unless you changed it.</span></li>
+    <li><b>Show the tab</b><span class="muted"><span class="ui plain">Config → Interface → Visible tabs → COMFY</span>. A <i data-lucide="workflow" style="width:16px;height:16px;vertical-align:-3px"></i> appears in the dock.</span></li>
+    <li><b>Tap CONNECT</b><span class="muted">Grey: not connected; a green pulse: connecting; a purple glow: connected. If the connection drops it tries again by itself, waiting a little longer each time.</span></li>
+</ol>
+
+<h2 id="template">Templates: your workflows</h2>
+<div class="split">
+    <div>
+        <p>In ComfyUI, save your workflow in <b>API format</b>: <span class="ui plain">Workflow → Export (API)</span> (older versions: enable Dev mode, then <b>Save (API Format)</b>). Copy the <code>.json</code> to the phone.</p>
+        <div class="opts">
+            <dl class="opt"><dt>LOAD NEW TEMPLATE</dt><dd>Opens a <code>.json</code>. It becomes the <b>ACTIVE TEMPLATE</b> and is kept for next time, with your changes.</dd></dl>
+            <dl class="opt"><dt>LOAD SAVED TEMPLATE</dt><dd>The <b>Saved Workflow</b> list: tap one to load it. <span class="ui">IMPORT</span> adds several files at once, <span class="ui">SELECT</span> then <span class="ui">DELETE SELECTED</span> removes some, <span class="ui">CLEAR ALL</span> removes all.</dd></dl>
+            <dl class="opt"><dt><i data-lucide="trash-2" style="width:16px;height:16px;vertical-align:-3px"></i></dt><dd>Unloads the active template.</dd></dl>
+            <dl class="opt"><dt><i data-lucide="settings-2" style="width:16px;height:16px;vertical-align:-3px"></i></dt><dd>Opens Config.</dd></dl>
+        </div>
+    </div>
+    <figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/tab-comfy-loaded.webp" alt="ComfyUI tab with a template" loading="lazy" width="412" height="892"></div></div><figcaption>A template loaded.</figcaption></figure>
+</div>
+
+<h2 id="controls">The controls it builds</h2>
+<div class="split flip">
+    <div>
+        <p>Resolver reads the workflow’s nodes and gives the common ones proper controls. Each box folds, and remembers whether it’s open.</p>
+        <div class="opts">
+            <dl class="opt"><dt>Resources</dt><dd>Checkpoint, LoRA (with model and CLIP strength), VAE, CLIP / text encoder and UNET loaders, as lists filled from your ComfyUI.</dd></dl>
+            <dl class="opt"><dt>Text</dt><dd>Each <code>CLIPTextEncode</code> node’s prompt, under its title (Positive, Negative…).</dd></dl>
+            <dl class="opt"><dt>Sampler</dt><dd><code>KSampler</code> / <code>KSamplerAdvanced</code>: seed (with a random button), steps, CFG scale, sampler, schedule, denoise.</dd></dl>
+            <dl class="opt"><dt>Resolution</dt><dd><code>EmptyLatentImage</code> / <code>EmptySD3LatentImage</code>: width and height.</dd></dl>
+            <dl class="opt"><dt>Input Image</dt><dd><code>LoadImage</code>: upload a picture, and <b>Mask/Edit</b> it: the Inpaint canvas opens with <b>MASK</b> and <b>PAINT</b> (with a colour) modes, then <span class="ui">APPLY MASK</span>.</dd></dl>
+            <dl class="opt"><dt>Power Lora Loader</dt><dd>rgthree’s node: each LoRA slot with its strength, and slots to add or remove.</dd></dl>
+            <dl class="opt"><dt>Extra nodes</dt><dd>Every other node’s settings (numbers, text, switches), in a box that starts folded. Wires between nodes are left alone.</dd></dl>
+        </div>
+    </div>
+    <figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/tab-comfy-controls.webp" alt="Controls for a workflow" loading="lazy" width="412" height="892"></div></div><figcaption>Text, sampler and size controls.</figcaption></figure>
+</div>
+
+<h2 id="run">Running it</h2>
+<ul>
+    <li><span class="ui">GENERATE</span> sends the workflow with your values; <i data-lucide="square" style="width:16px;height:16px;vertical-align:-3px"></i> stops it.</li>
+    <li><b>LIVE MONITOR</b>: the progress bar and a live preview as ComfyUI works.</li>
+    <li><b>FINISHED OUTPUTS</b>: every image the workflow makes, in order. Tap one to view or download it. <span class="ui">SELECT</span> then <span class="ui">SAVE (n)</span> saves the ones you pick to History; <span class="ui">CLEAR</span> empties the strip.</li>
+    <li>The final image is saved to History by itself, and you get a “ComfyUI Generation Complete” notification if the app is in the background.</li>
+</ul>
+<div class="callout note"><i data-lucide="archive"></i><div><b>Templates are in backups</b><p>Tick <b>Comfy Templates</b> in <a href="backup.html">BACK UP</a> to keep your saved workflows.</p></div></div>
+
+</main>
+<script src="assets/js/lucide.js"></script>
+<script src="assets/js/site.js"></script>
+<script src="assets/js/docs.js"></script>
+</body>
+</html>

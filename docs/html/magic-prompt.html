@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Magic Prompt · Resolver Docs</title>
+<meta name="description" content="A local AI model writes prompts from a short idea, describes images, writes wildcard options and picks matching wildcards (Scene optimization).">
+<link rel="icon" href="assets/img/favicon.png">
+<script>try{var t=localStorage.getItem('rdocs-theme'),a=localStorage.getItem('rdocs-accent');if(t&&t!=='system')document.documentElement.dataset.theme=t;if(a)document.documentElement.dataset.accent=a;}catch(e){}</script>
+<link rel="stylesheet" href="assets/css/docs.css">
+</head>
+<body data-page="magic-prompt">
+<main class="content">
+
+<p class="crumbs"><a href="index.html">Docs</a> / Create</p>
+<h1>Magic Prompt</h1>
+<p class="lead">A language model running on your PC (in LM Studio or Ollama) helps with the words: it turns a short idea into a full prompt, describes a picture, writes wildcard options, and picks wildcards that go together.</p>
+
+<h2 id="setup">Setting it up</h2>
+<ol class="steps">
+    <li><b>Run a model server on your PC</b><span class="muted"><b>LM Studio</b> (its server on port <code>1234</code>) or <b>Ollama</b> (port <code>11434</code>): anything with the OpenAI-style <code>/v1</code> API. Let it accept connections from the network (in LM Studio: <i>Serve on Local Network</i>).</span></li>
+    <li><b>Load a model</b><span class="muted">A small instruction model is plenty for prompts (3–8B). For <b>Describe</b>, a <b>vision</b> model that can read images (for example Qwen2.5-VL or Gemma 3).</span></li>
+    <li><b>Set the LLM port</b><span class="muted"><span class="ui plain">Config → Connection → Local ports → LLM</span>. It uses the same IP address as Forge.</span></li>
+    <li><b>Link</b><span class="muted">In the Magic Prompt window, open <i data-lucide="settings" style="width:16px;height:16px;vertical-align:-3px"></i> and tap <span class="ui">LINK</span>: the list fills with your server’s models. Pick one.</span></li>
+</ol>
+<div class="callout warn"><i data-lucide="cpu"></i><div><b>One graphics card for both</b><p>A language model uses VRAM too. If Forge runs out of memory, use a smaller model, or keep <span class="ui plain">Unload after picking</span> on for Scene optimization.</p></div></div>
+
+<h2 id="prompt">PROMPT: from an idea to a prompt</h2>
+<div class="split">
+    <div>
+        <p>Tap <span class="ui">PROMPT</span> on a tab’s Prompt box.</p>
+        <div class="opts">
+            <dl class="opt"><dt>Idea</dt><dd>A few words: “a futuristic city with flying cars”.</dd></dl>
+            <dl class="opt"><dt>GENERATE PROMPT</dt><dd>The model writes a full prompt into <b>Generated Prompt</b>, in the style of that tab’s model.</dd></dl>
+            <dl class="opt"><dt>USE AS PROMPT</dt><dd>Puts it in the tab’s prompt box.</dd></dl>
+            <dl class="opt"><dt>Persistent Chat</dt><dd>Keeps the conversation: your next idea refines the last prompt (the button becomes <span class="ui">ITERATE</span>). <span class="ui">RESET</span> starts over.</dd></dl>
+            <dl class="opt"><dt><i data-lucide="settings" style="width:16px;height:16px;vertical-align:-3px"></i> Settings</dt><dd><b>LLM CONNECTION</b> with <span class="ui">LINK</span> and the model, and the <b>system prompt</b>: the instructions given to the model, one for each model tab, so SDXL gets tags and Flux gets sentences. Edit it to change the style.</dd></dl>
+        </div>
+    </div>
+    <figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/mp-prompt.webp" alt="Magic Prompt, PROMPT tab" loading="lazy" width="412" height="892"></div></div><figcaption>An idea, and the prompt the model wrote.</figcaption></figure>
+</div>
+
+<h2 id="describe">DESCRIBE: from a picture to a prompt</h2>
+<div class="split flip">
+    <div>
+        <p>The <b>DESCRIBE</b> tab reads an image with a vision model.</p>
+        <div class="opts">
+            <dl class="opt"><dt>The image</dt><dd>Tap the box to pick one, or <span class="ui">USE LAST IMAGE</span> for your latest result. <span class="ui">CLEAR</span> removes it.</dd></dl>
+            <dl class="opt"><dt>Style</dt><dd><b>TAGS</b> (for SDXL / Anima) or <b>SENTENCES</b> (for Flux, Krea, Qwen).</dd></dl>
+            <dl class="opt"><dt>DESCRIBE IMAGE</dt><dd>Writes the <b>Description</b>; <span class="ui">USE AS PROMPT</span> sends it to the tab.</dd></dl>
+            <dl class="opt"><dt>Recent</dt><dd>The last few descriptions, to use again.</dd></dl>
+            <dl class="opt"><dt><i data-lucide="settings" style="width:16px;height:16px;vertical-align:-3px"></i> DESCRIBE MODEL</dt><dd>Its own model, as it needs one that can see. A model that can’t is flagged: “This model can’t read images.”</dd></dl>
+        </div>
+    </div>
+    <figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/mp-describe.webp" alt="Magic Prompt, DESCRIBE tab" loading="lazy" width="412" height="892"></div></div><figcaption>DESCRIBE with the last image.</figcaption></figure>
+</div>
+<p class="muted">To read the <i>settings</i> an image was made with (rather than describe it), use <a href="analyze.html">Analyze</a>.</p>
+
+<h2 id="wildcards">Writing wildcard options</h2>
+<p>In the <a href="wildcards.html#editor">wildcard editor</a>, the <b>Magic Prompt</b> row writes options for you: choose <b>TAGS</b> or <b>SCENES</b>, add an optional hint (“winter”, “fantasy”), and tap <span class="ui">GENERATE</span>. Its <i data-lucide="settings" style="width:16px;height:16px;vertical-align:-3px"></i> sets the <b>WILDCARD MODEL</b>.</p>
+
+<h2 id="scene">Scene optimization</h2>
+<div class="split">
+    <div>
+        <p>Random picks don’t always go together: a beach with snow boots, a library at a party. With a prompt that has wildcards, a <i data-lucide="wand-sparkles" style="width:16px;height:16px;vertical-align:-3px"></i> wand appears beside <span class="ui">PROMPT</span> on <b>SDXL</b> and <b>Anima</b>. With it on, before each job the model chooses among the options the wildcard engine offers, so the outfit, place, pose and lighting of each image suit each other and your prompt.</p>
+        <ul>
+            <li>Conditions and rules still hold: the model only chooses from options that are allowed.</li>
+            <li>If anything fails (no server, a slow answer), the usual random picks are used. Nothing is lost.</li>
+            <li>When the prompt doesn’t say how many people, it can also add one (“1girl, solo”…).</li>
+        </ul>
+        <p>Its options in <span class="ui plain">Config → Magic Prompt</span>:</p>
+        <div class="opts">
+            <dl class="opt"><dt>Scene model</dt><dd>Same as Magic Prompt, or another.</dd></dl>
+            <dl class="opt"><dt>Unload after picking<small>on</small></dt><dd>Frees the model’s memory so Forge has the VRAM for the picture.</dd></dl>
+            <dl class="opt"><dt>Recolor to match<small>off</small></dt><dd>May swap a few colours in the picks so they go together; <b>Backgrounds too</b> includes places, lighting and props.</dd></dl>
+            <dl class="opt"><dt>Drop tags that don’t fit<small>off</small></dt><dd>May leave out picked tags that clash (never the character’s).</dd></dl>
+            <dl class="opt"><dt>Add negatives<small>off</small></dt><dd>Adds a few negative tags of its own for each image.</dd></dl>
+        </div>
+    </div>
+    <figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/gen-wildcards.webp" alt="A prompt with wildcards on SDXL" loading="lazy" width="412" height="892"></div></div><figcaption>A prompt with wildcards: the wand sits beside PROMPT.</figcaption></figure>
+</div>
+
+<h2 id="config">Showing and hiding it</h2>
+<p><span class="ui plain">Config → Magic Prompt → Show Magic Prompt</span> hides every Magic Prompt button at once. Under it, <b>Prompt</b>, <b>Describe</b>, <b>Wildcard generate</b> and <b>Scene optimization</b> show or hide each part. See <a href="config.html#cfg-magic">Config</a>.</p>
+
+</main>
+<script src="assets/js/lucide.js"></script>
+<script src="assets/js/site.js"></script>
+<script src="assets/js/docs.js"></script>
+</body>
+</html>

@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Background &amp; Notifications · Resolver Docs</title>
+<meta name="description" content="Keep generating with the screen off: background mode, battery optimization, the progress and Generation Complete notifications, Live Updates and polling.">
+<link rel="icon" href="assets/img/favicon.png">
+<script>try{var t=localStorage.getItem('rdocs-theme'),a=localStorage.getItem('rdocs-accent');if(t&&t!=='system')document.documentElement.dataset.theme=t;if(a)document.documentElement.dataset.accent=a;}catch(e){}</script>
+<link rel="stylesheet" href="assets/css/docs.css">
+</head>
+<body data-page="background">
+<main class="content">
+
+<p class="crumbs"><a href="index.html">Docs</a> / Advanced</p>
+<h1>Background &amp; Notifications</h1>
+<p class="lead">Start a big batch, lock the phone, put it in your pocket. Resolver keeps collecting your images in the background and tells you when they’re done.</p>
+
+<h2 id="how">How it keeps going</h2>
+<p>While a job runs, Resolver starts an Android <b>foreground service</b>: the progress notification you see. It keeps the phone’s processor and Wi-Fi awake, so Android doesn’t pause the app, and the app keeps asking Forge how far it is. Your PC does the work either way; the phone only needs to stay connected to collect the result.</p>
+
+<h2 id="battery">Background mode (battery optimization)</h2>
+<div class="split">
+    <div>
+        <p>Android may still stop apps that use the battery in the background. On first start Resolver asks to be exempt: <b>Enable Background Mode</b>.</p>
+        <ul>
+            <li><span class="ui">ENABLE (RECOMMENDED)</span> opens Android’s dialog; allow it.</li>
+            <li><span class="ui">SKIP FOR NOW</span>: you can do it later with <span class="ui plain">Config → System Settings → IGNORE BATTERY OPTIMIZATIONS</span>.</li>
+        </ul>
+        <div class="callout note"><i data-lucide="smartphone"></i><div><b>Some phones go further</b><p>Samsung, Xiaomi, OnePlus and others have their own battery savers. If jobs still stop with the screen off, look in the phone’s battery settings for Resolver and set it to <i>Unrestricted</i> / <i>No restrictions</i> (and on Samsung, leave it out of <i>Sleeping apps</i>).</p></div></div>
+    </div>
+    <figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/battery.webp" alt="Enable Background Mode" loading="lazy" width="412" height="892"></div></div><figcaption>Asked on first start.</figcaption></figure>
+</div>
+
+<h2 id="notifications">Notifications</h2>
+<div class="opts">
+    <dl class="opt"><dt>Progress<small>while a job runs</small></dt><dd>A quiet notification with the job and its steps (“Generating: Step 42 / 50”) and a progress bar. Tap it to open the app.</dd></dl>
+    <dl class="opt"><dt>Generation Complete<small>when the app is in the background</small></dt><dd>A notification (with vibration) when the images are in. ComfyUI jobs say “ComfyUI Generation Complete”.</dd></dl>
+    <dl class="opt"><dt>Live Update<small>Android 16 · Config → Experimental</small></dt><dd>Shows the progress as a Live Update chip in the status bar. On Samsung phones it also leaves an empty “1 more notification” entry; the app explains how to hide it (Settings › Notifications › Sort and filter notifications › Background activities).</dd></dl>
+    <dl class="opt"><dt>Notification icon<small>Config → Interface</small></dt><dd>The status-bar icon: Logo, Badge, Bold R or Sparkles.</dd></dl>
+</div>
+<p>On Android 13 and later, allow Resolver’s notifications when Android asks (or in the phone’s app settings), or you won’t see them.</p>
+
+<h2 id="closing">If you swipe the app away</h2>
+<p>Swiping Resolver out of the recent apps ends its progress notification, and the app can no longer collect that job’s images (Forge keeps generating unless told otherwise). Two settings decide what happens next:</p>
+<div class="opts">
+    <dl class="opt"><dt>Abort on close or disconnect<small>Config → Generation · off</small></dt><dd>On: Forge’s job is stopped too, when the app is swiped away, on the next start after the app closed or crashed mid-job, and once the connection is back after it was lost mid-job (it keeps trying for up to 10 minutes).</dd></dl>
+    <dl class="opt"><dt>The queue</dt><dd>Waiting jobs stay in the Queue tab; tap START BATCH to carry on.</dd></dl>
+</div>
+
+<h2 id="polling">Polling: how often the app asks</h2>
+<div class="opts">
+    <dl class="opt"><dt>Polling rate<small>200 ms</small></dt><dd>While the app is open: how often it asks for progress and the live preview. Lower is smoother but busier (50 ms at least).</dd></dl>
+    <dl class="opt"><dt>Background polling rate<small>4000 ms</small></dt><dd>While the app is in the background. Android slows timers then anyway, so faster than 500 ms gains nothing. Resolver also gets a regular tick from Android to catch up on late checks.</dd></dl>
+</div>
+<p class="muted">Both are in <span class="ui plain">Config → Generation</span>. If a problem only happens with the screen off, turn on the <a href="help.html#diagnostics">Debug Log</a> (it marks events with V when the app was in view and H when hidden).</p>
+
+</main>
+<script src="assets/js/lucide.js"></script>
+<script src="assets/js/site.js"></script>
+<script src="assets/js/docs.js"></script>
+</body>
+</html>

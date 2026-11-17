@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Analyze · Resolver Docs</title>
+<meta name="description" content="Read how an image was made, its prompt, LoRAs and settings, and reuse them on any model tab, or send the image to Inpaint, img2img, Upscale or ControlNet.">
+<link rel="icon" href="assets/img/favicon.png">
+<script>try{var t=localStorage.getItem('rdocs-theme'),a=localStorage.getItem('rdocs-accent');if(t&&t!=='system')document.documentElement.dataset.theme=t;if(a)document.documentElement.dataset.accent=a;}catch(e){}</script>
+<link rel="stylesheet" href="assets/css/docs.css">
+</head>
+<body data-page="analyze">
+<main class="content">
+
+<p class="crumbs"><a href="index.html">Docs</a> / Review</p>
+<h1>Analyze</h1>
+<p class="lead">Images made with Forge carry their prompt and settings inside the file. Analyze reads them, from your own images or ones you’ve downloaded, and puts them back to work with one tap.</p>
+
+<h2 id="open">Opening an image</h2>
+<ul>
+    <li><b>UPLOAD IMAGE</b> on the Analyze tab, or <span class="ui">RECENT</span> for images you analyzed before.</li>
+    <li>From the viewer: <span class="ui plain">Send → Analyze</span>.</li>
+    <li>It reads PNG files (their text chunks) and JPEG / WEBP files (the EXIF comment), the way Forge and Automatic1111 save them. Images without settings in them still show their size and can be sent on.</li>
+</ul>
+
+<h2 id="read">What it shows</h2>
+<div class="split">
+    <div>
+        <div class="opts">
+            <dl class="opt"><dt>Resolution · Ratio · Type · Size</dt><dd>The picture’s size in pixels, its shape (e.g. 3:4), file type and file size.</dd></dl>
+            <dl class="opt"><dt>Use In</dt><dd>Copies the prompt and negative <b>and</b> its settings (steps, CFG, sampler, schedule, width, height, seed) into a model tab, and opens it. Only your <a href="config.html#cfg-interface">visible tabs</a> are offered. A sampler or schedule your Forge doesn’t have is left out, and the message says so.</dd></dl>
+            <dl class="opt"><dt>Send image to</dt><dd>The picture itself to <b>INPAINT</b>, <b>IMG2IMG</b>, <b>UPSCALE</b>, or <b>CONTROLNET</b> (when ControlNet is on).</dd></dl>
+            <dl class="opt"><dt>Prompt · Negative</dt><dd>In colors, as the prompt boxes show them; long ones fold (<b>Show more</b>). <i data-lucide="copy" style="width:16px;height:16px;vertical-align:-3px"></i> copies.</dd></dl>
+            <dl class="opt"><dt>LoRAs</dt><dd>Each LoRA in the prompt as a chip, marked <b>not installed</b> if your Forge doesn’t have it.</dd></dl>
+            <dl class="opt"><dt>Settings</dt><dd>The main settings as chips; tap one to copy it. <b>More</b> shows the rest (model hash, Hi-Res, ADetailer, version…).</dd></dl>
+        </div>
+    </div>
+    <div class="col" style="display:flex;flex-direction:column;gap:18px">
+        <figure class="shot" style="margin:0"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/analyze.webp" alt="Analyze with an image" loading="lazy" width="412" height="892"></div></div><figcaption>An image opened in Analyze.</figcaption></figure>
+        <figure class="shot" style="margin:0"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/analyze-settings.webp" alt="Analyze: prompt and settings" loading="lazy" width="412" height="892"></div></div><figcaption>Its prompt, LoRAs and settings.</figcaption></figure>
+    </div>
+</div>
+<div class="callout note"><i data-lucide="layout-grid"></i><div><b>Forge Couple images</b><p>An image made with Forge Couple shows its background and each region in boxes of their own, and <b>Use In</b> puts them back into the regions.</p></div></div>
+
+<h2 id="sticky">The sticky bar</h2>
+<p>Scroll down to read a long prompt and a slim bar appears at the top: the thumbnail (tap to scroll back), <span class="ui">USE IN</span>, <span class="ui">SEND TO</span> and <i data-lucide="x" style="width:16px;height:16px;vertical-align:-3px"></i>. Turn it off in <span class="ui plain">Config → Inpaint &amp; Analyze → Analyzer sticky bar</span>.</p>
+
+<h2 id="tips">Good to know</h2>
+<ul>
+    <li>Analyze reads the file on the phone; the image isn’t uploaded anywhere (only Forge’s LoRA list is asked for, to mark missing LoRAs).</li>
+    <li>Many sites strip the settings from images when you download or share them; a file shared through a chat app often loses them too.</li>
+    <li>To keep the settings in an upscaled image, tick <b>Copy Metadata from Source</b> on <a href="inpaint.html#upscale">Upscale</a>.</li>
+    <li>To describe an image that has no settings, use <a href="magic-prompt.html#describe">Magic Prompt → Describe</a>.</li>
+</ul>
+
+</main>
+<script src="assets/js/lucide.js"></script>
+<script src="assets/js/site.js"></script>
+<script src="assets/js/docs.js"></script>
+</body>
+</html>

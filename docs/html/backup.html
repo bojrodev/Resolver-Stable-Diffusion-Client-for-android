@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Backup &amp; Restore · Resolver Docs</title>
+<meta name="description" content="Save your settings, styles, LoRA data, wildcards, presets, Comfy templates and favorite images to a file, restore them, and clean up old model data.">
+<link rel="icon" href="assets/img/favicon.png">
+<script>try{var t=localStorage.getItem('rdocs-theme'),a=localStorage.getItem('rdocs-accent');if(t&&t!=='system')document.documentElement.dataset.theme=t;if(a)document.documentElement.dataset.accent=a;}catch(e){}</script>
+<link rel="stylesheet" href="assets/css/docs.css">
+</head>
+<body data-page="backup">
+<main class="content">
+
+<p class="crumbs"><a href="index.html">Docs</a> / Settings</p>
+<h1>Backup &amp; Restore</h1>
+<p class="lead">Your styles, LoRA settings, wildcards and favorites live on the phone. A backup keeps them safe, and moves them to a new phone or a fresh install.</p>
+
+<h2 id="backup">Making a backup</h2>
+<div class="split">
+    <div>
+        <p><span class="ui plain">Config → System Settings → BACK UP</span> lists the parts; tick the ones you want and confirm. The file goes to the phone’s <b>Documents</b> folder. A part you have nothing for yet (no Civitai key, no favorites) is greyed out.</p>
+        <div class="opts">
+            <dl class="opt"><dt>Civitai API Key</dt><dd>Saved as plain text in the backup, so it starts unticked.</dd></dl>
+            <dl class="opt"><dt>Comfy Templates</dt><dd>Your saved ComfyUI workflows.</dd></dl>
+            <dl class="opt"><dt>History Favorites</dt><dd>Your favorite images themselves, with what History keeps about them. Starts unticked, as it can be large.</dd></dl>
+            <dl class="opt"><dt>LoRA Data</dt><dd>Settings, names, thumbnails, variants and groups.</dd></dl>
+            <dl class="opt"><dt>Presets</dt><dd>img2img presets and favorites.</dd></dl>
+            <dl class="opt"><dt>Settings</dt><dd>Every app option (Config, each tab’s saved values and defaults, Checkpoint Manager…).</dd></dl>
+            <dl class="opt"><dt>Styles</dt><dd>Styles, favorites and thumbnails (and Forge Couple layouts).</dd></dl>
+            <dl class="opt"><dt>Wildcards</dt><dd>Wildcards, favorites, groups and library links.</dd></dl>
+        </div>
+    </div>
+    <figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/backup.webp" alt="The Back Up window" loading="lazy" width="412" height="892"></div></div><figcaption>BACK UP: tick the parts.</figcaption></figure>
+</div>
+
+<h3 id="files">What you get</h3>
+<p>Tick parts to see the file the app makes:</p>
+<div class="card" data-widget="backup">
+    <div class="bk">
+        <div class="bk-parts">
+            <label><input type="checkbox" value="civitai"><b>Civitai API Key</b><small>Plain text in the backup</small></label>
+            <label><input type="checkbox" value="comfy" checked><b>Comfy Templates</b><small>Saved ComfyUI workflows</small></label>
+            <label><input type="checkbox" value="favs"><b>History Favorites</b><small>Favorite images</small></label>
+            <label><input type="checkbox" value="lora" checked><b>LoRA Data</b><small>Settings, names, thumbnails, variants, groups</small></label>
+            <label><input type="checkbox" value="presets" checked><b>Presets</b><small>img2img presets and favorites</small></label>
+            <label><input type="checkbox" value="settings" checked><b>Settings</b><small>Every app option</small></label>
+            <label><input type="checkbox" value="styles" checked><b>Styles</b><small>Styles, favorites and thumbnails</small></label>
+            <label><input type="checkbox" value="wildcards" checked><b>Wildcards</b><small>Wildcards, favorites, groups and library links</small></label>
+        </div>
+        <div>
+            <p class="lbl" style="margin:0 0 8px">Saved to Documents</p>
+            <ul class="bk-files" aria-live="polite"></ul>
+            <p class="bk-note muted" style="font-size:14px;margin:12px 0 0"></p>
+        </div>
+    </div>
+</div>
+
+<h2 id="restore">Restoring</h2>
+<ol class="steps">
+    <li><b>Tap RESTORE</b><span class="muted"><span class="ui plain">Config → System Settings → RESTORE</span>, and choose a backup file (a .zip or a single part’s file).</span></li>
+    <li><b>Pick the parts</b><span class="muted">The app shows what the file holds and when it was made; tick what to bring back.</span></li>
+    <li><b>Done</b><span class="muted">Each part is restored on its own, so one that fails doesn’t stop the rest; the message lists any that couldn’t be. Older Resolver backups work too.</span></li>
+</ol>
+
+<h3 id="not-included">Not in a backup</h3>
+<ul>
+    <li>Your <b>History</b> other than favorites (use Download or Auto-Save to keep images).</li>
+    <li>The queue, recent lists (prompts, uploads) and caches.</li>
+    <li>Anything on your PC: checkpoints, LoRA files, Forge’s own settings.</li>
+</ul>
+
+<h2 id="cleanup">Clean up model data</h2>
+<p>Deleted some LoRAs or checkpoints on the PC? The app still keeps their settings and thumbnails. <span class="ui plain">Config → System Settings → CLEAN UP MODEL DATA</span> asks Forge for its current lists, shows what belongs to files that are gone (and thumbnails of styles you deleted), and clears it once you confirm. It never guesses: if Forge’s list can’t be read, nothing is removed.</p>
+
+<h2 id="reset">Reset app configuration</h2>
+<p><span class="ui plain">RESET APP CONFIGURATION</span> sets every Config option back to its default and puts the example wildcards back. Your server connections, prompts, History, styles, LoRAs, presets and other saved content are kept, and so is an installed app update. Make a backup first if you want to return to your settings.</p>
+
+</main>
+<script src="assets/js/lucide.js"></script>
+<script src="assets/js/site.js"></script>
+<script src="assets/js/docs.js"></script>
+</body>
+</html>

@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LoRAs &amp; Styles · Resolver Docs</title>
+<meta name="description" content="Adding LoRAs, their settings, weights, sliders, variants, groups and folders; and Styles, saved prompt presets.">
+<link rel="icon" href="assets/img/favicon.png">
+<script>try{var t=localStorage.getItem('rdocs-theme'),a=localStorage.getItem('rdocs-accent');if(t&&t!=='system')document.documentElement.dataset.theme=t;if(a)document.documentElement.dataset.accent=a;}catch(e){}</script>
+<link rel="stylesheet" href="assets/css/docs.css">
+</head>
+<body data-page="loras-styles">
+<main class="content">
+
+<p class="crumbs"><a href="index.html">Docs</a> / Create</p>
+<h1>LoRAs &amp; Styles</h1>
+<p class="lead">LoRAs are small add-on files that teach a model a character, an outfit or a look. Styles are prompt snippets you save once and tap in whenever you want them. Both live one tap below the prompt box.</p>
+
+<h2 id="loras">The LoRA window</h2>
+<p>Tap <span class="ui">+ LORA</span> under the prompt. Every LoRA on your PC is listed with its thumbnail. Tap a number to see what each part does:</p>
+<div class="hotspots" data-widget="hotspots">
+    <div class="phone"><div class="screen"><img src="assets/img/shots/lora-modal.webp" alt="The Select LoRA window" width="412" height="892"></div></div>
+    <ol class="hs-list">
+        <li data-x="54.6" data-y="11.1"><b>New group</b><span class="more">Puts several LoRAs under one header; only one of them is in the prompt at a time. <a href="#groups">Groups</a>.</span></li>
+        <li data-x="65.7" data-y="11.1"><b>Manage folders</b><span class="more">Your LoRA folders on the PC. Tap a heart to add a folder to the filter bar.</span></li>
+        <li data-x="76.8" data-y="11.1"><b>Open all</b><span class="more">Opens or closes every group and variant list at once.</span></li>
+        <li data-x="25" data-y="18"><b>Search</b><span class="more">Finds LoRAs by name. Searches go by whole words, in any order.</span></li>
+        <li data-x="66.9" data-y="18"><b>Search prompts and variants too</b><span class="more">Also matches a LoRA’s trigger words, negatives, variants, slider names and file names.</span></li>
+        <li data-x="74.8" data-y="18"><b>Search by type</b><span class="more">Shows only one Type: Artstyle, Background, Character, Character pack, Clothing, Concept or Other.</span></li>
+        <li data-x="87" data-y="18"><b>Sort</b><span class="more">A–Z, Recently added, Recently used or Most used. The window remembers your choice.</span></li>
+        <li data-x="20.2" data-y="24"><b>Model filter</b><span class="more">Shows the LoRAs for this tab’s model (here SDXL, 12 of them). Folders you’ve hearted appear as more chips; swipe sideways to move between them.</span></li>
+        <li data-x="41" data-y="24"><b>Favorites</b><span class="more">Only your starred LoRAs.</span></li>
+        <li data-x="88.3" data-y="24"><b>Refresh</b><span class="more">Reloads the list from Forge after you’ve added LoRA files on the PC.</span></li>
+        <li data-x="40" data-y="33.3"><b>A LoRA</b><span class="more">Tap to add it to the prompt; tap again to take it out. One already in the prompt has an accent border (like this one).</span></li>
+        <li data-x="82.5" data-y="31.1"><b>Star</b><span class="more">Marks it as a favorite.</span></li>
+        <li data-x="82.5" data-y="35.4"><b>Settings</b><span class="more">This LoRA’s weight, trigger words, Type, slider, variants and overrides. <a href="#settings">Below</a>.</span></li>
+        <li data-x="50" data-y="74.6"><b>random:: / order::</b><span class="more">A reminder: type <code>random::artstyle</code> in a prompt to pick one LoRA of that Type for each image. <a href="#types">Types</a>.</span></li>
+    </ol>
+</div>
+
+<h3 id="add">Adding and removing</h3>
+<ul>
+    <li><b>Tap a LoRA</b> to add its tag, <code>&lt;lora:name:weight&gt;</code>, to the prompt at its preferred weight, together with its trigger words (and its negatives in the Negative box).</li>
+    <li><b>Tap it again</b> (or delete its tag) to take it out: its trigger words and negatives go too, unless another LoRA, style or your default prompt also uses them.</li>
+    <li>LoRAs you paste or bring in from <b>Analyze</b> work the same way, and a tag in different capitals is still recognised.</li>
+</ul>
+
+<h3 id="tag">How the tag works</h3>
+<p>The number in the tag is the <b>weight</b>: how strongly the LoRA applies. Try it:</p>
+<div class="card" data-widget="loratag">
+    <div class="lt-row">
+        <div class="field"><label for="ltName">LoRA</label><select id="ltName"><option>detailTweaker_xl</option><option>watercolor_style</option><option>aria_character_v2</option><option>cinematic_lighting</option></select></div>
+        <div class="field"><label for="ltW">Weight <span class="lt-val" style="color:var(--accent)"></span></label><input id="ltW" type="range" min="-1" max="2" step="0.05" value="0.8"></div>
+        <label class="check" style="flex:0 0 auto;margin:0"><input type="checkbox" checked><span style="text-decoration:none">With trigger words</span></label>
+    </div>
+    <div class="prompt-demo lt-out" style="margin-top:14px" aria-live="polite"></div>
+    <p class="lt-hint"></p>
+</div>
+
+<h2 id="settings">A LoRA’s settings</h2>
+<div class="split">
+    <div>
+        <p>Tap the <i data-lucide="sliders-horizontal" style="width:16px;height:16px;vertical-align:-3px"></i> button on a LoRA. Changes apply the next time you add it.</p>
+        <div class="opts">
+            <dl class="opt"><dt>Preferred Weight</dt><dd>The weight it’s added at.</dd></dl>
+            <dl class="opt"><dt>Prompt</dt><dd>Its trigger words, added with it. Each LoRA’s page on Civitai usually lists them.</dd></dl>
+            <dl class="opt"><dt>Thumbnail</dt><dd>Tap the picture to choose your own, or use your last generated image.</dd></dl>
+            <dl class="opt"><dt>Link to ADetailer</dt><dd>On by default: when an ADetailer pass has <b>LoRA link</b> on, this LoRA’s tag is also used for that pass (the tag only, not its trigger words).</dd></dl>
+            <dl class="opt"><dt>Type</dt><dd>Artstyle, Background, Character, Character pack, Clothing, Concept or Other. Used by the type filter and by <code>random::</code>. <a href="#types">More</a>.</dd></dl>
+            <dl class="opt"><dt>Slider</dt><dd>Shows a weight slider under the prompt while this LoRA is in it. <a href="#sliders">More</a>.</dd></dl>
+            <dl class="opt"><dt>Variants</dt><dd>Turns on alternative versions of this LoRA. <a href="#variants">More</a>.</dd></dl>
+            <dl class="opt"><dt>Overrides<small>Sampler · Schedule · Steps · CFG · Negative</small></dt><dd>Settings this LoRA needs, put in when you add it: e.g. a Lightning LoRA’s 6 steps and CFG 1.5. They win over the checkpoint’s defaults; with several LoRAs, the last one added wins. <b>Negative</b>: tags added to the Negative box with it.</dd></dl>
+        </div>
+    </div>
+    <div class="col" style="display:flex;flex-direction:column;gap:18px">
+        <figure class="shot" style="margin:0"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/lora-settings.webp" alt="A LoRA's settings" loading="lazy" width="412" height="892"></div></div><figcaption>A LoRA’s settings.</figcaption></figure>
+        <figure class="shot" style="margin:0"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/lora-overrides.webp" alt="LoRA overrides" loading="lazy" width="412" height="892"></div></div><figcaption>With Overrides open.</figcaption></figure>
+    </div>
+</div>
+
+<h2 id="types">Types and random picks</h2>
+<p>Giving LoRAs a <b>Type</b> lets the app choose among them for you. In a prompt:</p>
+<div class="opts">
+    <dl class="opt"><dt><code>random::artstyle</code></dt><dd>Picks one Artstyle LoRA at random, for each image.</dd></dl>
+    <dl class="opt"><dt><code>order::character</code></dt><dd>Goes through your Character LoRAs one after another, image by image.</dd></dl>
+</div>
+<p>The same works for every Type (<code>background</code>, <code>clothing</code>, <code>concept</code>…). A <b>Character pack</b> (one LoRA holding many characters as variants) counts as characters, each variant its own.</p>
+
+<h3 id="sliders">Weight sliders</h3>
+<p>For a LoRA with <b>Slider</b> on, a slider appears under the prompt box while its tag is there. Drag it and the number in the tag follows; edit the tag and the slider follows.</p>
+<p>With Forge Couple, <span class="ui plain">Config → Extensions → Show Forge Couple → Sliders for all LoRAs</span> gives <b>every</b> LoRA in the prompt a slider while Forge Couple is on for that tab, handy for balancing LoRAs between regions.</p>
+
+<h3 id="variants">Variants</h3>
+<p>Alternative versions of one LoRA: an outfit, a hairstyle, a pose. Each variant has its own <b>name</b>, <b>weight</b>, <b>prompt</b> (trigger words), <b>additional negative prompts</b> and <b>thumbnail</b> (choose a file or use the last image). They appear under the LoRA’s row; tap one to use that version.</p>
+
+<h3 id="groups">Groups</h3>
+<p>Tap <i data-lucide="layers-plus" style="width:16px;height:16px;vertical-align:-3px"></i> <b>New group</b> to put LoRAs under one header, for example several characters from one series. Only one LoRA of a group is in the prompt at a time (sliders excepted). A group has its own name, thumbnail and <b>Type</b> shared by its LoRAs, <b>ADD LORAS</b> to fill it, <b>Hide Parents</b> to hide the LoRAs from the main list, and <b>Ungroup</b>.</p>
+
+<h3 id="folders">Folders and favorites</h3>
+<ul>
+    <li><b>Folders:</b> the folders your LoRAs are in on the PC. Open <i data-lucide="folder" style="width:16px;height:16px;vertical-align:-3px"></i> <b>Manage folders</b> and tap a heart to pin a folder to the filter bar.</li>
+    <li><b>Favorites:</b> the star on a row; the star chip shows only those.</li>
+</ul>
+
+<h2 id="styles">Styles</h2>
+<div class="split">
+    <div>
+        <p>A style is a saved bit of prompt (and negative), like “Cinematic” or “Watercolor”. Tap <span class="ui">STYLES</span> under the prompt, then tap a style to add it; tap it again to take it out.</p>
+        <ul>
+            <li>A style whose text is all in the boxes shows as <b>applied</b>; one only partly there is outlined with dashes.</li>
+            <li>Styles work on <b>img2img</b> too (LoRA · STYLES · PRESETS).</li>
+            <li><code>random::style</code> in a prompt picks a style for each image; <code>order::style</code> goes through them in turn. <code>style::NAME</code> adds one style for that image only.</li>
+        </ul>
+        <div class="opts">
+            <dl class="opt"><dt><i data-lucide="plus" style="width:16px;height:16px;vertical-align:-3px"></i> New style</dt><dd>Opens the editor for a new one.</dd></dl>
+            <dl class="opt"><dt><i data-lucide="refresh-cw" style="width:16px;height:16px;vertical-align:-3px"></i> Fetch from server</dt><dd>Brings in the styles saved in Forge.</dd></dl>
+            <dl class="opt"><dt>Forge Couple styles</dt><dd>When Forge Couple is on: shows only styles that hold a region layout.</dd></dl>
+            <dl class="opt"><dt>Search · ★ · Sort</dt><dd>Search by name (or prompts too, with the button in the box), show favorites, and sort as in the LoRA window.</dd></dl>
+        </div>
+    </div>
+    <figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/styles-modal.webp" alt="The Styles window" loading="lazy" width="412" height="892"></div></div><figcaption>The Styles window.</figcaption></figure>
+</div>
+
+<h3 id="style-editor">Making and editing a style</h3>
+<div class="split flip">
+    <div>
+        <p>Tap <i data-lucide="plus" style="width:16px;height:16px;vertical-align:-3px"></i> for a new style, or a style’s pencil to edit it.</p>
+        <div class="opts">
+            <dl class="opt"><dt>Thumbnail</dt><dd>Tap the picture to choose one, or <b>USE LAST IMAGE</b>.</dd></dl>
+            <dl class="opt"><dt>Name</dt><dd>Must be unique; a name already in use is refused.</dd></dl>
+            <dl class="opt"><dt>Include in random::style</dt><dd>Off: <code>random::style</code> and <code>order::style</code> skip this one.</dd></dl>
+            <dl class="opt"><dt>Prompt · Negative</dt><dd>The text it adds to each box.</dd></dl>
+            <dl class="opt"><dt>COPY FROM CURRENT TAB</dt><dd>Fills the style from what’s in the tab’s boxes right now.</dd></dl>
+            <dl class="opt"><dt>Layout <small>Forge Couple</small></dt><dd>With Forge Couple on, a style can also save regions: BASIC or ADVANCED, direction, background and each region’s text. See <a href="extensions.html#forge-couple">Forge Couple</a>.</dd></dl>
+            <dl class="opt"><dt><i data-lucide="trash-2" style="width:16px;height:16px;vertical-align:-3px"></i> Delete</dt><dd>Removes the style.</dd></dl>
+        </div>
+    </div>
+    <figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/style-editor.webp" alt="The style editor" loading="lazy" width="412" height="892"></div></div><figcaption>Editing a style.</figcaption></figure>
+</div>
+<div class="callout tip"><i data-lucide="archive"></i><div><b>Back them up</b><p>Styles, LoRA settings, variants and groups live on your phone. <span class="ui plain">Config → System Settings → BACK UP</span> saves them all to a file.</p></div></div>
+
+</main>
+<script src="assets/js/lucide.js"></script>
+<script src="assets/js/site.js"></script>
+<script src="assets/js/docs.js"></script>
+</body>
+</html>

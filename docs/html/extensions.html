@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Extensions · Resolver Docs</title>
+<meta name="description" content="ADetailer, ControlNet, Forge Couple, Tag autocomplete and Progress Bridge in Resolver.">
+<link rel="icon" href="assets/img/favicon.png">
+<script>try{var t=localStorage.getItem('rdocs-theme'),a=localStorage.getItem('rdocs-accent');if(t&&t!=='system')document.documentElement.dataset.theme=t;if(a)document.documentElement.dataset.accent=a;}catch(e){}</script>
+<link rel="stylesheet" href="assets/css/docs.css">
+</head>
+<body data-page="extensions">
+<main class="content">
+
+<p class="crumbs"><a href="index.html">Docs</a> / Create</p>
+<h1>Extensions</h1>
+<p class="lead">Forge can be extended with add-ons that fix faces, follow a pose, or describe parts of the picture separately. Resolver has controls for the popular ones; switch them on once they’re installed in Forge.</p>
+
+<h2 id="overview">Which ones, and where to switch them on</h2>
+<div class="tbl-wrap"><table class="tbl">
+    <thead><tr><th>Extension</th><th>What it’s for</th><th>Needs in Forge</th><th>Switch on in Config → Extensions</th></tr></thead>
+    <tbody>
+        <tr><td><a href="#adetailer"><b>ADetailer</b></a></td><td>Finds faces, hands or people and redraws them in detail</td><td>ADetailer</td><td>Show ADetailer [SDXL/Anima] · [other]</td></tr>
+        <tr><td><a href="#controlnet"><b>ControlNet</b></a></td><td>Follows a pose, outline or depth from a reference image</td><td>ControlNet (built into Forge)</td><td>Show ControlNet [SDXL/Anima] · [other] is in Experimental</td></tr>
+        <tr><td><a href="#forge-couple"><b>Forge Couple</b></a></td><td>Different prompts for different parts of the picture</td><td><a href="https://github.com/Haoming02/sd-forge-couple" target="_blank" rel="noopener">sd-forge-couple</a></td><td>Show Forge Couple</td></tr>
+        <tr><td><a href="#tagcomplete"><b>Tag autocomplete</b></a></td><td>Suggests tags as you type</td><td><a href="https://github.com/eduardoabreu81/sd-webui-tagcomplete-neo" target="_blank" rel="noopener">TagComplete Neo</a></td><td>Tag autocomplete</td></tr>
+        <tr><td><a href="#progress-bridge"><b>Progress Bridge</b></a></td><td>Real progress for ADetailer and upscaling</td><td><a href="https://github.com/Bungles/forge-neo-progress-bridge" target="_blank" rel="noopener">forge-neo-progress-bridge</a></td><td>Progress Bridge</td></tr>
+    </tbody>
+</table></div>
+<div class="callout note"><i data-lucide="info"></i><div><b>“[SDXL/Anima]” and “[other]”</b><p>The switches come in pairs: one for the SDXL and Anima tabs, and one for Qwen, Flux and Krea. Turn on only what your models support. Some switches ask first, reminding you the extension must be installed on your Forge.</p></div></div>
+<figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/fc-confirm.webp" alt="Turning Forge Couple on asks first" loading="lazy" width="412" height="892"></div></div><figcaption>Turning a feature on can ask first.</figcaption></figure>
+
+<h2 id="adetailer">ADetailer</h2>
+<p>Small faces and hands often come out blurry or wrong. ADetailer looks for them after the picture is made and redraws just those areas at a higher detail, like an automatic touch-up. It runs as part of the same job.</p>
+<div class="split">
+    <div>
+        <p>Turn it on with the switch in its header. It has up to <b>4 passes</b> (8 with <span class="ui plain">Show extra ADetailer passes</span>), each with a tick box: for example pass 1 for faces and pass 2 for hands.</p>
+        <div class="opts">
+            <dl class="opt"><dt>Detection Model</dt><dd>What to look for. See the table below.</dd></dl>
+            <dl class="opt"><dt>Confidence<small>0.30</small></dt><dd>How sure it must be that it found one. Lower finds more (and more mistakes).</dd></dl>
+            <dl class="opt"><dt>Denoise<small>0.40</small></dt><dd>How much the area may change. The − / + buttons nudge it by 0.01.</dd></dl>
+            <dl class="opt"><dt>Max Masks<small>All</small></dt><dd>Fix at most this many (e.g. only the biggest face).</dd></dl>
+            <dl class="opt"><dt>Mask Blur · Padding<small>4 · 32</small></dt><dd>Softens the edge of the fixed area, and how much surrounding picture it sees.</dd></dl>
+        </div>
+    </div>
+    <figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/gen-adetailer.webp" alt="ADetailer settings" loading="lazy" width="412" height="892"></div></div><figcaption>ADetailer, pass 1 on.</figcaption></figure>
+</div>
+<div class="tbl-wrap"><table class="tbl">
+    <thead><tr><th>Detection model</th><th>Finds</th></tr></thead>
+    <tbody>
+        <tr><td><code>face_yolov8n</code> · <code>face_yolov8s</code></td><td>Faces (n is faster, s more accurate). The usual choice.</td></tr>
+        <tr><td><code>hand_yolov8n</code> · <code>hand_yolov8s</code></td><td>Hands.</td></tr>
+        <tr><td><code>person_yolov8n-seg</code> · <code>person_yolov8s-seg</code></td><td>Whole people, following their outline.</td></tr>
+        <tr><td><code>mediapipe_face_full</code> · <code>_short</code> · <code>_mesh</code></td><td>Faces by another method (close-ups, or the face’s exact shape with mesh).</td></tr>
+    </tbody>
+</table></div>
+<p class="muted" style="font-size:14px">The list comes from your Forge when connected, so models you’ve added there appear too.</p>
+
+<h3 id="adetailer-more">A pass’s More Settings</h3>
+<div class="split flip">
+    <div>
+        <div class="opts">
+            <dl class="opt"><dt>Mask filter</dt><dd>With Max Masks set, which ones to keep: the biggest (<b>AREA</b>) or the surest (<b>CONFIDENCE</b>).</dd></dl>
+            <dl class="opt"><dt>Mask merge</dt><dd><b>NONE</b>: fix each separately. <b>MERGE</b>: all at once as one area. <b>MERGE + INVERT</b>: everything except them.</dd></dl>
+            <dl class="opt"><dt>Inpaint only masked</dt><dd>Redraws just the area, at full detail (on by default).</dd></dl>
+            <dl class="opt"><dt>LoRA link</dt><dd>Adds the main prompt’s LoRA tags to this pass, for LoRAs with <a href="loras-styles.html#settings">Link to ADetailer</a> on. Keeps a character LoRA’s face when it’s redrawn.</dd></dl>
+            <dl class="opt"><dt>Prompt · Negative</dt><dd>What this pass draws, e.g. <code>detailed eyes, smile</code>. If blank, the main prompt is used. Each has save-as-default, reload-default and clear buttons.</dd></dl>
+            <dl class="opt"><dt>ControlNet <small>ControlNet [ADetailer]</small></dt><dd>Guides the redraw with ControlNet: Model, Preprocessor, Weight (0–1) and Guidance range.</dd></dl>
+        </div>
+    </div>
+    <figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/gen-adetailer-more.webp" alt="ADetailer More Settings" loading="lazy" width="412" height="892"></div></div><figcaption>More Settings, with ControlNet.</figcaption></figure>
+</div>
+
+<h3 id="adetailer-models">ADetailer Model Settings</h3>
+<div class="split">
+    <div>
+        <p>In <span class="ui plain">Config → Extensions → ADetailer model settings → MANAGE</span>:</p>
+        <ul>
+            <li><b>Chip names:</b> a short name for each detection model, shown on its pass chip (“Face”, “Hands”) instead of the file name. <b>Show chip names</b> turns them on.</li>
+            <li><b>Toast text:</b> what the progress message says during that pass. Needs <a href="#progress-bridge">Progress Bridge</a>.</li>
+            <li><b>ADD MODEL</b> adds a model to the list.</li>
+        </ul>
+        <p>The progress notification also tells you what ADetailer is doing, e.g. <code>SDXL: 50/62 [1 face]</code>.</p>
+    </div>
+    <figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/adetailer-labels.webp" alt="ADetailer Model Settings" loading="lazy" width="412" height="892"></div></div><figcaption>ADetailer Model Settings.</figcaption></figure>
+</div>
+
+<h2 id="controlnet">ControlNet</h2>
+<div class="split">
+    <div>
+        <p>ControlNet makes the picture follow something from a reference image: a pose, the outlines, the depth. Upload a photo of someone waving and get a knight waving the same way.</p>
+        <p>There are <b>3 units</b> you can combine (e.g. pose + depth). Units 2 and 3 use unit 1’s image if you leave theirs empty.</p>
+        <div class="opts">
+            <dl class="opt"><dt>Control Image</dt><dd><b>UPLOAD IMAGE</b> picks the reference. The ✕ removes it.</dd></dl>
+            <dl class="opt"><dt>Control Type</dt><dd>Canny (outlines), Depth, OpenPose (pose)… Narrows the Model and Preprocessor lists to ones that fit.</dd></dl>
+            <dl class="opt"><dt>Preprocessor</dt><dd>Turns your image into the guide: e.g. <code>openpose_full</code> finds the skeleton, <code>canny</code> the edges. <code>none</code> if your image already is a guide.</dd></dl>
+            <dl class="opt"><dt>Model</dt><dd>The ControlNet model matching the type and your checkpoint family.</dd></dl>
+            <dl class="opt"><dt>Resolution</dt><dd>The size the preprocessor works at (512 by default; 64–2048).</dd></dl>
+            <dl class="opt"><dt>Weight<small>0–2</small></dt><dd>How strongly to follow the guide.</dd></dl>
+            <dl class="opt"><dt>Guidance Start · End</dt><dd>Which part of the steps it applies to (0 to 1 = all). Ending early leaves the model freer for details.</dd></dl>
+            <dl class="opt"><dt>Resize Mode</dt><dd>When the image isn’t the picture’s shape: Just Resize (stretch), Crop and Resize (inner fit), or Resize and Fill (outer fit).</dd></dl>
+            <dl class="opt"><dt>Control Mode</dt><dd>Balanced, My prompt is more important, or ControlNet is more important.</dd></dl>
+            <dl class="opt"><dt>Low · High Threshold</dt><dd>For Canny: which edges count (lower finds more lines).</dd></dl>
+        </div>
+    </div>
+    <figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/gen-controlnet.webp" alt="ControlNet settings" loading="lazy" width="412" height="892"></div></div><figcaption>ControlNet, unit 1.</figcaption></figure>
+</div>
+
+<h2 id="forge-couple">Forge Couple</h2>
+<p>One prompt describes the whole picture, so with two characters their details mix (both get red hair). Forge Couple splits the picture into <b>regions</b>, each with its own prompt. On the SDXL and Anima tabs.</p>
+<div class="callout note"><i data-lucide="layout-panel-left"></i><div><b>How the prompts fit together</b><p>With Forge Couple on, the main prompt box becomes the <b>background</b> (it shows a BACKGROUND tag): the scene and anything shared. Region boxes appear under it, one per region: who or what is there.</p></div></div>
+<h3 id="couple-try">Try a layout</h3>
+<div class="card" data-widget="couple">
+    <div class="fc-wrap">
+        <div class="fc-area" aria-hidden="true"></div>
+        <div>
+            <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:12px">
+                <div class="seg"><button data-dir="h">SIDE BY SIDE</button><button data-dir="v">STACKED</button></div>
+                <div class="seg"><button data-n="2">2</button><button data-n="3">3</button><button data-n="4">4</button></div>
+            </div>
+            <div class="field" style="margin:0"><label for="fcBw">Background weight <span class="fc-bwv" style="color:var(--accent)"></span></label><input id="fcBw" type="range" min="0.1" max="1.5" step="0.05" value="0.5"></div>
+            <ul class="fc-legend"></ul>
+        </div>
+    </div>
+</div>
+
+<h3 id="couple-basic">BASIC</h3>
+<div class="split">
+    <div>
+        <ul>
+            <li><b>Direction:</b> <b>SIDE BY SIDE</b> (columns, Left / Right) or <b>STACKED</b> (rows, Top / Bottom). Each region gets an equal share.</li>
+            <li><b>Region boxes</b> under the prompt: write each region’s prompt. <b>+ REGION</b> adds another, the bin clears one, and the arrows between two boxes swap them.</li>
+            <li><b>Background Weight</b> (0.1–1.5, 0.5): how much the background prompt counts against the regions.</li>
+            <li><b>Also during Hi-Res Fix:</b> keeps the regions in the second pass.</li>
+        </ul>
+    </div>
+    <figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/gen-forgecouple.webp" alt="Forge Couple region boxes under the prompt" loading="lazy" width="412" height="892"></div></div><figcaption>Region boxes under the prompt.</figcaption></figure>
+</div>
+
+<h3 id="couple-advanced">ADVANCED</h3>
+<div class="split flip">
+    <div>
+        <p>Draw the regions yourself, any size, overlapping or not.</p>
+        <ul>
+            <li><b>Drag</b> a region to move it, its <b>corners</b> to resize it. <b>RESET</b> goes back to the even split.</li>
+            <li>Each region shows where it is (“0–50% across • full height”) and has its own <b>Weight</b>.</li>
+            <li>Tap a region in the list to select it on the canvas.</li>
+        </ul>
+        <div class="callout tip"><i data-lucide="palette"></i><div><b>Save a layout as a style</b><p>A style can hold a whole Forge Couple layout: mode, direction, background and every region. See <a href="loras-styles.html#style-editor">Styles</a>. Prompt history keeps regions too.</p></div></div>
+    </div>
+    <figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/gen-forgecouple-adv.webp" alt="Forge Couple advanced mode" loading="lazy" width="412" height="892"></div></div><figcaption>ADVANCED: drawn regions.</figcaption></figure>
+</div>
+
+<h2 id="tagcomplete">Tag autocomplete</h2>
+<p>With the TagComplete Neo extension on your Forge, Resolver suggests tags as you type in a prompt box (Danbooru-style tags, your LoRAs and embeddings). Turn it on with <span class="ui plain">Config → Extensions → Tag autocomplete</span>; <b>Tag file</b> and <b>Extra file</b> choose which tag lists to use (“Same as server” follows the extension’s own setting). Off by default.</p>
+
+<h2 id="progress-bridge">Progress Bridge</h2>
+<p>Normally Forge reports progress for the main steps only, so ADetailer and upscaling look stuck at the end. The <b>forge-neo-progress-bridge</b> extension reports them too, and with <span class="ui plain">Config → Extensions → Progress Bridge</span> on, Resolver shows that real progress (and your ADetailer toast texts).</p>
+
+</main>
+<script src="assets/js/lucide.js"></script>
+<script src="assets/js/site.js"></script>
+<script src="assets/js/docs.js"></script>
+</body>
+</html>

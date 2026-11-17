@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wildcards · Resolver Docs</title>
+<meta name="description" content="Random picks for every image: __name__, choices, weights, labels, conditions and rules, the Wildcards window and editor, TRY and CHECK, reroll, import and export.">
+<link rel="icon" href="assets/img/favicon.png">
+<script>try{var t=localStorage.getItem('rdocs-theme'),a=localStorage.getItem('rdocs-accent');if(t&&t!=='system')document.documentElement.dataset.theme=t;if(a)document.documentElement.dataset.accent=a;}catch(e){}</script>
+<link rel="stylesheet" href="assets/css/docs.css">
+</head>
+<body data-page="wildcards">
+<main class="content">
+
+<p class="crumbs"><a href="index.html">Docs</a> / Create</p>
+<h1>Wildcards</h1>
+<p class="lead">A wildcard is a list of options with a name. Write <span data-pc="__hair color__"></span> in a prompt, and each image picks one of them, so a batch gives you variety without editing the prompt.</p>
+
+<h2 id="basics">How they work</h2>
+<ol class="steps">
+    <li><b>Write its name between double underscores</b><span class="muted">Anywhere in a prompt or negative: <code>1girl, __hair color__, __casual outfits__</code>. A name with spaces works as typed (<code>__hair color__</code> is the same as <code>__hair_color__</code>).</span></li>
+    <li><b>Generate</b><span class="muted">Each image picks its own options. With <b>Batch Count</b> 4 you get four different combinations.</span></li>
+    <li><b>See what was picked</b><span class="muted">The picks are saved with each image: open it in the viewer and use <span class="ui plain">Send → Wildcards</span> to keep some and <a href="#reroll">reroll</a> the rest.</span></li>
+</ol>
+<div class="callout tip"><i data-lucide="gift"></i><div><b>A starter set is included</b><p>Resolver comes with about 150 wildcards from the Bungles SFW library: hair, outfits, expressions, poses, places, lighting, weather… <span data-pc="__starter scene__"></span> uses them all: put it after your subject for a whole picture. Reset App Configuration puts them back if you change them.</p></div></div>
+
+<h2 id="try">Try it</h2>
+<p>These four small wildcards are editable. Pick an example or write your own prompt, then <b>Generate</b>: it runs the <b>app’s own wildcard engine</b>, so the picks follow the same rules as on your phone.</p>
+<div class="card play" data-widget="wcsim">
+    <div class="wc-libs"></div>
+    <div class="ex-btns" role="group" aria-label="Examples">
+        <button data-ex="1girl, __hair color__, {red|blue|green} dress" aria-pressed="true">Pick one</button>
+        <button data-ex="1girl, {2$$hat|scarf|gloves}, {glasses|}">Several / sometimes</button>
+        <button data-ex="1girl, __places[indoor]__">Only indoor</button>
+        <button data-ex="1girl, __pose__, __mood__, __places__">Only if…</button>
+        <button data-ex="${hair=!__hair color__}1girl, ${hair}, portrait, a doll with ${hair}">Same pick twice</button>
+        <button data-ex="1girl, __eye color__">Missing name</button>
+    </div>
+    <div class="row"><input type="text" class="wc-prompt" value="1girl, __hair color__, {red|blue|green} dress" aria-label="Prompt with wildcards" style="flex:1 1 280px" spellcheck="false">
+        <select class="wc-n" aria-label="Images" style="height:46px;border-radius:12px;border:1px solid var(--border-2);background:var(--input);color:var(--text);padding:0 10px"><option>4</option><option selected>6</option><option>10</option></select>
+        <button class="mini-btn primary wc-go" style="height:46px"><i data-lucide="dices"></i>Generate</button></div>
+    <ol class="out-list" aria-live="polite"></ol>
+    <p class="muted" style="margin:0;font-size:13.5px">All combinations of this prompt: <b class="wc-total">0</b>. <a href="queue.html#combinations">Make them all</a>.</p>
+</div>
+
+<h2 id="syntax">Syntax</h2>
+<p>Write these in a wildcard’s options (one per line) or straight into a prompt. They work in BASIC mode too. The app’s <b>How To</b> (the <b>?</b> in the Wildcards window) has the same list.</p>
+<div class="tbl-wrap"><table class="tbl">
+    <thead><tr><th>What</th><th>Write</th><th>Gives</th></tr></thead>
+    <tbody>
+        <tr><td><b>Pick one of a few</b><br><span class="muted">No wildcard needed.</span></td><td><span data-pc="{red|blue|green} dress"></span></td><td>blue dress</td></tr>
+        <tr><td><b>Sometimes nothing</b></td><td><span data-pc="{glasses|}"></span> <span data-pc="{glasses||}"></span></td><td>glasses half the time · a third</td></tr>
+        <tr><td><b>Pick several</b><br><span class="muted">Different ones; also <code>{1-3$$…}</code>.</span></td><td><span data-pc="{2$$hat|scarf|gloves}"></span> <span data-pc="{2$$__props__}"></span></td><td>hat, gloves</td></tr>
+        <tr><td><b>More or less likely</b><br><span class="muted">At the start of an option line only.</span></td><td><span data-pc="3::red hair"></span> <span data-pc="0.5::bald"></span></td><td>3× as likely · half as likely</td></tr>
+        <tr><td><b>Use the same pick again</b></td><td><span data-pc="${hair=!__hair color__}"></span> then <span data-pc="${hair}"></span></td><td>picks once, shows nothing there; the same pick anywhere (prompt, negative, Hi-Res)</td></tr>
+        <tr><td><b>Label options</b><br><span class="muted">Never sent to the image.</span></td><td><span data-pc="library ## indoor, quiet"></span><br><span data-pc="## pose"></span></td><td>labels for that option · a line of labels: for every option</td></tr>
+        <tr><td><b>Only some options</b><br><span class="muted"><code>&amp;</code> and, <code>|</code> or, <code>!</code> not.</span></td><td><span data-pc="__places[indoor]__"></span><br><span data-pc="__places[indoor & !busy]__"></span></td><td>library or cafe, never beach</td></tr>
+        <tr><td><b>Only if…</b><br><span class="muted">Something with that label is in the image, wherever it’s written.</span></td><td><span data-pc="?sitting:: relaxed"></span> <span data-pc="?!sitting:: alert"></span></td><td>only with a sitting pose · only without</td></tr>
+        <tr><td><b>Never together</b><br><span class="muted">A rule for the whole image.</span></td><td><span data-pc="#! sitting excludes standing"></span><br><span data-pc="#! one of: hat, hood"></span><br><span data-pc="#! wet requires rain"></span></td><td>never both · at most one · wet only with rain</td></tr>
+        <tr><td><b>A theme for the whole image</b></td><td><span data-pc="${season=!winter} ## winter"></span><br><span data-pc="#! excludes swimwear"></span></td><td>a wildcard of named picks, labels and rules: everything else follows</td></tr>
+        <tr><td><b>Random LoRA or style</b></td><td><span data-pc="random::character"></span> <span data-pc="random::style"></span></td><td>a Character LoRA · one of your styles. <a href="loras-styles.html#types">More</a></td></tr>
+        <tr><td><b>Notes</b></td><td><span data-pc="# a note"></span></td><td>a line starting with # is never picked</td></tr>
+    </tbody>
+</table></div>
+<div class="callout note"><i data-lucide="puzzle"></i><div><b>Putting it together</b><p>Places are labeled, the pose labels what it is, and the mood follows the pose, in any order: <b>places</b> <span data-pc="library ## indoor"></span> / <span data-pc="beach ## outdoor"></span>, <b>pose</b> <span data-pc="sitting ## sitting"></span> / <span data-pc="standing"></span>, <b>mood</b> <span data-pc="?sitting:: relaxed"></span> / <span data-pc="alert"></span>, and the prompt <span data-pc="__places[indoor]__, __pose__, __mood__"></span>. Try <b>Only if…</b> above.</p></div></div>
+
+<h2 id="window">The Wildcards window</h2>
+<div class="split">
+    <div>
+        <p>Open it from <span class="ui plain">Config → Prompts → Wildcards → MANAGE</span>, or from the wildcard buttons on a prompt box.</p>
+        <div class="opts">
+            <dl class="opt"><dt>BASIC / ADVANCED</dt><dd>Basic: the list and a plain editor. Advanced adds badges, TRY, CHECK, import / export, labels and rules. Basic keeps everything Advanced wrote.</dd></dl>
+            <dl class="opt"><dt><i data-lucide="folder-tree" style="width:16px;height:16px;vertical-align:-3px"></i> Group</dt><dd>Wildcards sharing a first word (three or more) under one header; others by kind, then under “other”.</dd></dl>
+            <dl class="opt"><dt><i data-lucide="star" style="width:16px;height:16px;vertical-align:-3px"></i> Favorites</dt><dd>Only your starred wildcards.</dd></dl>
+            <dl class="opt"><dt>Search · <i data-lucide="text-search" style="width:16px;height:16px;vertical-align:-3px"></i> · Sort</dt><dd>By name, or options, labels and rules too; sort A–Z, Recently added, Recently used, Most used.</dd></dl>
+            <dl class="opt"><dt><i data-lucide="plus" style="width:16px;height:16px;vertical-align:-3px"></i> New · <i data-lucide="undo-2" style="width:16px;height:16px;vertical-align:-3px"></i> Recently deleted · <i data-lucide="circle-help" style="width:16px;height:16px;vertical-align:-3px"></i> How To</dt><dd>A new wildcard; ones you deleted (kept 30 days); the syntax guide.</dd></dl>
+            <dl class="opt"><dt>Hold a row</dt><dd>Selects wildcards to delete several at once.</dd></dl>
+        </div>
+    </div>
+    <div class="col" style="display:flex;flex-direction:column;gap:18px">
+        <figure class="shot" style="margin:0"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/wc-basic.webp" alt="Wildcards window, Basic" loading="lazy" width="412" height="892"></div></div><figcaption>BASIC.</figcaption></figure>
+        <figure class="shot" style="margin:0"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/wc-advanced.webp" alt="Wildcards window, Advanced" loading="lazy" width="412" height="892"></div></div><figcaption>ADVANCED: CHECK, TRY, import and export.</figcaption></figure>
+    </div>
+</div>
+
+<h2 id="editor">Editing a wildcard</h2>
+<div class="split flip">
+    <div>
+        <p>Tap a wildcard to open it. Tap its name at the top to rename it.</p>
+        <div class="opts">
+            <dl class="opt"><dt>LIST / TEXT</dt><dd><b>LIST</b>: each option a card (its text, how often, labels, “only if”) that opens to edit, and <span class="ui">+ OPTION</span>. <b>TEXT</b>: all options as lines, with <b>A–Z</b> sorting. Both write the same lines.</dd></dl>
+            <dl class="opt"><dt>Labels on every option</dt><dd><span class="ui">+ LABEL</span>: labels the whole wildcard (a <code>##</code> line).</dd></dl>
+            <dl class="opt"><dt>Rules</dt><dd><span class="ui">+ RULE</span>: builds a <code>#!</code> rule (excludes, one of, requires…) step by step.</dd></dl>
+            <dl class="opt"><dt>EXAMPLE <i data-lucide="dices" style="width:16px;height:16px;vertical-align:-3px"></i></dt><dd>A sample pick from what’s in the editor; the dice gives another, a tap opens it in TRY.</dd></dl>
+            <dl class="opt"><dt>Used by</dt><dd>Which other wildcards call this one.</dd></dl>
+            <dl class="opt"><dt>Magic Prompt</dt><dd><b>TAGS</b> or <b>SCENES</b>, an optional hint, then <span class="ui">GENERATE</span>: your local AI model writes options for you. <i data-lucide="settings" style="width:16px;height:16px;vertical-align:-3px"></i> picks its model. <a href="magic-prompt.html">Magic Prompt</a>.</dd></dl>
+            <dl class="opt"><dt>Pick: RANDOM / IN ORDER</dt><dd>Random each image, or one after another, image by image.</dd></dl>
+            <dl class="opt"><dt><i data-lucide="history" style="width:16px;height:16px;vertical-align:-3px"></i> Versions · <i data-lucide="trash-2" style="width:16px;height:16px;vertical-align:-3px"></i></dt><dd>Its last 10 saved versions, to bring one back; delete.</dd></dl>
+        </div>
+    </div>
+    <div class="col" style="display:flex;flex-direction:column;gap:18px">
+        <figure class="shot" style="margin:0"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/wc-editor.webp" alt="Wildcard editor" loading="lazy" width="412" height="892"></div></div><figcaption>The editor (Advanced), LIST view.</figcaption></figure>
+        <figure class="shot" style="margin:0"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/wc-editor-text.webp" alt="Wildcard editor, TEXT view" loading="lazy" width="412" height="892"></div></div><figcaption>TEXT view.</figcaption></figure>
+    </div>
+</div>
+
+<h2 id="try-check">TRY and CHECK</h2>
+<div class="split">
+    <div>
+        <p><b>TRY</b> (Advanced) resolves a prompt without generating anything: type one or use <span class="ui">FROM PROMPT</span>, then <span class="ui">GENERATE</span> to see what each wildcard picked, and why.</p>
+        <p><b>CHECK</b> looks through all your wildcards for problems: names that don’t exist, wildcards inside themselves (loops), and rules that clash. The number on it is how many it found.</p>
+        <div class="callout note"><i data-lucide="info"></i><div><b>Problems never stop a job</b><p>A missing wildcard is left out of the prompt, and the Debug Log says why. TRY shows the same messages.</p></div></div>
+    </div>
+    <figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/wc-try.webp" alt="TRY" loading="lazy" width="412" height="892"></div></div><figcaption>TRY with a prompt.</figcaption></figure>
+</div>
+
+<h2 id="reroll">Rerolling an image’s picks</h2>
+<p>Liked an image but want another outfit? Open it in the viewer, tap <span class="ui plain">Send → Wildcards</span>: <b>Wildcard picks</b> lists each pick. Tap the ones to <b>redraw</b>; the rest are <b>kept</b>. <span class="ui">REROLL</span> puts its prompt in Generate with a strip under it: that tab’s next images keep the kept picks until you tap the strip’s ×.</p>
+
+<h2 id="import">Import and export</h2>
+<div class="split flip">
+    <div>
+        <p>The <i data-lucide="download" style="width:16px;height:16px;vertical-align:-3px"></i> button (Advanced) opens <b>Import Wildcards</b>:</p>
+        <div class="opts">
+            <dl class="opt"><dt>From file</dt><dd>Resolver <code>.json</code>, or Dynamic Prompts <code>.txt</code> and <code>.yaml</code>, or a <code>.zip</code> of a wildcards folder (password-protected ones ask for the password).</dd></dl>
+            <dl class="opt"><dt>Search Civitai</dt><dd>Wildcard packs on Civitai, 20 a page: ALL or SFW ONLY, sorted by Relevance, Newest, Top Rated or Most Downloaded.</dd></dl>
+            <dl class="opt"><dt>From URL</dt><dd>A file link or a Civitai link. Packs that need a login use your <span class="ui plain">Config → Connection → Civitai API key</span>.</dd></dl>
+            <dl class="opt"><dt>Libraries</dt><dd>Saved links, such as the <b>Bungles library</b>. <span class="ui">CHECK</span> looks for updates, only when you tap it; nothing is fetched by itself. <span class="ui">ADD LINK</span> saves your own.</dd></dl>
+            <dl class="opt"><dt>The preview</dt><dd>Before anything is saved: what’s new and what has the same name as yours: <b>REPLACE</b>, <b>MERGE</b> or <b>KEEP MINE</b>. Tick to import or skip; tap a name to see what’s inside.</dd></dl>
+            <dl class="opt"><dt>Uninstall</dt><dd>Removes a library’s wildcards again; ones you changed or use are kept unless ticked.</dd></dl>
+        </div>
+        <p><b>Export</b> (<i data-lucide="upload" style="width:16px;height:16px;vertical-align:-3px"></i>) saves the wildcards you pick to a <code>.json</code>; the wildcards they use come too.</p>
+        <div class="callout tip"><i data-lucide="shield-check"></i><div><b>Imported files are only data</b><p>Names are cleaned and contents shown as text, never run.</p></div></div>
+    </div>
+    <figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/wc-import.webp" alt="Import Wildcards" loading="lazy" width="412" height="892"></div></div><figcaption>Import Wildcards.</figcaption></figure>
+</div>
+
+<h2 id="settings">Wildcard settings</h2>
+<div class="opts">
+    <dl class="opt"><dt>Wildcards<small>Config → Prompts · on</small></dt><dd>Off: <code>__name__</code> is sent as typed.</dd></dl>
+    <dl class="opt"><dt>Same seed, same picks<small>off</small></dt><dd>A fixed seed repeats the same picks; a random seed (-1) still picks anew.</dd></dl>
+    <dl class="opt"><dt>No repeats in an image<small>on</small></dt><dd>A wildcard used twice in one prompt gives two different options while it has them.</dd></dl>
+    <dl class="opt"><dt>Combinations per run · Queued jobs at most<small>100 · 50</small></dt><dd>Limits for <b>All combinations</b>, which makes every combination of the prompt’s choices. See <a href="queue.html#combinations">Queue</a>.</dd></dl>
+</div>
+<p class="muted">With Magic Prompt set up, <b>Scene optimization</b> (the wand beside PROMPT, SDXL and Anima) lets the AI model choose picks that suit each other. See <a href="magic-prompt.html#scene">Magic Prompt</a>.</p>
+
+</main>
+<script src="assets/js/lucide.js"></script>
+<script src="assets/js/promptpaint.js"></script>
+<script src="assets/js/wcengine.js"></script>
+<script src="assets/js/site.js"></script>
+<script src="assets/js/docs.js"></script>
+</body>
+</html>

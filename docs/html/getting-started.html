@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Getting Started · Resolver Docs</title>
+<meta name="description" content="Install Resolver, set up Forge on your PC, connect the app and make your first image.">
+<link rel="icon" href="assets/img/favicon.png">
+<script>try{var t=localStorage.getItem('rdocs-theme'),a=localStorage.getItem('rdocs-accent');if(t&&t!=='system')document.documentElement.dataset.theme=t;if(a)document.documentElement.dataset.accent=a;}catch(e){}</script>
+<link rel="stylesheet" href="assets/css/docs.css">
+</head>
+<body data-page="getting-started">
+<main class="content">
+
+<p class="crumbs"><a href="index.html">Docs</a> / Start</p>
+<h1>Getting Started</h1>
+<p class="lead">From nothing to your first image in about ten minutes: install the app, let Forge on your PC accept the phone, connect, and generate.</p>
+
+<div class="card" style="margin:24px 0">
+    <b>Your setup progress</b> <span class="muted" data-count-for="setup" style="font-size:14px;margin-left:6px"></span>
+    <div class="progress" data-progress-for="setup"><i></i></div>
+    <p class="muted" style="font-size:13.5px;margin:6px 0 0">Tick each step in the <a href="#checklist">checklist</a> as you finish it; it’s kept in this browser and marks the steps below as done.</p>
+</div>
+
+<h2 id="requirements">What you need</h2>
+<div class="grid cols-2">
+    <div class="feature"><span class="ic"><i data-lucide="smartphone"></i></span><b>An Android phone</b><span>Android 10 or newer.</span></div>
+    <div class="feature"><span class="ic"><i data-lucide="monitor"></i></span><b>A PC with a graphics card</b><span>Running <b>Stable Diffusion WebUI Forge (Neo)</b>. ComfyUI is optional.</span></div>
+    <div class="feature"><span class="ic"><i data-lucide="wifi"></i></span><b>The same network</b><span>Phone and PC on the same Wi-Fi or router. (Away from home? See <a href="#remote">Remote mode</a>.)</span></div>
+    <div class="feature"><span class="ic"><i data-lucide="box"></i></span><b>At least one model</b><span>A checkpoint in Forge’s <code>models/Stable-diffusion</code> folder, for SDXL, Flux or another model tab.</span></div>
+</div>
+
+<h2 id="install">Install the app</h2>
+<ol class="steps">
+    <li id="s-install"><b>Download the APK</b>Get <code>Resolverv3.0.apk</code> from the <a href="https://github.com/bojrodev/Resolver-Stable-Diffusion-Client-for-android/releases" target="_blank" rel="noopener">Releases page on GitHub</a>.</li>
+    <li><b>Install it</b>Open the file on your phone. Android may ask you to allow installing apps from your browser or file manager; allow it for that app.</li>
+    <li><b>Updating later?</b>Install the new APK <b>over</b> the old one. Don’t uninstall first: uninstalling deletes your History, settings, LoRA data, styles and wildcards.</li>
+</ol>
+<div class="callout warn"><i data-lucide="triangle-alert"></i><div><b>Never uninstall to update</b><p>Android stores the app’s data with the app. Installing over it keeps everything; uninstalling removes it all. To be safe, make a backup first in <span class="ui plain">Config → System Settings → BACK UP</span>.</p></div></div>
+
+<h2 id="forge">Set up Forge on your PC</h2>
+<p>By default Forge only accepts connections from the PC itself. Three launch options let your phone in:</p>
+<div class="opts">
+    <dl class="opt"><dt><code>--listen</code></dt><dd>Accept connections from other devices on your network (your phone), not only from the PC.</dd></dl>
+    <dl class="opt"><dt><code>--api</code></dt><dd>Turn on Forge’s API, which is how Resolver talks to it.</dd></dl>
+    <dl class="opt"><dt><code>--cors-allow-origins *</code></dt><dd>Allow requests that come from an app rather than from Forge’s own web page.</dd></dl>
+</div>
+<p>Pick how you start Forge to see where they go:</p>
+<div data-widget="flags">
+    <div class="seg" role="group" aria-label="How you start Forge">
+        <button data-os="win" aria-pressed="true">Windows</button>
+        <button data-os="linux" aria-pressed="false">Linux / macOS</button>
+        <button data-os="pinokio" aria-pressed="false">Pinokio / other</button>
+    </div>
+    <div class="code"><span class="label">Launch options</span><pre></pre></div>
+</div>
+<ol class="steps">
+    <li id="s-forge"><b>Add the options, then restart Forge</b>Close Forge completely and start it again so the options take effect.</li>
+    <li><b>Allow it through the firewall</b>The first time, Windows may ask whether Python can use the network. Choose <b>Allow</b> for private networks. (If you missed it, see <a href="#trouble">Connection problems</a>.)</li>
+    <li><b>Check it started right</b>Forge’s window should say it’s running on <code>http://0.0.0.0:7860</code>. The <code>0.0.0.0</code> means it’s listening to your network, which is what you want.</li>
+</ol>
+
+<h3 id="comfy">Set up ComfyUI (optional)</h3>
+<p>Only needed for the <b>ComfyUI</b> tab. Add these to ComfyUI’s launch command, then restart it:</p>
+<div class="code"><span class="label">ComfyUI launch options</span><pre><span class="tok-s">--listen --enable-cors-header *</span></pre></div>
+<p>ComfyUI uses port <code>8188</code>, which is already the app’s default. The ComfyUI tab is hidden until you turn it on in <span class="ui plain">Config → Interface → Visible tabs</span>.</p>
+
+<h2 id="ip">Find your PC’s IP address</h2>
+<p>The app needs your PC’s address on your home network: four numbers with dots, usually starting with <code>192.168.</code> or <code>10.</code>.</p>
+<div class="tabs" data-remember="os-ip">
+    <div class="tablist"><button data-tab="win">Windows</button><button data-tab="mac">macOS</button><button data-tab="linux">Linux</button></div>
+    <div class="tabpanel" data-tab="win">
+        <ol class="steps">
+            <li><b>Open Command Prompt</b>Press <kbd>Win</kbd> + <kbd>R</kbd>, type <code>cmd</code> and press <kbd>Enter</kbd>.</li>
+            <li><b>Run ipconfig</b><div class="code"><pre>ipconfig</pre></div></li>
+            <li id="s-ip"><b>Read the IPv4 Address</b>Under your Wi-Fi or Ethernet adapter, find <b>IPv4 Address</b>, for example <code>192.168.1.20</code>.</li>
+        </ol>
+    </div>
+    <div class="tabpanel" data-tab="mac" hidden>
+        <ol class="steps">
+            <li><b>Open System Settings → Network</b>Select Wi-Fi or Ethernet, then <b>Details</b>.</li>
+            <li><b>Read the IP address</b>It’s listed as <b>IP address</b>. Or in Terminal: <div class="code"><pre>ipconfig getifaddr en0</pre></div></li>
+        </ol>
+    </div>
+    <div class="tabpanel" data-tab="linux" hidden>
+        <ol class="steps">
+            <li><b>Open a terminal and run</b><div class="code"><pre>hostname -I</pre></div></li>
+            <li><b>Use the first address</b>The one starting with <code>192.168.</code> or <code>10.</code></li>
+        </ol>
+    </div>
+</div>
+<div class="callout note"><i data-lucide="info"></i><div><b>Keep the address from changing</b><p>Routers can give your PC a different address after a restart. If the app suddenly can’t connect, check the IP again. Setting a “reserved” or “static” IP for your PC in your router’s settings stops it changing.</p></div></div>
+
+<h2 id="connect">Connect the app</h2>
+<div class="split">
+    <div>
+        <ol class="steps">
+            <li><b>Open Config</b>Tap the <span class="ui plain"><i data-lucide="settings" style="width:14px;height:14px;vertical-align:-2px"></i> gear</span> at the right end of the dock.</li>
+            <li><b>Open Connection</b>It’s the first section. Leave <span class="ui">LOCAL</span> selected.</li>
+            <li><b>Enter your PC’s address</b>In <b>Local IP address</b>, type it with <code>http://</code> in front, e.g. <code>http://192.168.1.20</code>.</li>
+            <li><b>Check the ports</b>Leave the defaults unless you changed them on the PC:<br>
+                <span class="chip">WEBUI 7860</span> Forge · <span class="chip">COMFY 8188</span> ComfyUI · <span class="chip">LLM 1234</span> Magic Prompt · <span class="chip">WAKE 5000</span> Dev Power</li>
+            <li id="s-connect"><b>Go back to Generate and tap INITIALIZE ENGINE</b>The big button at the top. Settings save as you type, and from then on the app connects by itself when it starts.</li>
+        </ol>
+    </div>
+    <figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/cfg-connection.webp" alt="Config, Connection section: Local mode, IP address and ports" loading="lazy" width="412" height="892"></div></div><figcaption>Config → Connection, in Local mode.</figcaption></figure>
+</div>
+
+<h3 id="helper">Connection helper</h3>
+<p>Type your PC’s address to check it and see exactly what to enter:</p>
+<div class="card" data-widget="connect">
+    <div class="grid cols-2" style="gap:12px">
+        <div class="field"><label for="hIp">PC IP address</label><input id="hIp" inputmode="decimal" placeholder="192.168.1.20" autocomplete="off" spellcheck="false"></div>
+        <div class="field"><label for="hPort">Forge port</label><input id="hPort" inputmode="numeric" placeholder="7860" autocomplete="off"></div>
+    </div>
+    <div class="field" style="margin-top:0"><span class="help" id="hHelp"></span></div>
+    <div class="result" id="hOut"></div>
+</div>
+
+<h3 id="states">What INITIALIZE ENGINE tells you</h3>
+<p>The button changes as the app reaches Forge and asks it for its list of models:</p>
+<div class="opts">
+    <dl class="opt"><dt>INITIALIZE ENGINE</dt><dd>Not connected yet. Tap to connect.</dd></dl>
+    <dl class="opt"><dt>INITIALIZING...</dt><dd>Reaching Forge.</dd></dl>
+    <dl class="opt"><dt>INITIALIZED</dt><dd>Connected. The checkpoint list fills in and you can generate.</dd></dl>
+    <dl class="opt"><dt>FAILED</dt><dd>Forge didn’t answer. A window shows why; see <a href="#trouble">Connection problems</a>.</dd></dl>
+</div>
+
+<h2 id="first">Your first image</h2>
+<div class="split flip">
+    <div>
+        <ol class="steps">
+            <li><b>Pick a model tab</b>Under the top card: <span class="ui">SDXL</span>, <span class="ui">ANIMA</span>, <span class="ui">QWEN</span>, <span class="ui">FLUX</span> or <span class="ui">KREA</span>. Choose the one that matches your checkpoint.</li>
+            <li><b>Choose a checkpoint</b>Tap <b>Active Checkpoint</b> and pick one. (It says “Link first” until the app is connected.)</li>
+            <li><b>Write a prompt</b>Describe the picture, e.g. <code>a cozy cabin in a snowy forest, warm light, highly detailed</code>. Add what you don’t want in <b>Negative</b>.</li>
+            <li id="s-first"><b>Tap GENERATE</b>At the bottom of the tab. Progress appears on the button, and the image appears below it (and in <b>History</b>).</li>
+        </ol>
+        <div class="callout tip"><i data-lucide="lightbulb"></i><div><b>Tip: let it work in the background</b><p>You can switch apps or turn the screen off: generation carries on and shows its progress in your notifications.</p></div></div>
+    </div>
+    <figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/gen-sdxl.webp" alt="The Generate tab on SDXL" loading="lazy" width="412" height="892"></div></div><figcaption>The Generate tab, SDXL.</figcaption></figure>
+</div>
+
+<h2 id="remote">Connect from anywhere (Remote mode)</h2>
+<p>Away from home, your phone can’t see your PC’s home address. A <b>tunnel</b> gives Forge a public <code>https://</code> address instead. Run one on the PC, then switch the app to <span class="ui">REMOTE</span>.</p>
+<div class="tabs" data-remember="tunnel">
+    <div class="tablist"><button data-tab="ngrok">Ngrok</button><button data-tab="cf">Cloudflare Tunnel</button></div>
+    <div class="tabpanel" data-tab="ngrok">
+        <p>Install <a href="https://ngrok.com/download" target="_blank" rel="noopener">ngrok</a>, sign in once, then run:</p>
+        <div class="code"><span class="label">On the PC</span><pre>ngrok http 7860</pre></div>
+        <p>Copy the <code>https://….ngrok-free.app</code> address it shows.</p>
+    </div>
+    <div class="tabpanel" data-tab="cf" hidden>
+        <p>Install <a href="https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/" target="_blank" rel="noopener">cloudflared</a>, then run:</p>
+        <div class="code"><span class="label">On the PC</span><pre>cloudflared tunnel --url http://localhost:7860</pre></div>
+        <p>Copy the <code>https://….trycloudflare.com</code> address it shows.</p>
+    </div>
+</div>
+<ol class="steps">
+    <li><b>Switch to Remote</b>In <span class="ui plain">Config → Connection</span>, tap <span class="ui">REMOTE</span>.</li>
+    <li><b>Paste the address into Forge URL</b>The whole thing, starting with <code>https://</code>. If you also use Dev Power remotely, tunnel port <code>5000</code> the same way and paste it into <b>Dev Power (Wake) URL</b>.</li>
+    <li><b>Behind Cloudflare Access?</b>If your tunnel is protected by Cloudflare Zero Trust, turn on <b>Cloudflare Zero Trust</b> and paste your service token’s <b>Client ID</b> and <b>Client secret</b>. The app sends them with every request.</li>
+</ol>
+<div class="callout note"><i data-lucide="info"></i><div><b>What works remotely</b><p>Remote mode has fields for Forge and Dev Power. Magic Prompt (your local AI model) uses the Local address only.</p></div></div>
+<div class="callout danger"><i data-lucide="shield-alert"></i><div><b>Keep your tunnel private</b><p>Anyone with the tunnel address can use your Forge. Don’t share it publicly, and close the tunnel when you’re done. Cloudflare Zero Trust adds a login in front of it.</p></div></div>
+
+<h2 id="checklist">Setup checklist</h2>
+<p class="muted">Ticks are saved in this browser, and also mark the steps above as done.</p>
+<div class="progress" data-progress-for="setup"><i></i></div>
+<p class="muted" data-count-for="setup" style="font-size:14px"></p>
+<div data-checklist="setup">
+    <label class="check" data-id="req"><input type="checkbox"><span>I have Android 10+, a PC with Forge, and a checkpoint.</span></label>
+    <label class="check" data-id="install" data-step="s-install"><input type="checkbox"><span>Resolver is installed on my phone.</span></label>
+    <label class="check" data-id="forge" data-step="s-forge"><input type="checkbox"><span>Forge starts with <code>--listen --api --cors-allow-origins *</code>.</span></label>
+    <label class="check" data-id="ip" data-step="s-ip"><input type="checkbox"><span>I know my PC’s IPv4 address.</span></label>
+    <label class="check" data-id="connect" data-step="s-connect"><input type="checkbox"><span>The app says INITIALIZED.</span></label>
+    <label class="check" data-id="first" data-step="s-first"><input type="checkbox"><span>I generated my first image.</span></label>
+</div>
+<button class="btn" data-reset-for="setup" type="button" style="margin-top:10px"><i data-lucide="rotate-ccw"></i>Reset checklist</button>
+
+<h2 id="trouble">Connection problems</h2>
+<div class="opts">
+    <dl class="opt"><dt>“Connection Error: No URL found”</dt><dd>The address is empty. Fill in <b>Local IP address</b> (Local) or <b>Forge URL</b> (Remote) in <span class="ui plain">Config → Connection</span>.</dd></dl>
+    <dl class="opt"><dt>FAILED, or it waits forever</dt><dd>
+        <ul style="margin:0">
+            <li>Check Forge is running, and that it was restarted after adding the options.</li>
+            <li>Check the phone and PC are on the same Wi-Fi (not mobile data, not a guest network).</li>
+            <li>Open <code>http://YOUR-IP:7860/docs</code> in the phone’s browser. If it doesn’t open, the problem is between the phone and the PC, not in the app.</li>
+            <li>Let Python through the Windows firewall: Windows Security → Firewall → Allow an app → tick <b>Python</b> for <b>Private</b>.</li>
+        </ul></dd></dl>
+    <dl class="opt"><dt>It worked yesterday</dt><dd>Your PC’s IP probably changed. Find it again (see <a href="#ip">above</a>), or reserve it in your router.</dd></dl>
+    <dl class="opt"><dt>Remote: errors or a web page instead of images</dt><dd>Make sure you pasted the full <code>https://</code> address and the tunnel is still running. Free tunnel addresses change each time you start them.</dd></dl>
+    <dl class="opt"><dt>Generation stops when the screen is off</dt><dd>Allow Resolver to ignore battery optimization: <span class="ui plain">Config → System Settings → IGNORE BATTERY OPTIMIZATIONS</span>.</dd></dl>
+</div>
+
+</main>
+<script src="assets/js/lucide.js"></script>
+<script src="assets/js/site.js"></script>
+<script src="assets/js/docs.js"></script>
+</body>
+</html>

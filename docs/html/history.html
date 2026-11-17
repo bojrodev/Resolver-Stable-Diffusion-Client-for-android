@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>History · Resolver Docs</title>
+<meta name="description" content="Every image you make: search, favorites, date sections, selecting, the viewer and its Send menu, badges, and how many images are kept.">
+<link rel="icon" href="assets/img/favicon.png">
+<script>try{var t=localStorage.getItem('rdocs-theme'),a=localStorage.getItem('rdocs-accent');if(t&&t!=='system')document.documentElement.dataset.theme=t;if(a)document.documentElement.dataset.accent=a;}catch(e){}</script>
+<link rel="stylesheet" href="assets/css/docs.css">
+</head>
+<body data-page="history">
+<main class="content">
+
+<p class="crumbs"><a href="index.html">Docs</a> / Review</p>
+<h1>History</h1>
+<p class="lead">Every image you generate lands in <b>History</b>, newest first, kept on your phone with its prompt and settings. From here you view, compare, share, save, favorite and reuse them.</p>
+
+<h2 id="results">Right after generating</h2>
+<div class="split">
+    <div>
+        <p>New images appear first in the <b>results strip</b> under GENERATE (and on the Inpaint tab), then in History. The strip keeps the latest <b>20</b> (<span class="ui plain">Config → History &amp; Results → Recent results shown</span>). Tap one to open the viewer.</p>
+        <p><b>Auto-Save</b> (beside GENERATE) also saves each new image to the phone’s storage, in the format chosen there (PNG, JPEG or WEBP). See <a href="generate.html#generating">Generating</a>.</p>
+    </div>
+    <figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/gen-results.webp" alt="Results under GENERATE" loading="lazy" width="412" height="892"></div></div><figcaption>Results under GENERATE.</figcaption></figure>
+</div>
+
+<h2 id="tab">The History tab</h2>
+<div class="split flip">
+    <div>
+        <div class="opts">
+            <dl class="opt"><dt><i data-lucide="search" style="width:16px;height:16px;vertical-align:-3px"></i> Search</dt><dd>Finds images by their <b>prompt</b>, <b>checkpoint</b> or <b>date</b> (“kimono”, “juggernaut”, “Nov 3”). <a href="#search">More</a>.</dd></dl>
+            <dl class="opt"><dt><i data-lucide="star" style="width:16px;height:16px;vertical-align:-3px"></i> Favorites</dt><dd>Only your favorites, in one group.</dd></dl>
+            <dl class="opt"><dt><i data-lucide="calendar-days" style="width:16px;height:16px;vertical-align:-3px"></i> Date sections</dt><dd>Headers between days (“Nov 3 • 4”). <b>Hold</b> the button to group by <b>DAY</b>, <b>MONTH</b> or <b>YEAR</b>.</dd></dl>
+            <dl class="opt"><dt><i data-lucide="trash-2" style="width:16px;height:16px;vertical-align:-3px"></i> ALL</dt><dd>Deletes all of History after asking. Favorites stay unless you tick <b>Delete favorites too</b>.</dd></dl>
+            <dl class="opt"><dt>Pages</dt><dd>30 images a page (<span class="ui plain">History images per page</span>), with ‹ › to turn pages.</dd></dl>
+            <dl class="opt"><dt>Columns</dt><dd>AUTO, 3, 4 or 5 per row, and full width when the phone is sideways (<span class="ui plain">Config → History &amp; Results</span>).</dd></dl>
+        </div>
+    </div>
+    <figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/history.webp" alt="The History tab" loading="lazy" width="412" height="892"></div></div><figcaption>History with new images.</figcaption></figure>
+</div>
+
+<h3 id="search">Search and date sections</h3>
+<div class="shot-row">
+    <figure class="shot" style="margin:0"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/history-search.webp" alt="History search" loading="lazy" width="412" height="892"></div></div><figcaption>Searching “kimono”.</figcaption></figure>
+    <figure class="shot" style="margin:0"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/history-dates.webp" alt="Date sections" loading="lazy" width="412" height="892"></div></div><figcaption>Date sections on.</figcaption></figure>
+</div>
+
+<h2 id="select">Selecting several</h2>
+<div class="split">
+    <div>
+        <ul>
+            <li><b>Hold</b> a thumbnail to start selecting; then tap to tick more.</li>
+            <li><b>Hold and slide</b> to tick every image from there to your finger; slide back to untick.</li>
+            <li>The circle at the top selects the whole page. Images already saved to the phone show <b>SAVED</b>.</li>
+            <li>The bar at the bottom: <i data-lucide="share-2" style="width:16px;height:16px;vertical-align:-3px"></i> share, ☆ favorite, <i data-lucide="download" style="width:16px;height:16px;vertical-align:-3px"></i> save to the phone, <i data-lucide="trash-2" style="width:16px;height:16px;vertical-align:-3px"></i> delete, and <i data-lucide="x" style="width:16px;height:16px;vertical-align:-3px"></i> to stop selecting (or press back).</li>
+        </ul>
+    </div>
+    <figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/history-select.webp" alt="Selecting images" loading="lazy" width="412" height="892"></div></div><figcaption>Three images selected.</figcaption></figure>
+</div>
+
+<h2 id="viewer">The viewer</h2>
+<div class="split flip">
+    <div>
+        <p>Tap any image to see it full screen. <b>Swipe</b> sideways for the next one, <b>pinch</b> to zoom.</p>
+        <div class="opts">
+            <dl class="opt"><dt><i data-lucide="send" style="width:16px;height:16px;vertical-align:-3px"></i> Send</dt><dd><b>ControlNet</b> (as its reference image, when ControlNet is on), <b>Inpaint</b> (opens Crop &amp; Edit), <b>Analyze</b> (its prompt and settings), <b>Wildcards</b> (<a href="wildcards.html#reroll">reroll its picks</a>).</dd></dl>
+            <dl class="opt"><dt><i data-lucide="share-2" style="width:16px;height:16px;vertical-align:-3px"></i> Share</dt><dd>Android’s share sheet.</dd></dl>
+            <dl class="opt"><dt>☆ Favorite</dt><dd>Stars it: kept when History is trimmed, and shown by the ★ filter.</dd></dl>
+            <dl class="opt"><dt><i data-lucide="download" style="width:16px;height:16px;vertical-align:-3px"></i> Download</dt><dd>Saves it to the phone, named like <code>bojro_261117_1234567.png</code> (the date as YYMMDD, then its seed).</dd></dl>
+            <dl class="opt"><dt><i data-lucide="trash-2" style="width:16px;height:16px;vertical-align:-3px"></i> Delete</dt><dd>Removes it from History.</dd></dl>
+            <dl class="opt"><dt>Hold</dt><dd>On an Upscale, img2img or Inpaint result made this session: shows the original picture until you let go.</dd></dl>
+        </div>
+    </div>
+    <div class="col" style="display:flex;flex-direction:column;gap:18px">
+        <figure class="shot" style="margin:0"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/viewer.webp" alt="The viewer" loading="lazy" width="412" height="892"></div></div><figcaption>The viewer.</figcaption></figure>
+        <figure class="shot" style="margin:0"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/viewer-send.webp" alt="The Send menu" loading="lazy" width="412" height="892"></div></div><figcaption>The Send menu.</figcaption></figure>
+    </div>
+</div>
+
+<h2 id="badges">Badges</h2>
+<div class="split">
+    <div>
+        <p>Small labels on the thumbnails say how an image was made. Choose which show in <span class="ui plain">Config → History &amp; Results → Gallery badges → MANAGE</span> (all but PNG by default).</p>
+        <div class="tbl-wrap"><table class="tbl">
+            <thead><tr><th>Badge</th><th>Means</th></tr></thead>
+            <tbody>
+                <tr><td><span class="chip">AD</span></td><td>ADetailer found something (or ran, without Progress Bridge)</td></tr>
+                <tr><td><span class="chip">CN</span></td><td>ControlNet</td></tr>
+                <tr><td><span class="chip">FC</span></td><td>Forge Couple</td></tr>
+                <tr><td><span class="chip">HR</span></td><td>Hi-Res Fix</td></tr>
+                <tr><td><span class="chip">IMG</span> · <span class="chip">INP</span></td><td>img2img · Inpaint</td></tr>
+                <tr><td><span class="chip">UP</span></td><td>Upscaled</td></tr>
+                <tr><td><span class="chip">PNG</span> · <span class="chip">JPG</span> · <span class="chip">WEBP</span></td><td>The file format</td></tr>
+            </tbody>
+        </table></div>
+    </div>
+    <figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/gallery-badges.webp" alt="Gallery Badges settings" loading="lazy" width="412" height="892"></div></div><figcaption>Gallery Badges.</figcaption></figure>
+</div>
+
+<h2 id="limit">How many images are kept</h2>
+<p>History lives on the phone, so it keeps the newest <b>30</b> images (<span class="ui plain">Config → History &amp; Results → Gallery cache limit</span>, set it higher if you have room). When new ones push older ones out:</p>
+<ul>
+    <li><b>Favorites are never removed.</b> Star what you want to keep.</li>
+    <li>With <b>Auto-delete warning</b> on (the default), before a job pushes out images you haven’t saved, the app shows them and asks: <span class="ui">CANCEL</span> or <span class="ui">CONTINUE</span>. Tap one to view it first.</li>
+    <li>Images you saved (Auto-Save or Download) stay in the phone’s storage either way.</li>
+</ul>
+<div class="callout tip"><i data-lucide="archive"></i><div><b>Moving to a new phone?</b><p>History Favorites can go in a backup, with the images. See <a href="backup.html">Backup &amp; Restore</a>.</p></div></div>
+
+</main>
+<script src="assets/js/lucide.js"></script>
+<script src="assets/js/site.js"></script>
+<script src="assets/js/docs.js"></script>
+</body>
+</html>

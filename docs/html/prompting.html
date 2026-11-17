@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prompting · Resolver Docs</title>
+<meta name="description" content="Prompt syntax, weights, BREAK and AND, the colored prompt boxes, the Prompt Guide, Recent Prompts, auto-formatting, the negative box and Character Select.">
+<link rel="icon" href="assets/img/favicon.png">
+<script>try{var t=localStorage.getItem('rdocs-theme'),a=localStorage.getItem('rdocs-accent');if(t&&t!=='system')document.documentElement.dataset.theme=t;if(a)document.documentElement.dataset.accent=a;}catch(e){}</script>
+<link rel="stylesheet" href="assets/css/docs.css">
+</head>
+<body data-page="prompting">
+<main class="content">
+
+<p class="crumbs"><a href="index.html">Docs</a> / Create</p>
+<h1>Prompting</h1>
+<p class="lead">How to write what you want: weights, brackets, BREAK and AND, and the tools around the prompt box that color it, tidy it and remember it.</p>
+
+<h2 id="playground">Try it: a prompt box like the app’s</h2>
+<p>Type below, or tap an example. The colors are made by the app’s own code, so they match your phone exactly. Under it is the <b>weight</b> each tag ends up with.</p>
+<div class="card play" data-widget="promptplay">
+    <div class="ex-btns" role="group" aria-label="Examples">
+        <button data-ex="masterpiece, best quality, 1girl, (smile:1.2), ((red eyes)), [freckles], silver hair">Weights</button>
+        <button data-ex="1girl, red dress BREAK blue hat, garden">BREAK</button>
+        <button data-ex="1girl, (looking at viewer:1.2, smile">Missing bracket</button>
+        <button data-ex="1girl, [hat:0.5], [cat:dog:0.5], [cat|dog]">Timing</button>
+        <button data-ex="1girl, __hair color__, {red|blue|green} dress, &lt;lora:detailTweaker_xl:0.8&gt;">Wildcards &amp; LoRA</button>
+        <button data-ex="rem \(re:zero\), 1girl, maid">Brackets as text</button>
+    </div>
+    <textarea rows="3" spellcheck="false" aria-label="Prompt">masterpiece, best quality, 1girl, (smile:1.2), ((red eyes)), [freckles], silver hair</textarea>
+    <div class="prompt-demo" aria-live="polite"></div>
+    <div><p class="lbl" style="margin:0 0 8px">What each tag weighs</p><ul class="wt-list"></ul></div>
+</div>
+<p class="muted" style="font-size:14px">Weights multiply: each <code>( )</code> pair is ×1.1, each <code>[ ]</code> pair divides by 1.1 (about ×0.91), and <code>(tag:1.3)</code> sets the number. 0.5 to 1.5 works best.</p>
+
+<h2 id="syntax">Prompt syntax</h2>
+<p>The same list as the app’s <b>Prompt Guide</b> (the <b>?</b> on each prompt box). It works in every prompt and negative box.</p>
+<div class="tbl-wrap"><table class="tbl">
+    <thead><tr><th>What</th><th>Write</th><th>Gives</th></tr></thead>
+    <tbody>
+        <tr><td><b>Order matters</b><br><span class="muted">Tags split by commas; earlier ones count a little more.</span></td><td><span data-pc="1girl, red dress, beach"></span></td><td>dress and beach a touch weaker than 1girl</td></tr>
+        <tr><td><b>Stronger</b></td><td><span data-pc="(smile)"></span> <span data-pc="((smile))"></span> <span data-pc="(smile:1.3)"></span></td><td>1.1× · 1.21× · 1.3×</td></tr>
+        <tr><td><b>Weaker</b></td><td><span data-pc="[freckles]"></span> <span data-pc="(freckles:0.7)"></span></td><td>about 0.9× · 0.7×</td></tr>
+        <tr><td><b>Brackets as text</b><br><span class="muted">A backslash, as in series names.</span></td><td><span data-pc="rem \(re:zero\)"></span></td><td>the tag “rem (re:zero)”</td></tr>
+        <tr><td><b>Swap partway</b><br><span class="muted">Below 1: a share of the steps; 1 or more: a step number.</span></td><td><span data-pc="[cat:dog:0.5]"></span> <span data-pc="[cat:dog:10]"></span></td><td>cat for the first half, then dog · dog after step 10</td></tr>
+        <tr><td><b>Add or remove later</b><br><span class="muted">Not a weight!</span></td><td><span data-pc="[hat:0.5]"></span> <span data-pc="[hat::12]"></span></td><td>a hat added halfway · the hat taken away after step 12</td></tr>
+        <tr><td><b>Alternate</b></td><td><span data-pc="[cat|dog]"></span></td><td>swaps every step: a cat-dog mix</td></tr>
+        <tr><td><b>BREAK</b><br><span class="muted">A new chunk of the prompt.</span></td><td><span data-pc="red dress BREAK blue hat"></span></td><td>colors stay on their own items</td></tr>
+        <tr><td><b>AND</b><br><span class="muted">Separate prompts blended. Slower; SD 1.5 / SDXL only.</span></td><td><span data-pc="a cat :1.2 AND a dog :0.8"></span></td><td>less mixing; more cat than dog</td></tr>
+        <tr><td><b>LoRA</b><br><span class="muted">Two character LoRAs: about 0.6 each.</span></td><td><span data-pc="<lora:name:0.8>"></span></td><td>that LoRA at 0.8. <a href="loras-styles.html#tag">More</a></td></tr>
+        <tr><td><b>Wildcards and choices</b></td><td><span data-pc="__hair color__"></span> <span data-pc="{red|blue} dress"></span></td><td>one option for each image. <a href="wildcards.html">Wildcards</a></td></tr>
+        <tr><td><b>In the negative</b></td><td><span data-pc="~hat"></span></td><td>no hat, sun hat or top hat. <a href="#negative">Below</a></td></tr>
+    </tbody>
+</table></div>
+<div class="callout warn"><i data-lucide="triangle-alert"></i><div><b><code>[tag:0.5]</code> is not a weight</b><p>It looks like one, but Forge reads it as “add this tag after 50% of the steps”. For a weaker tag write <code>(tag:0.5)</code>. The app underlines it with a yellow wave so you notice.</p></div></div>
+<div class="callout note"><i data-lucide="info"></i><div><b>Natural-language models</b><p>Flux, Krea and Qwen (Z-Image) understand full sentences, so describe the picture in plain words there. Weights and tags matter most on SDXL and Anima.</p></div></div>
+
+<h2 id="colors">The colored prompt boxes</h2>
+<div class="split">
+    <div>
+        <p>With <span class="ui plain">Config → Prompts → Color-coded prompts</span> on (the default), every prompt and negative box is drawn in colors, so a missing bracket stands out. Nothing you send changes. Tap the <b>?</b> beside the switch for this legend:</p>
+        <div class="opts">
+            <dl class="opt"><dt><span data-pc="((("></span></dt><dd>Brackets: a color for each level of nesting.</dd></dl>
+            <dl class="opt"><dt><span data-pc="(a))"></span></dt><dd>A bracket with no partner: white on red.</dd></dl>
+            <dl class="opt"><dt><span data-pc="(x:1.2)"></span></dt><dd>Weights (and <code>3::</code> in a wildcard).</dd></dl>
+            <dl class="opt"><dt><span data-pc="<lora:x:1>"></span></dt><dd>LoRA tags.</dd></dl>
+            <dl class="opt"><dt><span data-pc="__x__"></span> <span data-pc="{a|b}"></span></dt><dd>Wildcards and choices.</dd></dl>
+            <dl class="opt"><dt><span data-pc="a BREAK b"></span></dt><dd>BREAK and AND, highlighted.</dd></dl>
+            <dl class="opt"><dt><span data-pc="[tag:0.5]"></span></dt><dd>Check this one: a timing, not a weight.</dd></dl>
+            <dl class="opt"><dt>In wildcards</dt><dd>Conditions <code>?!a::</code>, rules <code>#!</code>, labels <code>##</code> and <code># notes</code> have their own colors too.</dd></dl>
+        </div>
+    </div>
+    <figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/prompt-colors.webp" alt="The Color-Coded Prompts legend" loading="lazy" width="412" height="892"></div></div><figcaption>The legend in the app. Its <b>PROMPT GUIDE</b> button opens the guide.</figcaption></figure>
+</div>
+
+<h2 id="guide">The Prompt Guide</h2>
+<div class="split flip">
+    <div>
+        <p>The <b>?</b> on each tab’s Prompt box opens the <b>Prompt Guide</b>: everything in the <a href="#syntax">table above</a>, with colored examples. It works offline, so it’s there when you need a reminder.</p>
+        <p>For wildcard syntax there’s a second guide, <b>How To</b>, in the Wildcards window. See <a href="wildcards.html#syntax">Wildcards</a>.</p>
+    </div>
+    <figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/prompt-guide.webp" alt="The Prompt Guide" loading="lazy" width="412" height="892"></div></div><figcaption>The Prompt Guide.</figcaption></figure>
+</div>
+
+<h2 id="history">Recent Prompts</h2>
+<div class="split">
+    <div>
+        <p>The <i data-lucide="history" style="width:16px;height:16px;vertical-align:-3px"></i> clock under the prompt opens <b>Recent Prompts</b>: the last <b>20</b> prompts of that tab, saved each time you generate or queue (Inpaint and img2img share one list).</p>
+        <ul>
+            <li>Each shows when (“12 min ago”, “Yesterday”), the checkpoint, and the prompt in colors.</li>
+            <li>Tap one to see it in full, with Forge Couple regions if it had them. <span class="ui">COPY</span> copies it; <span class="ui">USE</span> puts it back in the tab.</li>
+            <li><span class="ui">CLEAR</span> empties the list. Turn it off in <span class="ui plain">Config → Prompts → Prompt history</span>.</li>
+        </ul>
+        <p class="muted">History has its own search too, by prompt, checkpoint and date. See <a href="history.html#search">History</a>.</p>
+    </div>
+    <figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/prompt-history.webp" alt="Recent Prompts" loading="lazy" width="412" height="892"></div></div><figcaption>Recent Prompts on SDXL.</figcaption></figure>
+</div>
+
+<h2 id="negative">The negative box</h2>
+<p>The <b>Negative</b> box lists what you <i>don’t</i> want. Resolver adds two helpers when the job is sent (your box itself isn’t changed):</p>
+<div class="opts">
+    <dl class="opt"><dt>Negative blocks prompt tags<small>Config → Prompts · on</small></dt><dd>A tag that is in the negative is taken out of the prompt, so the two never fight. Wildcards also avoid picking it.</dd></dl>
+    <dl class="opt"><dt><span data-pc="~word"></span><small>always</small></dt><dd>Removes every prompt tag that <b>ends</b> in that word, and keeps wildcards from picking one: <code>~hat</code> stops <i>hat</i>, <i>sun hat</i> and <i>top hat</i>. Handy against a wildcard or LoRA that keeps adding something.</dd></dl>
+</div>
+<p>A <code>__wildcard__</code> written in the negative is kept out of the prompt’s picks and adds nothing to the negative.</p>
+
+<h2 id="format">Prompt auto-formatting</h2>
+<p>Off by default. With <span class="ui plain">Config → Prompts → Prompt auto-formatting</span> on, each box is tidied when you generate (and when you leave it, with <b>Format on leaving text box</b>):</p>
+<div class="grid cols-2">
+    <div class="card"><p class="lbl" style="margin:0 0 8px">Before</p><div class="prompt-demo" style="margin:0"><span data-pc="1girl,Blue_Eyes , (smile : 1.2),, long hair,long hair"></span></div></div>
+    <div class="card"><p class="lbl" style="margin:0 0 8px">After (SDXL)</p><div class="prompt-demo" style="margin:0"><span data-pc="1girl, blue eyes, (smile:1.2), long hair, "></span></div></div>
+</div>
+<ul>
+    <li>One space after each comma, none before; no doubled or empty tags; empty brackets go; <code>(blue eyes : 1.2)</code> becomes <code>(blue eyes:1.2)</code>; broken weights like <code>(smile1.5)</code> are mended.</li>
+    <li><b>SDXL and Anima</b> (and Inpaint with their checkpoints): tags in lower case, <code>_</code> between letters becomes a space, duplicate tags are removed, a closing <code>, </code> is added, and <code>name (series)</code> brackets are escaped so Forge reads them as text. Pony’s <code>score_9</code>, emoticons like <code>^_^</code>, LoRA tags, wildcards and embedding names are left alone.</li>
+    <li><b>Flux, Qwen, Krea</b> (sentences): spacing only, plus a missing space after a full stop.</li>
+    <li>Unfinished wildcards are closed (<code>__pose</code> → <code>__pose__</code>) and unknown ones removed, with a message.</li>
+</ul>
+
+<h2 id="saac">Character Select (SAAC)</h2>
+<p>For <b>WAI-Illustrious</b> models (v16 and later): a searchable gallery of the characters the model knows, with pictures. Switch it on in <span class="ui plain">Config → Prompts → SAAC</span>. The first time, it downloads about <b>125 MB</b> of character data, kept on the phone after that.</p>
+<ul>
+    <li>A <span class="ui">SAAC</span> button appears under the prompt. Tap a character to add its tags to the prompt (formatted as the box would be); characters already in the prompt come first.</li>
+    <li>Search, ★ favorites, and sort (A–Z, Recently used, Most used). Hold a card to see its picture full screen.</li>
+    <li><span data-pc="random::saac"></span> in a prompt picks a character for each image (only your favorites while the ★ filter is on).</li>
+</ul>
+
+<h2 id="tools">Other prompt tools</h2>
+<div class="grid cols-2">
+    <a class="feature" href="loras-styles.html"><span class="ic"><i data-lucide="palette"></i></span><b>LoRAs &amp; Styles →</b><span>Add LoRA tags and saved style presets from under the prompt.</span></a>
+    <a class="feature" href="wildcards.html"><span class="ic"><i data-lucide="shuffle"></i></span><b>Wildcards →</b><span>Random picks for each image: <code>__name__</code>, <code>{a|b}</code> and more.</span></a>
+    <a class="feature" href="magic-prompt.html"><span class="ic"><i data-lucide="sparkles"></i></span><b>Magic Prompt →</b><span>A local AI writes the prompt, or describes a picture.</span></a>
+    <a class="feature" href="extensions.html#tagcomplete"><span class="ic"><i data-lucide="tags"></i></span><b>Tag autocomplete →</b><span>Tag suggestions as you type.</span></a>
+</div>
+
+</main>
+<script src="assets/js/lucide.js"></script>
+<script src="assets/js/promptpaint.js"></script>
+<script src="assets/js/site.js"></script>
+<script src="assets/js/docs.js"></script>
+</body>
+</html>

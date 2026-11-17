@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Resolver Docs</title>
+<meta name="description" content="The complete guide to Resolver, the Android app for Stable Diffusion with Forge and ComfyUI.">
+<link rel="icon" href="assets/img/favicon.png">
+<script>try{var t=localStorage.getItem('rdocs-theme'),a=localStorage.getItem('rdocs-accent');if(t&&t!=='system')document.documentElement.dataset.theme=t;if(a)document.documentElement.dataset.accent=a;}catch(e){}</script>
+<link rel="stylesheet" href="assets/css/docs.css">
+</head>
+<body data-page="index">
+<main class="content">
+
+<section class="hero">
+    <div>
+        <p class="eyebrow">Resolver v3.0 · Documentation</p>
+        <h1>Learn <span class="wm">RESOLVER</span>,<br>feature by feature.</h1>
+        <p class="lead">Resolver turns your Android phone into a full remote control for Stable Diffusion running on your PC, through <b>Forge</b> or <b>ComfyUI</b>. These docs walk you through every tab, button and setting, with screenshots from the app.</p>
+        <div class="btn-row">
+            <a class="btn primary" href="getting-started.html"><i data-lucide="rocket"></i>Get started</a>
+            <a class="btn" href="#tour"><i data-lucide="smartphone"></i>Take the tour</a>
+        </div>
+        <div class="stats">
+            <div><b>5</b><span>model tabs</span></div>
+            <div><b>7</b><span>app tabs</span></div>
+            <div><b>13</b><span>settings sections</span></div>
+            <div><b>99</b><span>settings explained</span></div>
+        </div>
+    </div>
+    <div class="phone"><div class="screen"><img class="zoomable" src="assets/img/shots/gen-sdxl.webp" alt="Resolver's Generate tab on SDXL" width="412" height="892"></div></div>
+</section>
+
+<h2 id="what">What is Resolver?</h2>
+<p>Image generation needs a strong graphics card, so it runs on your PC. Resolver is the part you hold in your hand: you write prompts, choose models and settings, and watch images arrive on your phone. Your PC does the work; the app sends it the job and brings back the result.</p>
+<div class="grid cols-3">
+    <div class="feature"><span class="ic"><i data-lucide="smartphone"></i></span><b>On your phone</b><span>Resolver (this app): prompts, settings, your history, and everything you see.</span></div>
+    <div class="feature"><span class="ic"><i data-lucide="wifi"></i></span><b>Over your network</b><span>At home over Wi-Fi, or from anywhere through a tunnel (Remote mode).</span></div>
+    <div class="feature"><span class="ic"><i data-lucide="monitor"></i></span><b>On your PC</b><span>Forge (or ComfyUI) generates the images on your graphics card.</span></div>
+</div>
+
+<h2 id="tour">Tour of the app</h2>
+<p>The app has a dock at the bottom, as on the phone. <b>Tap the icons below the phone</b> to see each tab. On Generate, try the model buttons too: each model tab has its own color, and so do these docs (also from the dots at the top).</p>
+<div class="tour" data-widget="tour">
+    <div>
+        <div class="phone"><div class="screen"><img class="zoomable" src="assets/img/shots/gen-sdxl.webp" alt="" width="412" height="892"></div></div>
+        <div class="tour-dock" role="group" aria-label="App tabs"></div>
+    </div>
+    <div class="tour-info" aria-live="polite"></div>
+</div>
+<div class="callout tip"><i data-lucide="hand"></i><div><b>The real dock slides too</b><p>In the app you can tap a tab, or put your finger on the dock and slide: the tab under your finger lifts up with its name, a light tick buzzes for each one you pass, and letting go switches to it. Sliding up off the dock cancels.</p></div></div>
+
+<h2 id="features">What Resolver can do</h2>
+<div class="grid cols-2">
+    <div class="feature"><span class="ic"><i data-lucide="zap"></i></span><b>Five model tabs</b><span>SDXL, Anima, Qwen (Z-Image), Flux and Krea, each with its own checkpoint, prompts and settings.</span></div>
+    <div class="feature"><span class="ic"><i data-lucide="shuffle"></i></span><b>Wildcards</b><span><code>__name__</code> picks a random option for every image, with weights, nesting and rules. Import from files, links or Civitai.</span></div>
+    <div class="feature"><span class="ic"><i data-lucide="palette"></i></span><b>LoRAs &amp; Styles</b><span>Pick LoRAs with thumbnails, variants, groups and weight sliders; save prompt presets as Styles.</span></div>
+    <div class="feature"><span class="ic"><i data-lucide="layout-grid"></i></span><b>Forge Couple</b><span>Describe different parts of the picture separately, with region boxes you draw.</span></div>
+    <div class="feature"><span class="ic"><i data-lucide="sparkles"></i></span><b>Magic Prompt</b><span>A local AI model turns a short idea into a full prompt, or describes an image for you.</span></div>
+    <div class="feature"><span class="ic"><i data-lucide="brush"></i></span><b>Inpaint, img2img &amp; Upscale</b><span>Repaint part of a picture with your finger, redraw it, extend it, or enlarge it.</span></div>
+    <div class="feature"><span class="ic"><i data-lucide="layers"></i></span><b>Queue</b><span>Line up many jobs, even every combination of your prompt’s choices, and run them all.</span></div>
+    <div class="feature"><span class="ic"><i data-lucide="moon"></i></span><b>Keeps going with the screen off</b><span>Generation continues in the background, with progress in your notifications.</span></div>
+    <div class="feature"><span class="ic"><i data-lucide="image"></i></span><b>History</b><span>Search, favourites, date sections, compare, multi-select and sharing.</span></div>
+    <div class="feature"><span class="ic"><i data-lucide="scan-line"></i></span><b>Analyze</b><span>Read how any image was made and reuse its settings in one tap.</span></div>
+    <div class="feature"><span class="ic"><i data-lucide="workflow"></i></span><b>ComfyUI</b><span>Run your own ComfyUI workflows with controls built for them.</span></div>
+    <div class="feature"><span class="ic"><i data-lucide="power"></i></span><b>Dev Power</b><span>Wake your PC, start or stop Forge and ComfyUI, all from the phone.</span></div>
+</div>
+
+<h2 id="next">Where to go next</h2>
+<div class="grid cols-2">
+    <a class="feature" href="getting-started.html"><span class="ic"><i data-lucide="rocket"></i></span><b>Getting Started →</b><span>Install the app, set up Forge on your PC, connect, and make your first image.</span></a>
+    <a class="feature" href="generate.html"><span class="ic"><i data-lucide="zap"></i></span><b>Generate →</b><span>Every part of the main tab: model tabs, checkpoints, settings, Hi-Res Fix and the generate buttons.</span></a>
+    <a class="feature" href="loras-styles.html"><span class="ic"><i data-lucide="palette"></i></span><b>LoRAs &amp; Styles →</b><span>Add LoRAs, set their weight and trigger words, use variants and groups, and save Styles.</span></a>
+    <a class="feature" href="prompting.html"><span class="ic"><i data-lucide="text-cursor-input"></i></span><b>Prompting →</b><span>Weights, BREAK and AND, the colored boxes, Recent Prompts and auto-formatting, with a playground.</span></a>
+    <a class="feature" href="wildcards.html"><span class="ic"><i data-lucide="shuffle"></i></span><b>Wildcards →</b><span>Random picks for every image, with a live simulator running the app’s own engine.</span></a>
+    <a class="feature" href="magic-prompt.html"><span class="ic"><i data-lucide="sparkles"></i></span><b>Magic Prompt →</b><span>A local AI writes prompts, describes images and matches wildcard picks.</span></a>
+    <a class="feature" href="extensions.html"><span class="ic"><i data-lucide="puzzle"></i></span><b>Extensions →</b><span>ADetailer for faces and hands, ControlNet poses, and Forge Couple regions.</span></a>
+    <a class="feature" href="inpaint.html"><span class="ic"><i data-lucide="brush"></i></span><b>Inpaint, img2img &amp; Upscale →</b><span>Crop &amp; Edit, masks, outpainting, Denoising, presets and upscaling.</span></a>
+    <a class="feature" href="queue.html"><span class="ic"><i data-lucide="layers"></i></span><b>Queue →</b><span>Line up jobs, and make every combination of a prompt.</span></a>
+    <a class="feature" href="history.html"><span class="ic"><i data-lucide="image"></i></span><b>History →</b><span>Search, favorites, the viewer, badges and how many images are kept.</span></a>
+    <a class="feature" href="analyze.html"><span class="ic"><i data-lucide="scan-line"></i></span><b>Analyze →</b><span>Read an image’s prompt and settings and reuse them.</span></a>
+    <a class="feature" href="comfyui.html"><span class="ic"><i data-lucide="workflow"></i></span><b>ComfyUI →</b><span>Run your own workflows with controls built for them.</span></a>
+    <a class="feature" href="dev-power.html"><span class="ic"><i data-lucide="power"></i></span><b>Dev Power &amp; Remote →</b><span>Start Forge from the phone, and connect from anywhere.</span></a>
+    <a class="feature" href="background.html"><span class="ic"><i data-lucide="bell"></i></span><b>Background &amp; Notifications →</b><span>Keep generating with the screen off.</span></a>
+    <a class="feature" href="config.html"><span class="ic"><i data-lucide="settings"></i></span><b>Config →</b><span>All 99 settings, searchable, with their defaults.</span></a>
+    <a class="feature" href="backup.html"><span class="ic"><i data-lucide="archive-restore"></i></span><b>Backup &amp; Restore →</b><span>Keep your styles, LoRA data, wildcards and favorites safe.</span></a>
+    <a class="feature" href="help.html"><span class="ic"><i data-lucide="life-buoy"></i></span><b>Troubleshooting &amp; FAQ →</b><span>Answers to common problems, and the Debug Log.</span></a>
+</div>
+
+</main>
+<script src="assets/js/lucide.js"></script>
+<script src="assets/js/site.js"></script>
+<script src="assets/js/docs.js"></script>
+</body>
+</html>

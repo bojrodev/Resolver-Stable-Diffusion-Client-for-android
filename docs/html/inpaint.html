@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inpaint, img2img &amp; Upscale · Resolver Docs</title>
+<meta name="description" content="Crop & Edit, outpainting, painting a mask, Inpaint settings, img2img and its presets, Denoising, and Upscale.">
+<link rel="icon" href="assets/img/favicon.png">
+<script>try{var t=localStorage.getItem('rdocs-theme'),a=localStorage.getItem('rdocs-accent');if(t&&t!=='system')document.documentElement.dataset.theme=t;if(a)document.documentElement.dataset.accent=a;}catch(e){}</script>
+<link rel="stylesheet" href="assets/css/docs.css">
+</head>
+<body data-page="inpaint">
+<main class="content">
+
+<p class="crumbs"><a href="index.html">Docs</a> / Edit</p>
+<h1>Inpaint, img2img &amp; Upscale</h1>
+<p class="lead">The second tab works on a picture you already have. <b>Inpaint</b> repaints the part you paint over, <b>img2img</b> redraws the whole picture, and <b>Upscale</b> enlarges it. Switch with the three buttons at the top, or swipe sideways.</p>
+
+<div class="grid cols-3">
+    <div class="feature"><span class="ic"><i data-lucide="brush"></i></span><b>INPAINT</b><span>Paint a mask; only that part changes. Fix a hand, change a face, remove an object.</span></div>
+    <div class="feature"><span class="ic"><i data-lucide="refresh-cw"></i></span><b>IMG2IMG</b><span>The whole picture redrawn from itself: a new style, more detail, a variation.</span></div>
+    <div class="feature"><span class="ic"><i data-lucide="maximize-2"></i></span><b>UPSCALE</b><span>Bigger and sharper with an upscaler model. No prompt needed.</span></div>
+</div>
+
+<h2 id="load">Getting a picture in</h2>
+<ul>
+    <li><b>UPLOAD IMAGE</b> on the tab: choose one from the phone. It opens in <a href="#crop">Crop &amp; Edit</a> first.</li>
+    <li><span class="ui">RECENT</span>: pictures you uploaded before, to open again (turn off in <span class="ui plain">Config → Inpaint &amp; Analyze → Recent uploads</span>).</li>
+    <li>From a result: open it in the viewer, then <span class="ui plain">Send → Inpaint</span>. From <a href="analyze.html">Analyze</a>: <span class="ui">INPAINT</span>, <span class="ui">IMG2IMG</span> or <span class="ui">UPSCALE</span>.</li>
+</ul>
+<p>The picture is shared by Inpaint and img2img; each keeps its own prompt, settings and Denoising. The <i data-lucide="x" style="width:16px;height:16px;vertical-align:-3px"></i> on the picture removes it, <i data-lucide="image-plus" style="width:16px;height:16px;vertical-align:-3px"></i> replaces it.</p>
+
+<h2 id="crop">Crop &amp; Edit</h2>
+<div class="split">
+    <div>
+        <p>Every picture passes through here, so it has a size the model handles well.</p>
+        <div class="opts">
+            <dl class="opt"><dt>Move and zoom</dt><dd>Drag to move, pinch to zoom, double-tap to switch between the whole picture and 100%. The box shows what’s kept.</dd></dl>
+            <dl class="opt"><dt>1MP / 2MP Presets</dt><dd>The same shapes as on Generate (1:1, 3:2, 4:3, 16:9). The label of the tier closest to your picture’s size lights up. <a href="generate.html#size">Sizes</a>.</dd></dl>
+            <dl class="opt"><dt>FIT TO IMAGE</dt><dd>The whole picture, at its own size and shape (in multiples of 8).</dd></dl>
+            <dl class="opt"><dt><i data-lucide="arrow-left-right" style="width:16px;height:16px;vertical-align:-3px"></i> Flip</dt><dd>Portrait ↔ landscape.</dd></dl>
+            <dl class="opt"><dt><i data-lucide="lock" style="width:16px;height:16px;vertical-align:-3px"></i> Confine to Image</dt><dd>On (locked): the box always stays inside the picture. Unlock it to zoom out past the edges: see <a href="#outpaint">outpainting</a>.</dd></dl>
+            <dl class="opt"><dt>— × —</dt><dd>The size that will be sent.</dd></dl>
+            <dl class="opt"><dt>PROCEED · CANCEL</dt><dd>Use the crop, or go back to where you came from.</dd></dl>
+        </div>
+    </div>
+    <figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/editor.webp" alt="Crop & Edit" loading="lazy" width="412" height="892"></div></div><figcaption>Crop &amp; Edit.</figcaption></figure>
+</div>
+<h3 id="outpaint">Outpainting: making the picture bigger</h3>
+<p>Unlock <i data-lucide="lock-open" style="width:16px;height:16px;vertical-align:-3px"></i> Confine to Image and zoom out so the box goes past the picture’s edges. After <span class="ui">PROCEED</span>, the empty margins are filled with the picture’s edge colours (softly blurred) and masked, and the tab switches to <b>Inpaint</b>, which paints the new area. Describe the whole scene in the prompt and use a high Denoising (0.8–1).</p>
+
+<h2 id="inpaint">Inpaint</h2>
+<div class="split flip">
+    <div>
+        <p>Paint over what should change, with your finger. It shows as a see-through layer.</p>
+        <div class="opts">
+            <dl class="opt"><dt>DRAW / ERASE</dt><dd>Paint the mask, or rub some off.</dd></dl>
+            <dl class="opt"><dt>Brush Size</dt><dd>5–300. While painting, a <b>floating</b> Brush Size slider sits above the dock (<span class="ui plain">Config → Inpaint &amp; Analyze</span>), and a circle shows the size as you change it.</dd></dl>
+            <dl class="opt"><dt><i data-lucide="undo-2" style="width:16px;height:16px;vertical-align:-3px"></i> <i data-lucide="trash" style="width:16px;height:16px;vertical-align:-3px"></i> <i data-lucide="search-x" style="width:16px;height:16px;vertical-align:-3px"></i></dt><dd>Undo the last stroke, clear the mask, and reset the zoom (pinch the picture to zoom in for fine work).</dd></dl>
+        </div>
+    </div>
+    <figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/inp-mask.webp" alt="A painted mask" loading="lazy" width="412" height="892"></div></div><figcaption>A mask painted on the sky.</figcaption></figure>
+</div>
+<h3 id="mask-settings">Mask settings</h3>
+<div class="split">
+    <div>
+        <div class="opts">
+            <dl class="opt"><dt>Masked Content<small>default Original</small></dt><dd>What the masked part starts from. <b>Original</b>: what’s there now (best for changes that keep the shape). <b>Fill</b>: the surrounding colours. <b>Latent Noise</b>: random noise, for something new. <b>Latent Nothing</b>: blank. Noise and Nothing need Denoising near 1.</dd></dl>
+            <dl class="opt"><dt>Mask Blur<small>0–64 · 4</small></dt><dd>Softens the mask’s edge, so the new part blends in.</dd></dl>
+            <dl class="opt"><dt>Mask Mode<small>WHOLE / MASKED</small></dt><dd><b>WHOLE</b>: the whole picture is worked on at its size. <b>MASKED</b>: only the masked area (plus padding) is cut out, worked on at full resolution and put back: much more detail for a small area such as a face or hand.</dd></dl>
+            <dl class="opt"><dt>Mask Padding<small>0–256 px · 32</small></dt><dd>With MASKED: how much around the mask the model sees, for context.</dd></dl>
+            <dl class="opt"><dt>Color Match</dt><dd>Matches the new part’s colours to the original.</dd></dl>
+            <dl class="opt"><dt>Soft Inpaint</dt><dd>Blends the edge gradually instead of a hard cut (Forge’s Soft Inpainting).</dd></dl>
+        </div>
+    </div>
+    <figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/inp-controls.webp" alt="Mask settings" loading="lazy" width="412" height="892"></div></div><figcaption>Mask, brush and mask settings.</figcaption></figure>
+</div>
+<p>Below these are the usual parts: <b>Active Checkpoint</b> (its own, apart from Generate’s; Flux checkpoints get their CLIP / T5 row here too), Low Bits and Modules Override when shown, <a href="extensions.html">ADetailer and ControlNet</a> when switched on for “other”, the <b>Prompt</b> (with LoRA, Styles, Presets and Recent Prompts), <b>Negative</b> and <b>Generation Params</b>.</p>
+<div class="callout tip"><i data-lucide="lightbulb"></i><div><b>Describe only the masked part</b><p>In Inpaint the prompt is for what goes <i>in the mask</i>: “blue sky with clouds”, not the whole scene. (The default prompt is just <code>original</code>.)</p></div></div>
+
+<h2 id="img2img">img2img</h2>
+<div class="split flip">
+    <div>
+        <p>No mask: the whole picture is redrawn, guided by your prompt. Use it to restyle a picture, add detail, or make variations.</p>
+        <ul>
+            <li>The prompt describes the <b>whole</b> picture. The <i data-lucide="download" style="width:16px;height:16px;vertical-align:-3px"></i> button in the Prompt header (img2img only) brings in the prompt saved in the picture.</li>
+            <li><b>Denoising</b> sets how much changes (0.5 by default; 0.75 for Inpaint). The − / + buttons move it by 0.01, and the hint below says how many steps will really run.</li>
+            <li><span class="ui">PRESETS</span>: saved <a href="#presets">img2img presets</a>. Styles and LoRAs work here too.</li>
+            <li><span class="ui plain">Config → Inpaint &amp; Analyze → Keep source seed</span> reuses the seed saved in the picture.</li>
+        </ul>
+    </div>
+    <div class="col" style="display:flex;flex-direction:column;gap:18px">
+        <figure class="shot" style="margin:0"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/inp-img2img.webp" alt="img2img" loading="lazy" width="412" height="892"></div></div><figcaption>img2img with a picture.</figcaption></figure>
+        <figure class="shot" style="margin:0"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/inp-img2img-params.webp" alt="img2img settings" loading="lazy" width="412" height="892"></div></div><figcaption>Prompt, Generation Params and Denoising.</figcaption></figure>
+    </div>
+</div>
+<h3 id="denoise">How much does Denoising change?</h3>
+<div class="card" data-widget="denoise">
+    <div class="ar">
+        <div class="ar-controls">
+            <div><span class="ar-lbl">Steps</span><input class="dn-steps" type="range" min="1" max="60" value="25" aria-label="Steps" style="flex:1"><b class="dn-sv" style="width:30px"></b></div>
+            <div><span class="ar-lbl">Denoise</span><input class="dn-val" type="range" min="0" max="1" step="0.05" value="0.5" aria-label="Denoising strength" style="flex:1"><b class="dn-dv" style="width:38px"></b></div>
+            <p class="dn-out" style="margin:4px 0 0;font-weight:700" aria-live="polite"></p>
+            <p class="dn-hint muted" style="margin:0;font-size:14px"></p>
+        </div>
+        <div><div class="denoise-pic" aria-hidden="true"><i></i></div><p class="muted" style="font-size:12.5px;margin:6px 0 0;text-align:center">How much noise covers the picture before it’s redrawn</p></div>
+    </div>
+</div>
+<p class="muted" style="font-size:14px">Forge runs only part of the steps in img2img: about Steps × Denoising (+1). So raise Steps a little when you use a low Denoising.</p>
+
+<h3 id="presets">img2img presets</h3>
+<div class="split">
+    <div>
+        <p>A preset saves a prompt with its settings, for jobs you repeat (“upscale detail pass”, “anime to painting”). Tap <span class="ui">PRESETS</span> under the prompt.</p>
+        <ul>
+            <li>Tap a preset to apply it; search, ★ favorites and sort as in the other lists.</li>
+            <li><i data-lucide="plus" style="width:16px;height:16px;vertical-align:-3px"></i> New: <b>Name</b>, <b>Steps</b>, <b>CFG</b>, <b>Denoise</b>, <b>Prompt</b> and <b>Negative</b>, filled from the tab. <b>FROM THE IMG2IMG TAB</b> lists the rest it keeps; <span class="ui">USE CURRENT SETTINGS</span> takes them again.</li>
+            <li>Presets are in backups (<span class="ui plain">Presets</span>).</li>
+        </ul>
+    </div>
+    <figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/img2img-presets.webp" alt="img2img Presets" loading="lazy" width="412" height="892"></div></div><figcaption>img2img Presets.</figcaption></figure>
+</div>
+
+<h2 id="upscale">Upscale</h2>
+<div class="split flip">
+    <div>
+        <p>Enlarges the picture with Forge’s upscaler models (Extras), quickly and without changing what’s in it.</p>
+        <div class="opts">
+            <dl class="opt"><dt>Resize Mode</dt><dd><b>BY FACTOR</b>: <b>Scale By</b> 1–8 (2 by default). <b>TO SIZE</b>: a <b>Width</b> and <b>Height</b>; <b>Crop to Fit</b> (on) crops instead of stretching when the shape differs. The line under the picture shows the size before and after (768 × 768 → 1536 × 1536).</dd></dl>
+            <dl class="opt"><dt>Upscaler 1</dt><dd>The model: R-ESRGAN 4x+ (photos), R-ESRGAN 4x+ Anime6B (anime), 4x-UltraSharp…</dd></dl>
+            <dl class="opt"><dt>Upscaler 2 (optional blend)</dt><dd>A second model blended in by <b>Upscaler 2 Visibility</b> (0–1).</dd></dl>
+            <dl class="opt"><dt>Copy Metadata from Source</dt><dd>Puts the original’s prompt and settings into the result, so Analyze can still read it.</dd></dl>
+            <dl class="opt"><dt>Face restore<small>Config → Experimental</small></dt><dd>With <b>Additional upscale features</b> on: GFPGAN Visibility, CodeFormer Visibility and CodeFormer Weight.</dd></dl>
+            <dl class="opt"><dt>UPSCALE · ABORT · SKIP</dt><dd>Start, stop, or skip the current one. With <a href="extensions.html#progress-bridge">Progress Bridge</a>, its real progress shows.</dd></dl>
+        </div>
+    </div>
+    <div class="col" style="display:flex;flex-direction:column;gap:18px">
+        <figure class="shot" style="margin:0"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/inp-upscale.webp" alt="Upscale" loading="lazy" width="412" height="892"></div></div><figcaption>Upscale.</figcaption></figure>
+        <figure class="shot" style="margin:0"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/inp-upscale-settings.webp" alt="Upscale settings" loading="lazy" width="412" height="892"></div></div><figcaption>Its settings.</figcaption></figure>
+    </div>
+</div>
+<div class="callout note"><i data-lucide="git-compare"></i><div><b>Before and after</b><p>In the viewer, <b>hold</b> an Upscale, img2img or Inpaint result (made this session) to see the picture it was made from, at the same zoom. Let go to see the result again.</p></div></div>
+<p class="muted">Want more detail, not just more pixels? Use img2img at a bigger size with Denoising 0.3–0.4, or <a href="generate.html#hires">Hi-Res Fix</a> while generating.</p>
+
+</main>
+<script src="assets/js/lucide.js"></script>
+<script src="assets/js/site.js"></script>
+<script src="assets/js/docs.js"></script>
+</body>
+</html>

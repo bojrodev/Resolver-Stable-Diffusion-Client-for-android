@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Queue · Resolver Docs</title>
+<meta name="description" content="Line up jobs and run them in one go: adding, reordering, details, SKIP and ABORT, and All combinations.">
+<link rel="icon" href="assets/img/favicon.png">
+<script>try{var t=localStorage.getItem('rdocs-theme'),a=localStorage.getItem('rdocs-accent');if(t&&t!=='system')document.documentElement.dataset.theme=t;if(a)document.documentElement.dataset.accent=a;}catch(e){}</script>
+<link rel="stylesheet" href="assets/css/docs.css">
+</head>
+<body data-page="queue">
+<main class="content">
+
+<p class="crumbs"><a href="index.html">Docs</a> / Review</p>
+<h1>Queue</h1>
+<p class="lead">Set up several jobs (different prompts, models, settings), line them up, and let your PC work through them while you do something else. The number on the dock’s <i data-lucide="layers" style="width:17px;height:17px;vertical-align:-3px"></i> icon is how many are waiting.</p>
+
+<h2 id="add">Adding jobs</h2>
+<ol class="steps">
+    <li><b>Set up a job as for generating</b><span class="muted">On any model tab of Generate: prompt, checkpoint, settings, extensions.</span></li>
+    <li><b>Tap Add to queue</b><span class="muted">The <i data-lucide="list-plus" style="width:16px;height:16px;vertical-align:-3px"></i> button beside GENERATE. The job is saved as it is now, so you can change the tab and add another right away.</span></li>
+    <li><b>Open Queue and tap START BATCH</b><span class="muted">Jobs run one after another, from the top. You can keep adding while it runs.</span></li>
+</ol>
+
+<h2 id="tab">The Queue tab</h2>
+<div class="split">
+    <div>
+        <div class="opts">
+            <dl class="opt"><dt>QUEUE</dt><dd>Jobs waiting, the next one marked <b>NEXT</b>. <span class="ui">START BATCH</span> runs them; <span class="ui">CLEAR</span> empties the list.</dd></dl>
+            <dl class="opt"><dt>ACTIVE</dt><dd>The job running now, with its image count and a progress line along the card. The header shows steps done (ADetailer’s included). <span class="ui">SKIP</span> drops the image being made and goes on; <span class="ui">ABORT</span> stops.</dd></dl>
+            <dl class="opt"><dt>COMPLETED</dt><dd>Finished jobs with a thumbnail. Tap the thumbnail to see the job’s images full screen. <span class="ui">CLEAR</span> empties the list (the images stay in History).</dd></dl>
+        </div>
+        <p>Each card shows the <b>mode</b> (SDXL, Anima, Flux…), the <b>checkpoint</b>, and chips with its main settings.</p>
+        <ul>
+            <li><b>Tap a card</b> for its details: the prompt and negative (or Forge Couple’s background and regions), each with copy, and all its settings. <span class="ui">REMOVE</span> takes a waiting job out.</li>
+            <li><b>Hold and drag</b> a waiting card to change the order. Near the top or bottom the page scrolls.</li>
+            <li>The last card you tapped stays outlined, so you don’t lose your place.</li>
+        </ul>
+    </div>
+    <div class="col" style="display:flex;flex-direction:column;gap:18px">
+        <figure class="shot" style="margin:0"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/queue.webp" alt="The Queue tab with three jobs" loading="lazy" width="412" height="892"></div></div><figcaption>Three jobs waiting: SDXL, Anima and Flux.</figcaption></figure>
+        <figure class="shot" style="margin:0"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/queue-details.webp" alt="A job's details" loading="lazy" width="412" height="892"></div></div><figcaption>A job’s details.</figcaption></figure>
+    </div>
+</div>
+<div class="callout tip"><i data-lucide="moon"></i><div><b>Leave it running</b><p>The queue keeps going with the screen off or the app in the background, with progress in your notifications. See <a href="background.html">Background &amp; Notifications</a>.</p></div></div>
+
+<h2 id="combinations">All combinations</h2>
+<p>With wildcards or <code>{a|b}</code> choices in the prompt, <span class="ui plain">More Settings → All combinations</span> makes <b>every</b> combination instead of random picks: <code>{red|blue} dress, {day|night}</code> gives 4 images. Its line shows how many the prompt makes.</p>
+<p>Big numbers are split into runs: <span class="ui plain">Config → Prompts</span> sets <b>Combinations per run</b> (100) and <b>Queued jobs at most</b> (50). When a prompt makes more than one run, the app asks whether to queue them all. Try it:</p>
+<div class="card play" data-widget="combos">
+    <div class="ex-btns" role="group" aria-label="Examples">
+        <button data-ex="1girl, {red|blue} dress, {day|night}">4 combinations</button>
+        <button data-ex="1girl, __hair color__, __places__, __pose__">60 combinations</button>
+        <button data-ex="1girl, __hair color__, __places__, __pose__, {smile|frown|surprised}, {day|night|sunset|dawn}">720 combinations</button>
+    </div>
+    <input type="text" class="cb-prompt" value="1girl, __hair color__, __places__, __pose__" aria-label="Prompt" spellcheck="false">
+    <div class="row">
+        <label class="lbl" for="cbCap">Combinations per run</label><input id="cbCap" class="cb-cap" type="number" min="1" max="999" value="100" style="width:110px">
+        <label class="lbl" for="cbJobs">Queued jobs at most</label><input id="cbJobs" class="cb-jobs" type="number" min="1" max="999" value="50" style="width:110px">
+    </div>
+    <div class="stat-line" aria-live="polite"></div>
+    <p class="cb-say" style="margin:0"></p>
+    <p class="muted" style="margin:0;font-size:13.5px">The wildcards here are the examples from <a href="wildcards.html#try">Wildcards</a>: hair color (5 options), places (4), pose (3). Counted by the app’s own engine.</p>
+</div>
+<ul>
+    <li>Each run carries on from where the last one stopped. After an ABORT, the next run starts again at the image that was aborted.</li>
+    <li>From <b>Add to queue</b> the question offers <span class="ui">QUEUE … ONLY</span> (just the next run) instead of GENERATE … NOW.</li>
+    <li>Emptying the prompt turns All combinations off.</li>
+</ul>
+
+</main>
+<script src="assets/js/lucide.js"></script>
+<script src="assets/js/wcengine.js"></script>
+<script src="assets/js/site.js"></script>
+<script src="assets/js/docs.js"></script>
+</body>
+</html>

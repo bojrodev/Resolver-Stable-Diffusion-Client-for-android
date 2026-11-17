@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dev Power &amp; Remote · Resolver Docs</title>
+<meta name="description" content="Start and stop Forge, ComfyUI and LM Studio from the phone with the Bojro Dev Power PC app, and use Resolver away from home.">
+<link rel="icon" href="assets/img/favicon.png">
+<script>try{var t=localStorage.getItem('rdocs-theme'),a=localStorage.getItem('rdocs-accent');if(t&&t!=='system')document.documentElement.dataset.theme=t;if(a)document.documentElement.dataset.accent=a;}catch(e){}</script>
+<link rel="stylesheet" href="assets/css/docs.css">
+</head>
+<body data-page="dev-power">
+<main class="content">
+
+<p class="crumbs"><a href="index.html">Docs</a> / Advanced</p>
+<h1>Dev Power &amp; Remote</h1>
+<p class="lead">Forge doesn’t have to be running when you sit down with your phone. <b>Bojro Dev Power</b> is a small companion app for your Windows PC: Resolver tells it to start or stop Forge, ComfyUI and LM Studio.</p>
+
+<h2 id="pc-app">The PC app</h2>
+<div class="split">
+    <div>
+        <ol class="steps">
+            <li><b>Download and run it</b><span class="muted">From the Resolver <a href="https://github.com/bojrodev/Resolver-Stable-Diffusion-Client-for-android/releases" target="_blank" rel="noopener">GitHub releases</a> (the book button in the app links there too). It runs in the tray.</span></li>
+            <li><b>Set the paths</b><span class="muted">Under <b>Service Paths</b>, <b>Browse…</b> to the file that starts each one (for Forge, <code>webui-user.bat</code>), tick <b>On</b> for the ones to start, and <b>Save</b>.</span></li>
+            <li><b>Check the port</b><span class="muted"><b>API Port</b> is 5000 by default; it must match <span class="ui plain">Config → Connection → Local ports → Wake</span>.</span></li>
+            <li><b>Optional</b><span class="muted"><b>Start on Boot</b> (runs at Windows login), <b>Minimize to Tray</b>, <b>Dark Mode</b>.</span></li>
+        </ol>
+        <p>Its window also has <b>START ALL</b> / <b>STOP ALL</b>, a Start / Stop per service with its state, and a <b>Live Console</b> showing each service’s output.</p>
+    </div>
+    <figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/power-info.webp" alt="Dev Power info in the app" loading="lazy" width="412" height="892"></div></div><figcaption>The book button: where to get the PC app.</figcaption></figure>
+</div>
+<div class="callout warn"><i data-lucide="shield"></i><div><b>Keep it on your network</b><p>Anyone who can reach port 5000 can start and stop these programs. Don’t open that port to the internet; away from home, use a tunnel with access control (see <a href="#remote">below</a>).</p></div></div>
+
+<h2 id="buttons">The buttons in the app</h2>
+<p>At the top of <b>Generate</b>, the <b>Use Bojro Dev Power</b> row:</p>
+<figure class="shot"><img class="zoomable" src="assets/img/shots/power-row.webp" alt="The Dev Power row" loading="lazy" style="max-width:420px;width:100%;border-radius:14px;border:1px solid var(--border)"></figure>
+<p>Tap them below to see what each one sends and does:</p>
+<div class="card" data-widget="power">
+    <div class="pw">
+        <div style="display:flex;flex-direction:column;gap:12px">
+            <p class="lbl" style="margin:0">In the app</p>
+            <div class="pw-btns">
+                <button data-act="power"><i data-lucide="power"></i>Power</button>
+                <button data-act="kill" class="kill">KILL!</button>
+            </div>
+            <p class="lbl" style="margin:6px 0 0">PWK (Partial Control)</p>
+            <div class="pw-btns">
+                <button data-act="forge-on">Forge ON</button><button data-act="forge-off" class="kill">KILL</button>
+                <button data-act="comfy-on">ComfyUI ON</button><button data-act="comfy-off" class="kill">KILL</button>
+                <button data-act="lm-on">LM Studio ON</button><button data-act="lm-off" class="kill">KILL</button>
+            </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:10px">
+            <p class="lbl" style="margin:0">On the PC</p>
+            <div class="pw-svc">
+                <div data-svc="forge">Forge<span>STOPPED</span></div>
+                <div data-svc="comfy">ComfyUI<span>STOPPED</span></div>
+                <div data-svc="lm">LM Studio<span>STOPPED</span></div>
+            </div>
+            <div class="pw-req" aria-live="polite">Tap a button</div>
+            <p class="pw-say muted" style="margin:0;font-size:14px"></p>
+        </div>
+    </div>
+</div>
+<div class="split">
+    <div>
+        <div class="opts">
+            <dl class="opt"><dt><i data-lucide="book-open" style="width:16px;height:16px;vertical-align:-3px"></i> Book</dt><dd>What Dev Power is and where to download the PC app.</dd></dl>
+            <dl class="opt"><dt><i data-lucide="power" style="width:16px;height:16px;vertical-align:-3px"></i> Power</dt><dd>Starts every service ticked On. Give Forge a minute to load, then tap INITIALIZE ENGINE.</dd></dl>
+            <dl class="opt"><dt>PWK</dt><dd><b>Partial Control</b>: ON or KILL for Forge, ComfyUI or LM Studio alone. Handy to free the graphics card for one of them.</dd></dl>
+            <dl class="opt"><dt>KILL!</dt><dd>Stops all three. The PC stays on.</dd></dl>
+        </div>
+        <p>Hide the row with <span class="ui plain">Config → Interface → Show Dev Power</span>.</p>
+    </div>
+    <figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/power-pwk.webp" alt="Partial Control" loading="lazy" width="412" height="892"></div></div><figcaption>PWK: one service at a time.</figcaption></figure>
+</div>
+
+<h2 id="remote">Using Resolver away from home</h2>
+<p>At home the phone reaches the PC by its local address. Away from home it needs a <b>tunnel</b>: a public address that leads to your PC, such as <b>ngrok</b> or <b>Cloudflare Tunnel</b>. Set-up steps are in <a href="getting-started.html#remote">Getting Started → Remote mode</a>. In short:</p>
+<ol class="steps">
+    <li><b>Run a tunnel to Forge’s port</b><span class="muted">For example <code>ngrok http 7860</code>, and one to port 5000 if you use Dev Power.</span></li>
+    <li><b>Switch to REMOTE</b><span class="muted"><span class="ui plain">Config → Connection → Connection mode → REMOTE</span>, then paste the public addresses into <b>Forge URL</b> and <b>Dev Power (Wake) URL</b>.</span></li>
+    <li><b>Behind Cloudflare Access?</b><span class="muted">Turn on <b>Cloudflare Zero Trust</b> and paste a service token’s <b>Client ID</b> and <b>Client secret</b>: they’re sent with every request.</span></li>
+</ol>
+<div class="callout tip"><i data-lucide="smartphone"></i><div><b>On mobile data</b><p>Live Preview is off on mobile data unless you allow it (<span class="ui plain">Config → Live Preview</span>), and the <a href="help.html#diagnostics">Data usage tracker</a> shows what each job costs.</p></div></div>
+
+</main>
+<script src="assets/js/lucide.js"></script>
+<script src="assets/js/site.js"></script>
+<script src="assets/js/docs.js"></script>
+</body>
+</html>
