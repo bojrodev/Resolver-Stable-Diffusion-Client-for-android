@@ -1,7 +1,7 @@
 {
-  "version": "3.1",
-  "isNativeRequired": true,
+  "version": "3.1.1",
+  "isNativeRequired": false,
   "nativeUrl": "https://github.com/bojrodev/Resolver-Stable-Diffusion-Client-for-android/releases/tag/v3.1",
-  "url": "https://github.com/bojrodev/Resolver-Stable-Diffusion-Client-for-android/releases/download/v3.0.1/OTTA3.0.1fix.zip",
-  "note": "Resolver v3.1 security update\n\n• Critical security fix in the app's Android layer (Capacitor 6.2.3)\n• Includes all v3.0.1 fixes: History order, smarter duplicate tags, dock and keyboard fixes\n\nNew APK required: install over your current app. Your images and settings stay."
+  "url": "https://github.com/bojrodev/Resolver-Stable-Diffusion-Client-for-android/releases/download/v3.1.1/ota3.1.1.zip",
+  "note": "Resolver v3.1.1: Advanced Control\n\n• Config opens in a clean Simple mode with just the essentials\n• Hold the CPU in the new Mode selector to unlock Advanced Control and every option\n• Search is now an icon beside the Mode selector\n• Notice links open in a browser tab\n• Readable toasts in light mode\n\nInstalls in the app, no new APK needed. On a version older than 3.1, install the v3.1 APK first. Your images and settings stay."
 }
