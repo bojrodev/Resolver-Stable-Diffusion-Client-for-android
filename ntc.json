@@ -1,9 +1,9 @@
 {
-  "id": "v3.0-release",
-  "title": "Resolver v3.0 Released",
-  "message": "Resolver v3.0 is out, our biggest update yet: Wildcards, Forge Couple, prompt history, LoRA variants & groups, Backup & Restore, a new dock and 40+ fixes. Huge thanks to Bungles for the v3.0 patch! It needs a new APK: install it over your current app and your images, history and settings stay as they are.",
+  "id": "docs-site-launch",
+  "title": "New: Resolver Documentation",
+  "message": "Resolver now has a full documentation website: an interactive guide to every tab, setting and feature, with screenshots, wildcards and extension guides, troubleshooting and answers to common questions. To open it, visit Resolver's page on GitHub (bojrodev / Resolver-Stable-Diffusion-Client-for-android) and tap \"Read the Docs\" at the top of the README.",
   "type": "info",
-  "date": "2026-11-16",
+  "date": "2026-11-17",
   "active": true,
   "link": "",
   "linkText": ""
