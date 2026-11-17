@@ -150,7 +150,7 @@ Requires the Bojro Power (`BojroPowerv_x_portable.exe`) utility running on the h
 ## Architecture
 
 Resolver utilizes a Hybrid Mobile Architecture to balance UI flexibility with system-level performance:
-- **Frontend:** Vanilla JS + Capacitor 6.0 for a responsive UI.
+- **Frontend:** Vanilla JS + Capacitor 6.2 for a responsive UI.
 - **Backend Communication:** REST API for state sync and WebSockets for real-time image streaming.
 - **Native Layer:** Java-based Android Foreground Services with Wake Locks to ensure background task persistence.
 

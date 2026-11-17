@@ -9,8 +9,8 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         // Bump both for every APK release: a new versionCode/versionName also makes Capacitor drop any OTA web
         // bundle installed earlier and load this APK's own built-in one (Bridge.isNewBinary()).
-        versionCode 10
-        versionName "3.0"
+        versionCode 11
+        versionName "3.1"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

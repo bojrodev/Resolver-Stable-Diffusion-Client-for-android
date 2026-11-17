@@ -48,7 +48,7 @@ async function checkForAppUpdate(silent = false) {
 
         // IMPORTANT: Update this number manually when you release a new version
         // (and versionCode / versionName in android/app/build.gradle for an APK release).
-        const currentVersion = '3.0.1';
+        const currentVersion = '3.1';
         // ---------------------
 
         const response = await fetch(UPDATE_URL + '?t=' + new Date().getTime());
@@ -149,7 +149,7 @@ function showUpdateModal(data, UpdaterPlugin) {
 
 // This web bundle needs the 3.0 app (its native parts: haptics, notifications, the Resolver device plugin). An app older
 // than that which received it as an over-the-air update (from its own, older updater) is asked to install the new APK.
-const MIN_NATIVE_VERSION = '3.0';
+const MIN_NATIVE_VERSION = '3.1';
 (async function checkNativeVersion() {
     const Updater = window.Capacitor && window.Capacitor.Plugins ? window.Capacitor.Plugins.CapacitorUpdater : null;
     if (!Updater || typeof Updater.current !== 'function') return;

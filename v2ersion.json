@@ -1,7 +1,7 @@
 {
-  "version": "3.0.1",
-  "isNativeRequired": false,
-  "nativeUrl": "https://github.com/bojrodev/Resolver-Stable-Diffusion-Client-for-android/releases",
+  "version": "3.1",
+  "isNativeRequired": true,
+  "nativeUrl": "https://github.com/bojrodev/Resolver-Stable-Diffusion-Client-for-android/releases/tag/v3.1",
   "url": "https://github.com/bojrodev/Resolver-Stable-Diffusion-Client-for-android/releases/download/v3.0.1/OTTA3.0.1fix.zip",
-  "note": "Resolver v3.0.1 fixes\n\n• History in date order after restoring favourites\n• Smarter duplicate tag removal (double brackets, groups)\n• Dock ignores Android's swipe-up gesture\n• Page stays in place when the keyboard closes\n\nInstalls in the app, no new APK needed. On a version older than 3.0, install the v3.0 APK first. Your images and settings stay."
+  "note": "Resolver v3.1 security update\n\n• Critical security fix in the app's Android layer (Capacitor 6.2.3)\n• Includes all v3.0.1 fixes: History order, smarter duplicate tags, dock and keyboard fixes\n\nNew APK required: install over your current app. Your images and settings stay."
 }
