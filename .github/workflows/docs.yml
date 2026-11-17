@@ -1,0 +1,48 @@
+name: Publish Docs
+
+# Publishes the documentation site (docs/html) to GitHub Pages when it changes on dev.
+# One-time setup: Settings > Pages > Build and deployment > Source: GitHub Actions.
+on:
+  push:
+    branches:
+      - "dev"
+    paths:
+      - "docs/html/**"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One publish at a time; a newer push replaces one still waiting.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # The site only: the screenshot tools stay in the repo, not on the website.
+      - name: Prepare site
+        run: |
+          mkdir -p _site
+          cp -r docs/html/. _site/
+          rm -rf _site/tools
+          touch _site/.nojekyll
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

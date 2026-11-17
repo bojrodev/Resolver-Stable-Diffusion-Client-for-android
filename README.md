@@ -15,11 +15,16 @@
 <a href="https://github.com/bojrodev/Resolver-WebUI-Forge-Client/releases">
 <img src="https://img.shields.io/github/downloads/bojrodev/Resolver-WebUI-Forge-Client/total?style=for-the-badge&label=Download%20APK&logo=android&color=3DDC84"/>
 </a>
+<a href="https://bojrodev.github.io/Resolver-Stable-Diffusion-Client-for-android/">
+<img src="https://img.shields.io/badge/Read%20the-Docs-FF9800?style=for-the-badge&logo=readthedocs&logoColor=white"/>
+</a>
 
 </div>
 <br>
 
 **Resolver** is an open-source, high-performance native Android interface for AI image generation. It provides a seamless mobile experience for interacting with WebUI Forge and ComfyUI backends, ensuring your generation queues stay active even when your screen is off.
+
+📖 **[Documentation](https://bojrodev.github.io/Resolver-Stable-Diffusion-Client-for-android/)**: an interactive guide to every feature, with screenshots: getting started, every tab and setting, wildcards, extensions, troubleshooting and more.
 
 ## Table of Contents
 
