@@ -48,7 +48,7 @@ async function checkForAppUpdate(silent = false) {
 
         // IMPORTANT: Update this number manually when you release a new version
         // (and versionCode / versionName in android/app/build.gradle for an APK release).
-        const currentVersion = '3.1';
+        const currentVersion = '3.1.1';
         // ---------------------
 
         const response = await fetch(UPDATE_URL + '?t=' + new Date().getTime());
