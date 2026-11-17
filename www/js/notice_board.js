@@ -42,6 +42,7 @@ function showNoticeBoard(notice) {
     title.textContent = notice.title;
     message.textContent = notice.message;
     link.classList.add('hidden');
+    link.onclick = null;
 
     if (typeof notice.link === 'string' && notice.link.trim()) {
         try {
@@ -51,6 +52,12 @@ function showNoticeBoard(notice) {
                 link.textContent = typeof notice.linkText === 'string' && notice.linkText.trim()
                     ? notice.linkText
                     : 'LEARN MORE';
+                // Open in a browser tab with a close button. Following the <a> itself would load the page
+                // inside the app's WebView (allowNavigation "*"), replacing Resolver with no way back.
+                link.onclick = (e) => {
+                    e.preventDefault();
+                    window.openExternalLink(url.href);
+                };
                 link.classList.remove('hidden');
             } else {
                 console.warn('Notice link must use http or https.');
