@@ -1195,6 +1195,11 @@ input[readonly]:not([data-touch-lock]), textarea[readonly]:not([data-touch-lock]
     transform: translateY(10px);
     transition: opacity 0.25s ease, transform 0.25s ease;
 }
+/* Light mode: a light toast, as its text is dark there. */
+[data-theme="light"] .app-toast {
+    background: rgba(255, 255, 255, 0.97);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
+}
 
 /* --- NOTIFICATION BADGE (Added Fix) --- */
 .badge {
@@ -4036,6 +4041,39 @@ button[onclick*="setComfyLoraStrength"] {
     font-size: var(--fs-section);
     margin-top: 0;
 }
+/* Mode selector colours for dark (the default) and light; the accents come from the current tab. */
+:root {
+    --ac-edge: rgba(255, 255, 255, 0.06);
+    --ac-board: #07070b;
+    --ac-grid: 0.05;
+    --ac-halo: 0.14;
+    --ac-deco: 0.22;
+    --ac-dim: 0.16;
+    --ac-chip-a: #1d1d26;
+    --ac-chip-b: #0a0a0f;
+    --ac-chip-text: #ffffff;
+    --ac-chip-muted: rgba(255, 255, 255, 0.65);
+    --ac-bar-bg: rgba(255, 255, 255, 0.07);
+    --ac-app-bg: #101016;
+    --ac-warn: #ff6e40;
+    --ac-title-glow: 0 0 8px var(--accent-primary), 0 0 2px var(--accent-primary);
+}
+[data-theme="light"] {
+    --ac-edge: var(--border-color);
+    --ac-board: #f7f7fa;
+    --ac-grid: 0.09;
+    --ac-halo: 0.16;
+    --ac-deco: 0.4;
+    --ac-dim: 0.28;
+    --ac-chip-a: #ffffff;
+    --ac-chip-b: #ececf1;
+    --ac-chip-text: #1c1c1e;
+    --ac-chip-muted: #6e6e73;
+    --ac-bar-bg: rgba(0, 0, 0, 0.06);
+    --ac-app-bg: #ffffff;
+    --ac-warn: #d84315;
+    --ac-title-glow: 0 0 10px rgba(var(--accent-primary-rgb), 0.45);
+}
 /* Mode selector (advcontrol.js). Simple hides what only Advanced Control shows. */
 body:not(.adv-control) #view-cfg .cfg-adv { display: none !important; }
 #cfgTopBar {
@@ -4053,7 +4091,7 @@ body:not(.adv-control) #view-cfg .cfg-adv { display: none !important; }
     padding: 10px 12px;
     border-radius: 14px;
     background: var(--bg-panel, #141418);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--ac-edge);
     border-left: 3.5px solid var(--accent-primary);
     color: var(--text-main);
     font-size: var(--fs-section);
@@ -4115,11 +4153,10 @@ body.adv-control .cfg-mode-chip { box-shadow: 0 0 10px rgba(var(--accent-primary
     justify-content: center;
     border-radius: 14px;
     background: var(--bg-panel, #141418);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--ac-edge);
     color: var(--text-muted);
     cursor: pointer;
 }
-[data-theme="light"] #cfgModeBar, [data-theme="light"] #cfgSearchBtn { border-color: var(--border-color); }
 /* Advanced Control's sections fade in one after another as it switches on. */
 #view-cfg.ac-reveal .cfg-adv { animation: acReveal 0.45s ease-out both; animation-delay: calc(var(--ac-i, 0) * 45ms); }
 @keyframes acReveal {
@@ -4147,10 +4184,10 @@ body.adv-control .cfg-mode-chip { box-shadow: 0 0 10px rgba(var(--accent-primary
     overflow: hidden;
     border: 1px solid rgba(var(--accent-primary-rgb), 0.25);
     background:
-        radial-gradient(circle at 50% 32%, rgba(var(--accent-primary-rgb), 0.14), transparent 62%),
-        linear-gradient(rgba(var(--accent-primary-rgb), 0.05) 1px, transparent 1px) 0 0 / 20px 20px,
-        linear-gradient(90deg, rgba(var(--accent-primary-rgb), 0.05) 1px, transparent 1px) 0 0 / 20px 20px,
-        #07070b;
+        radial-gradient(circle at 50% 32%, rgba(var(--accent-primary-rgb), var(--ac-halo)), transparent 62%),
+        linear-gradient(rgba(var(--accent-primary-rgb), var(--ac-grid)) 1px, transparent 1px) 0 0 / 20px 20px,
+        linear-gradient(90deg, rgba(var(--accent-primary-rgb), var(--ac-grid)) 1px, transparent 1px) 0 0 / 20px 20px,
+        var(--ac-board);
 }
 .ac-wires {
     position: absolute;
@@ -4161,10 +4198,10 @@ body.adv-control .cfg-mode-chip { box-shadow: 0 0 10px rgba(var(--accent-primary
     stroke-linecap: round;
     stroke-linejoin: round;
 }
-.ac-deco path { stroke: rgba(var(--accent-primary-rgb), 0.22); stroke-width: 1.5; transition: stroke 0.4s; }
+.ac-deco path { stroke: rgba(var(--accent-primary-rgb), var(--ac-deco)); stroke-width: 1.5; transition: stroke 0.4s; }
 .ac-pads circle { fill: rgba(var(--accent-primary-rgb), 0.4); stroke: none; transition: fill 0.4s; }
 .ac-pins path { stroke: rgba(var(--accent-primary-rgb), 0.6); stroke-width: 3; stroke-linecap: butt; }
-.ac-track path { stroke: rgba(var(--accent-primary-rgb), 0.16); stroke-width: 3; transition: stroke 0.4s; }
+.ac-track path { stroke: rgba(var(--accent-primary-rgb), var(--ac-dim)); stroke-width: 3; transition: stroke 0.4s; }
 .ac-flow path {
     stroke: var(--accent-primary);
     stroke-width: 3;
@@ -4208,7 +4245,7 @@ body.adv-control .cfg-mode-chip { box-shadow: 0 0 10px rgba(var(--accent-primary
     display: flex;
     padding: 7px;
     border-radius: 10px;
-    background: linear-gradient(145deg, #1d1d26, #0a0a0f);
+    background: linear-gradient(145deg, var(--ac-chip-a), var(--ac-chip-b));
     border: 2px solid rgba(var(--accent-primary-rgb), 0.65);
     box-shadow: 0 0 16px rgba(var(--accent-primary-rgb), 0.35), inset 0 0 16px rgba(var(--accent-primary-rgb), 0.15);
     cursor: pointer;
@@ -4242,18 +4279,18 @@ body.adv-control .cfg-mode-chip { box-shadow: 0 0 10px rgba(var(--accent-primary
     border-radius: 6px;
 }
 .ac-cpu-title {
-    color: #fff;
+    color: var(--ac-chip-text);
     font-size: 17px;
     font-weight: 900;
     line-height: 1.1;
     letter-spacing: 2px;
-    text-shadow: 0 0 8px var(--accent-primary), 0 0 2px var(--accent-primary);
+    text-shadow: var(--ac-title-glow);
 }
 .ac-cpu-warn {
     display: flex;
     align-items: center;
     gap: 4px;
-    color: #ff6e40;
+    color: var(--ac-warn);
     font-size: 9px;
     font-weight: 800;
     letter-spacing: 0.5px;
@@ -4265,7 +4302,7 @@ body.adv-control .cfg-mode-chip { box-shadow: 0 0 10px rgba(var(--accent-primary
     height: 14px;
     border-radius: 7px;
     overflow: hidden;
-    background: rgba(255, 255, 255, 0.07);
+    background: var(--ac-bar-bg);
     border: 1px solid rgba(var(--accent-primary-rgb), 0.55);
 }
 .ac-cpu-fill {
@@ -4277,7 +4314,7 @@ body.adv-control .cfg-mode-chip { box-shadow: 0 0 10px rgba(var(--accent-primary
 }
 .ac-board.charging .ac-cpu-fill { transition: none; }
 .ac-cpu-hint {
-    color: rgba(255, 255, 255, 0.65);
+    color: var(--ac-chip-muted);
     font-size: 9px;
     font-weight: 800;
     letter-spacing: 1.5px;
@@ -4295,9 +4332,9 @@ body.adv-control .cfg-mode-chip { box-shadow: 0 0 10px rgba(var(--accent-primary
     justify-content: center;
     gap: 6px;
     border-radius: 10px;
-    background: #101016;
+    background: var(--ac-app-bg);
     border: 1.5px solid rgba(var(--accent-primary-rgb), 0.5);
-    color: #fff;
+    color: var(--ac-chip-text);
     font-size: 10px;
     font-weight: 900;
     letter-spacing: 1px;
