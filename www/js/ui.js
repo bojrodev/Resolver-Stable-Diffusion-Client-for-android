@@ -293,19 +293,45 @@ function extractLoraTags(text) {
     return new Set(Array.from(matches, m => m[1].toLowerCase()));
 }
 
-// Removes duplicate tags, matched loosely (normaliseTag(), so "smile" and "(smile:1.2)" are one tag). The first is kept, in its
+// Removes duplicate tags, matched loosely (normaliseTag(), so "smile", "(smile:1.2)" and "((smile))" are one tag). The first is kept, in its
 // place, but takes a later copy's weight if it has none. Commas and line breaks both separate tags; a removed tag's
-// separator merges into the one before it, so line breaks are kept. Prompt keywords (BREAK, AND...), numbers, wildcards
-// and bracket groups spanning commas ("(smile, happy:1.2)") are left alone. Returns the count.
+// separator merges into the one before it, so line breaks are kept. Prompt keywords (BREAK, AND...), numbers and wildcards
+// are left alone. So is a bracket group spanning commas ("(smile, happy:1.2)"), but its tags count: a loose copy
+// elsewhere goes, wherever it is. Returns the count.
 const REPEATABLE_TAG = /^(AND|BREAK|ADDROW|ADDCOL|-?\d+(\.\d+)?)$/;
 function mergeTagSeparators(a, b) {
     const lines = Math.max((a.match(/\n/g) || []).length, (b.match(/\n/g) || []).length);
     const comma = (a + b).includes(',');
     return lines ? (comma ? ',' : '') + '\n'.repeat(lines) : (comma ? ', ' : ' ');
 }
+// The pieces (tags between separators) inside bracket groups that span separators, and those groups' tags as
+// normaliseTag() keys. A bracket that never closes makes no group.
+function tagGroups(pieces) {
+    const inGroup = new Set(), keys = new Set();
+    const net = t => (t.replace(/\\./g, '').match(/[([]/g) || []).length - (t.replace(/\\./g, '').match(/[)\]]/g) || []).length;
+    const unescapedEnd = t => /[)\]]$/.test(t) && !/\\[)\]]$/.test(t);
+    let depth = 0, open = [];
+    for (let i = 0; i < pieces.length; i += 2) {
+        const tag = pieces[i].trim(), d = net(tag);
+        if (depth > 0 || d > 0) open.push(i);
+        depth = Math.max(0, depth + d);
+        if (depth === 0 && open.length) {
+            if (open.length > 1) open.forEach(j => {
+                inGroup.add(j);
+                let t = pieces[j].trim().replace(/^[([]+/, '');
+                while (unescapedEnd(t)) t = t.slice(0, -1).replace(/:\s*-?\d*\.?\d+$/, '');
+                t = t.trim();
+                if (t && !/[{}|]/.test(t) && !REPEATABLE_TAG.test(t) && !/__[A-Za-z0-9(-]/.test(t) && !/^(random|order)::/i.test(t)) keys.add(normaliseTag(t));
+            });
+            open = [];
+        }
+    }
+    return { inGroup, keys };
+}
 function removeDuplicateTagsFrom(el) {
     if (!el || !el.value) return 0;
     const pieces = el.value.split(/(\s*[,\n][\s,]*)/);
+    const groups = tagGroups(pieces);
     const seen = new Map(); // normalised tag -> its kept item
     const kept = [];
     let removedCount = 0;
@@ -317,13 +343,14 @@ function removeDuplicateTagsFrom(el) {
         const tag = item.tag.trim();
         const was = inChoice;
         inChoice = Math.max(0, inChoice + (tag.match(/(^|[^\\])\{/g) || []).length - (tag.match(/(^|[^\\])\}/g) || []).length);
-        const whole = tag && !was && !/[{}|]/.test(tag) && !REPEATABLE_TAG.test(tag) && !/__[A-Za-z0-9(-]/.test(tag) && !/^(random|order)::/i.test(tag) && repairTagBrackets(tag) === tag;
+        const whole = tag && !was && !groups.inGroup.has(i) && !/[{}|]/.test(tag) && !REPEATABLE_TAG.test(tag) && !/__[A-Za-z0-9(-]/.test(tag) && !/^(random|order)::/i.test(tag) && repairTagBrackets(tag) === tag;
         const key = whole ? normaliseTag(tag) : null;
         const first = key && seen.get(key);
-        if (first && kept.length) {
-            if (weighted(tag) && !weighted(first.tag.trim())) first.tag = first.tag.replace(first.tag.trim(), tag);
+        const grouped = key && groups.keys.has(key);
+        if (grouped || (first && kept.length)) {
+            if (!grouped && weighted(tag) && !weighted(first.tag.trim())) first.tag = first.tag.replace(first.tag.trim(), tag);
             const prev = kept[kept.length - 1];
-            prev.sep = mergeTagSeparators(prev.sep, item.sep);
+            if (prev) prev.sep = mergeTagSeparators(prev.sep, item.sep);
             removedCount++;
             continue;
         }

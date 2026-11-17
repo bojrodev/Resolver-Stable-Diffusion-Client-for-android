@@ -1481,7 +1481,24 @@ function payloadForForge(payload) {
     return out;
 }
 
-// A tag compared loosely: case, extra spaces and weight brackets ("(tag:1.2)", "[tag]") are ignored, and so is what
+// A tag without its outer brackets, "(smile:1.2)" or "[smile]" -> "smile", "((smile))" -> "(smile)"; null when the
+// first bracket doesn't close at the tag's end ("(a) (b)", "(a"). Escaped brackets are text.
+function unwrapTag(t) {
+    const open = t[0], close = open === '(' ? ')' : open === '[' ? ']' : '';
+    if (!close || t.length < 2 || t[t.length - 1] !== close) return null;
+    let depth = 0;
+    for (let i = 0; i < t.length; i++) {
+        const c = t[i];
+        if (c === '\\') { i++; continue; }
+        if (c === '(' || c === '[') depth++;
+        else if (c === ')' || c === ']') { if (--depth === 0 && i < t.length - 1) return null; }
+    }
+    if (depth !== 0) return null;
+    const inner = t.slice(1, -1);
+    return (open === '(' ? inner.replace(/:\s*-?\d*\.?\d+$/, '') : inner).trim();
+}
+
+// A tag compared loosely: case, extra spaces and weight brackets ("(tag:1.2)", "[tag]", "((tag))") are ignored, and so is what
 // Prompt Auto-Formatting changes (ui.js): unmatched or half-escaped brackets, escapes, underscores, a full stop between
 // words, a stray full stop at the end, spaces around ":" and "|". <lora:...> tags stay exact apart from case.
 function normaliseTag(tag) {
@@ -1489,7 +1506,7 @@ function normaliseTag(tag) {
     if (t.startsWith('<')) return t.replace(/\s+/g, ' ').toLowerCase();
     if (t === '...') return t;
     t = repairTagBrackets(t).replace(LOOSE_STOPS, '$1').replace(STOP_RUN, '$1.').replace(/(^|[^.])\.(?=\s*\\?[):\]])/g, (m, pre, i, str) => strayFullStop(str.slice(0, i) + pre) ? pre : m);
-    for (let m; (m = t.match(/^\(((?:\\[()]|[^()])*?)(?::\s*-?\d*\.?\d+)?\)$/) || t.match(/^\[((?:[^\[\]]|\[[^\[\]]*\])*)\]$/));) t = m[1].trim();
+    for (let inner; (inner = unwrapTag(t)) !== null;) t = inner;
     while (/[^.]\.$/.test(t) && strayFullStop(t.slice(0, -1))) t = t.slice(0, -1).trim();
     return t.replace(/\\([()])/g, '$1').replace(/_/g, ' ').replace(/(\p{L})\.\s*(?=\p{L})/gu, '$1 ').replace(/\s*([:|])\s*/g, '$1')
         .replace(/\s+/g, ' ').trim().toLowerCase();

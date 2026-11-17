@@ -1,12 +1,16 @@
 // The dock's sliding highlight and drag-to-switch (style.css, "Dock glide").
-// One pill (.dock-glider) slides to the lit item: the active tab, or while a finger is down, the item under it. Tap an
-// item, or slide along the dock and lift on one; a label above names the item while sliding. The tab switches as the
-// finger lifts (switchTab(), boot.js). Lifting well above the dock cancels, so a system swipe from the bottom edge
-// changes nothing. Haptics come from Android itself (ResolverDevice.haptic), so they follow the phone's touch-feedback
+// One pill (.dock-glider) slides to the lit item: the active tab, or during a slide, the item under the finger. Tap an
+// item, or slide along the dock and lift on one; a label above names the item while sliding. A press alone moves
+// nothing (a swipe up from the bottom edge starts as one). The tab switches as the
+// finger lifts (switchTab(), boot.js). A press that goes upwards is dropped at once and a slide starts only sideways,
+// so Android's swipe up from the bottom edge (home, recent apps) changes nothing; lifting well above the dock cancels a
+// slide too. Haptics come from Android itself (ResolverDevice.haptic), so they follow the phone's touch-feedback
 // setting; without it (a browser) navigator.vibrate stands in where allowed.
 window.DockGlide = (() => {
     const CANCEL_ABOVE = 60;   // px above the dock's top edge where a lift cancels
     const DRAG_SLOP = 8;       // px moved before a press counts as a slide (shows the label)
+    const TAP_SLOP = 24;       // px between press and lift beyond which it isn't a tap
+    const SWIPE_UP = 16;       // px moved upwards, more than sideways, that drops a press: a system swipe, not the dock's
     let dock, glider, tip, press = null, lit = null, ready = false, raf = 0;
 
     function haptic(kind) {
@@ -59,7 +63,7 @@ window.DockGlide = (() => {
     function end(commit) {
         const p = press;
         press = null;
-        dock.classList.remove('pressing', 'sliding');
+        dock.classList.remove('sliding');
         if (!p) return;
         window.__dockHandledAt = Date.now();
         if (commit && p.over) {
@@ -77,12 +81,12 @@ window.DockGlide = (() => {
         if (!over) return;
         press = { id: e.pointerId, x: e.clientX, y: e.clientY, over, sliding: false };
         try { dock.setPointerCapture(e.pointerId); } catch (err) { }
-        dock.classList.add('pressing');
-        place(over);
     }
     function onMove(e) {
         if (!press || e.pointerId !== press.id) return;
-        if (!press.sliding && Math.hypot(e.clientX - press.x, e.clientY - press.y) > DRAG_SLOP) {
+        const dx = e.clientX - press.x, dy = e.clientY - press.y;
+        if (!press.sliding && -dy > SWIPE_UP && -dy > Math.abs(dx)) { end(false); return; }
+        if (!press.sliding && Math.abs(dx) > DRAG_SLOP && Math.abs(dx) >= Math.abs(dy)) {
             press.sliding = true;
             dock.classList.add('sliding');
             place(press.over);   // shows the label over the pressed item
@@ -98,6 +102,10 @@ window.DockGlide = (() => {
     function onUp(e) {
         if (!press || e.pointerId !== press.id) return;
         dock.classList.remove('cancelling');
+        // Where the finger lifts decides (a fast swipe can end without a move event in between): a tap that ended far
+        // from where it began isn't one, and a slide ends on the item under the lift, or none above the cancel line.
+        if (press.sliding) press.over = itemAt(e.clientX, e.clientY);
+        else if (Math.hypot(e.clientX - press.x, e.clientY - press.y) > TAP_SLOP) { end(false); return; }
         end(true);
     }
     function onCancel(e) {
@@ -127,7 +135,7 @@ window.DockGlide = (() => {
         dock.addEventListener('lostpointercapture', onCancel);
 
         // Follows the active tab wherever it's set (switchTab(), items shown or hidden, the Dock style option). Only a real
-        // change counts: this module's own class changes (lit, pressing...) also reach the observers.
+        // change counts: this module's own class changes (lit, sliding...) also reach the observers.
         const dockSig = () => Array.from(dock.querySelectorAll('.dock-item')).map(el => el.id + (el.classList.contains('active') ? '*' : '') + (el.classList.contains('hidden') ? '-' : '')).join() + (dock.classList.contains('selecting') ? '|s' : '');
         const bodySig = () => Array.from(document.body.classList).filter(c => c.startsWith('dock-') || c === 'app-loading').sort().join();
         let lastDock = dockSig(), lastBody = bodySig();

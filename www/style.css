@@ -1287,7 +1287,6 @@ input[readonly]:not([data-touch-lock]), textarea[readonly]:not([data-touch-lock]
    One pill slides to the lit item (the active tab, or the one under a sliding finger), with the item's icon lifting
    inside it. --dl / --ds are the lift and scale the pill and the lit icon share. */
 .glass-dock { --dl: -8px; --ds: 1.1; }
-.glass-dock.pressing:not(.sliding) { --ds: 1.02; }
 .glass-dock.sliding { --dl: -14px; --ds: 1.18; }
 .glass-dock.has-glider .dock-item {
     transition: color 0.25s ease, opacity 0.2s ease,

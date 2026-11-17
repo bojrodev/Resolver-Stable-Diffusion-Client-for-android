@@ -611,11 +611,24 @@ document.addEventListener('touchstart', unlockAudioEngine);
 // Detect the keyboard closing by the viewport growing back to full height.
 if (window.visualViewport) {
     let lastViewportHeight = window.visualViewport.height;
+    // How far the keyboard has moved the view up the page to keep the focused box in sight. The WebView does that by
+    // panning the visible part (offsetTop), not by scrolling the page, and drops it back when the keyboard closes; the
+    // page is then scrolled by that much instead, so it stays where it was.
+    let keyboardPan = 0;
+    const notePan = () => { if (isKeyboardUp()) keyboardPan = Math.max(0, window.visualViewport.offsetTop || 0); };
+    window.visualViewport.addEventListener('scroll', notePan);
     window.visualViewport.addEventListener('resize', () => {
         const newHeight = window.visualViewport.height;
         const grew = newHeight > lastViewportHeight + 50; // ignore tiny fluctuations
         lastViewportHeight = newHeight;
-        if (!grew) return;
+        if (!grew) { notePan(); return; }
+        const pan = keyboardPan;
+        keyboardPan = 0;
+        if (pan > 1 && !document.body.classList.contains('scroll-locked')) {
+            const before = window.scrollY;
+            window.scrollBy({ top: pan, behavior: 'instant' });
+            if (window.dbg) window.dbg(`keyboard closed: the view was ${Math.round(pan)}px up the page, page scrolled ${Math.round(before)} -> ${Math.round(window.scrollY)}`);
+        }
 
         const active = document.activeElement;
         if (active && (active.tagName === 'TEXTAREA' || active.tagName === 'INPUT')) {

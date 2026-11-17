@@ -2869,6 +2869,7 @@ window.loadGallery = function(onShown) {
     });
     const show = async imgs => {
         if (seq !== galleryLoadSeq) return;
+        if (imgs && window.GalleryDates) imgs = GalleryDates.byTime(imgs);
         // ★: favourites only (galleryfavs.js).
         const favOnly = !!(window.GalleryFavs && GalleryFavs.only());
         if (window.GalleryFavs && imgs) {

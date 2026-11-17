@@ -145,5 +145,13 @@
     }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire); else wire();
 
-    window.GalleryDates = { sections, searchText, setBy, closeOptions };
+    // The images oldest first by when they were made, not by image number (a restored favourite has a new number and
+    // its old date). One whose date can't be read stays with the image numbered before it.
+    function byTime(imgs) {
+        let last = -Infinity;
+        const at = new Map([...imgs].sort((a, b) => a.id - b.id).map(it => { const t = timeOf(it); if (t !== null) last = t; return [it, last]; }));
+        return [...imgs].sort((a, b) => (at.get(a) - at.get(b)) || (a.id - b.id));
+    }
+
+    window.GalleryDates = { sections, searchText, setBy, closeOptions, byTime };
 })();
