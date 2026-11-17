@@ -720,8 +720,10 @@ function cfgSearchUnmark() {
 }
 window.filterCfgSearch = function (raw) {
     const q = raw.trim().toLowerCase();
+    // Only what the current mode shows: in Simple, the Advanced Control options (.cfg-adv) aren't searched.
+    const simple = !document.body.classList.contains('adv-control');
+    const off = el => el.classList.contains('hidden') || (simple && el.classList.contains('cfg-adv'));
     const cards = [...document.querySelectorAll('#view-cfg .cfg-card')];
-    document.getElementById('cfgSearchClear')?.classList.toggle('hidden', !raw);
     cfgSearchUnmark();
     document.querySelectorAll('#view-cfg .cfg-search-miss').forEach(e => e.classList.remove('cfg-search-miss'));
     if (!q) {
@@ -737,6 +739,7 @@ window.filterCfgSearch = function (raw) {
     if (!cfgSearchOpen) cfgSearchOpen = new Set(cards.map(c => c.querySelector('.cfg-accordion-content')).filter(c => !c.classList.contains('hidden')).map(c => c.id));
     const has = el => el.textContent.toLowerCase().includes(q);
     cards.forEach(card => {
+        if (off(card)) { card.classList.add('cfg-search-miss'); return; }
         const title = card.querySelector('.cfg-accordion-header label');
         const content = card.querySelector('.cfg-accordion-content');
         const whole = has(title);
@@ -747,7 +750,7 @@ window.filterCfgSearch = function (raw) {
             const next = el.tagName === 'LABEL' ? items[i + 1] : null;
             const hit = has(el) || (next && has(next)) || (items[i - 1]?.tagName === 'LABEL' && has(items[i - 1]));
             el.classList.toggle('cfg-search-miss', !hit);
-            if (hit && !el.classList.contains('hidden')) any = true;
+            if (hit && !off(el)) any = true;
         });
         card.classList.toggle('cfg-search-miss', !any);
         if (any) {
@@ -776,6 +779,18 @@ window.clearCfgSearch = function () {
     const input = document.getElementById('cfgSearch');
     if (input) input.value = '';
     window.filterCfgSearch('');
+};
+// The search icon in the top bar's corner opens the box in the bar's place; its X clears the search and closes it.
+window.openCfgSearch = function () {
+    document.getElementById('cfgTopBar')?.classList.add('hidden');
+    document.getElementById('cfgSearchWrap')?.classList.remove('hidden');
+    document.getElementById('cfgSearch')?.focus();
+};
+window.closeCfgSearch = function () {
+    window.clearCfgSearch();
+    document.getElementById('cfgSearch')?.blur();
+    document.getElementById('cfgSearchWrap')?.classList.add('hidden');
+    document.getElementById('cfgTopBar')?.classList.remove('hidden');
 };
 
 // The Settings backup (Backup & Restore, backup.js): every option, without the presets, LoRA data and styles, which

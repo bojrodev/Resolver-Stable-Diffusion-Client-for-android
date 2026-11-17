@@ -5713,10 +5713,21 @@
 
         <div id="view-cfg" class="hidden">
             <div class="col" style="gap: 0;">
-                <div id="cfgSearchWrap">
+                <!-- Mode selector (advcontrol.js): Simple shows the essentials, Advanced Control every option. The search
+                     opens from the icon in the corner, in place of the bar. -->
+                <div id="cfgTopBar">
+                    <button type="button" id="cfgModeBar" onclick="AdvControl.open()">
+                        <span class="cfg-mode-chip" aria-hidden="true"><i data-lucide="cpu" width="18" height="18"></i></span>
+                        <span class="cfg-mode-label">Mode selector</span>
+                        <span id="cfgModeName" class="cfg-mode-name">Simple</span>
+                        <i data-lucide="chevron-right" width="16" height="16" class="cfg-mode-arrow"></i>
+                    </button>
+                    <button type="button" id="cfgSearchBtn" onclick="openCfgSearch()" aria-label="Search settings"><i data-lucide="search" width="18" height="18"></i></button>
+                </div>
+                <div id="cfgSearchWrap" class="hidden">
                     <i data-lucide="search" width="16" height="16"></i>
                     <input type="text" id="cfgSearch" placeholder="Search settings..." autocomplete="off" oninput="filterCfgSearch(this.value)">
-                    <button id="cfgSearchClear" type="button" class="hidden" onclick="clearCfgSearch()" aria-label="Clear search"><i data-lucide="x" width="16" height="16"></i></button>
+                    <button id="cfgSearchClear" type="button" onclick="closeCfgSearch()" aria-label="Close search"><i data-lucide="x" width="16" height="16"></i></button>
                 </div>
                 <div class="glass-box cfg-card cfg-theme-general">
                     <div class="row cfg-accordion-header" onclick="toggleGeneric('cfg-connection', 'arr-cfg-connection', 'bojro_vis_cfg_connection')" style="justify-content:space-between; cursor:pointer; margin-bottom:10px;">
@@ -5801,7 +5812,7 @@
                             <label class="cfg-opt" for="cfgThemeSwitch" style="margin: 0; color: var(--text-main);">Light mode</label>
                             <input type="checkbox" id="cfgThemeSwitch" class="bojro-switch" onchange="toggleTheme()">
                         </div>
-                        <div id="cfgNotifIconRow" class="row hidden" style="justify-content: space-between; align-items: center; padding: 0 5px; gap: 10px;">
+                        <div id="cfgNotifIconRow" class="row hidden cfg-adv" style="justify-content: space-between; align-items: center; padding: 0 5px; gap: 10px;">
                             <label class="cfg-opt" style="margin: 0; color: var(--text-main);">Notification icon</label>
                             <div class="notif-icon-btns">
                                 <button type="button" class="notif-icon-btn" data-icon="logo" aria-label="Logo" onclick="setNotificationIcon('logo')"><svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true"><g transform="scale(0.04364) translate(-362.1,-248.05)"><path fill-rule="nonzero" d="M669,663C674.6,668.6 680.8,674 686,680C696.5,691.3 707.7,702.5 719,713C706.4,743.5 745.4,768.2 768.3,746.3C791.1,724.3 767.7,685.4 738,696C712.8,667.5 682.8,643 658,614C654.3,610.3 650.3,606.9 647,603C630.4,584.9 611.7,568.2 595,550C626,551 665.9,548.6 696,550C726.1,551.4 752.9,544.7 775.9,529.9C799,515.2 811.2,498.8 821,475C849.1,471.6 855.3,427.7 829,417C829.3,404.9 824.9,391.5 821.3,380.7C817.7,369.9 812.6,360.7 806.3,351.7C800,342.7 794.3,335.7 785.8,328.3C777.2,320.8 770,315.8 759.7,310.3C749.3,304.9 739.3,301.4 727,299C714.7,296.6 698.7,296.8 685,297C671.3,297.2 656.2,296.9 642,297C627.8,297.1 612.3,296.9 598,297C583.7,297.1 568.3,296.9 554,297C539.8,297.1 523.9,296.7 510,297C496.1,297.3 481.7,299.6 474.3,288.8C466.8,277.9 451.2,278.4 441,282C430.9,285.7 423.1,294.6 421,306C418.9,317.4 425.1,328 433.8,336.2C442.4,344.5 436.9,363 438,376C439.1,389 437.5,406.1 438,420C438.5,433.9 437.8,449.7 438,464C438.2,478.3 437.9,493.6 438,508C438.1,522.4 437.9,537.6 438,552C438.1,566.4 437.9,581.7 438,596C438.1,610.3 437.9,625.1 438,639C438.1,652.9 437.7,669.8 438,683C438.3,696.2 424.1,698.2 422,711C419.8,723.8 423.1,733.9 432.8,742.3C442.4,750.6 455.6,750.7 466.3,745.3C477,739.9 482.5,728.5 482,717C481.5,705.5 475.7,695.5 465,691C465,616 465,541 465,466C480.2,466 495.9,466 511,466C526.1,466 542.1,466 557,466C571.9,466 588.6,466 603,466C617.4,466 634.6,466 648,466C661.4,466 663.5,481.8 676.9,483.1C690.4,484.4 701,481.9 708.7,470.7C716.3,459.5 715.7,447.3 708.8,436.3C701.8,425.2 689.9,421.9 676.7,423.7C663.5,425.5 660.8,440.7 647,440C633.2,439.3 616.6,440.3 602,440C587.4,439.7 570.9,440.1 556,440C541.1,439.9 525,440.1 510,440C495,439.9 480,440.1 465,440C465,427.6 465.1,415.5 465,403C464.9,390.5 465.1,378.6 465,366C464.9,353.4 462.7,343.5 471.3,335.3C479.8,327 483.9,322 497,324C510.1,326 521.3,323.1 534,324C546.7,324.9 558.6,323.6 571,324C583.4,324.4 595.8,323.8 608,324C620.3,324.2 633,323.9 645,324C657,324.1 669.4,323.9 681,324C692.6,324.1 706.6,323.6 717.3,324.7C728.1,325.8 737,328.7 745.9,333.1C754.8,337.4 761,341.5 768.3,347.8C775.5,354 780.2,360.1 785.3,367.8C790.3,375.4 795,383.5 797.7,392.3C800.3,401.1 806.8,413.3 797.8,418.8C788.7,424.2 786.2,433.8 785,443C783.8,452.2 788.8,462.5 796,468C791.9,480.3 784.3,489 774.3,498.3C764.2,507.5 754.9,512.5 741.7,517.7C728.5,522.8 711.5,523.2 696,523C680.5,522.8 659.5,522.5 644,523C628.5,523.5 606.3,521.5 592,523C577.7,524.5 554.4,517 546.8,528.8C539.1,540.6 560.5,550.8 566.8,559.3C573,567.7 585.2,576.8 592.8,585.3C600.3,593.7 610,602.3 618.3,610.8C626.5,619.2 635.9,628.4 643.8,637.3C651.6,646.1 661.3,654 669,663Z"/></g></svg></button>
@@ -5810,19 +5821,19 @@
                                 <button type="button" class="notif-icon-btn" data-icon="sparkles" aria-label="Sparkles" onclick="setNotificationIcon('sparkles')"><svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true"><path fill-rule="nonzero" d="M10,1.5L12.3,7.7L18.5,10L12.3,12.3L10,18.5L7.7,12.3L1.5,10L7.7,7.7ZM18.5,14L19.7,17.3L23,18.5L19.7,19.7L18.5,23L17.3,19.7L14,18.5L17.3,17.3Z"/></svg></button>
                             </div>
                         </div>
-                        <div class="row" style="justify-content: space-between; align-items: center; padding: 0 5px;">
+                        <div class="row cfg-adv" style="justify-content: space-between; align-items: center; padding: 0 5px;">
                             <label class="cfg-opt" for="cfgShowDevPowerSwitch" style="margin: 0; color: var(--text-main);">Show Dev Power</label>
                             <input type="checkbox" id="cfgShowDevPowerSwitch" class="bojro-switch" checked onchange="toggleDevPowerVisibility()">
                         </div>
-                        <div class="row" style="justify-content: space-between; align-items: center; padding: 0 5px;">
+                        <div class="row cfg-adv" style="justify-content: space-between; align-items: center; padding: 0 5px;">
                             <label class="cfg-opt" for="cfgShowGenSpinnerSwitch" style="margin: 0; color: var(--text-main);">Show loading circle</label>
                             <input type="checkbox" id="cfgShowGenSpinnerSwitch" class="bojro-switch" checked onchange="toggleGenSpinnerVisibility()">
                         </div>
-                        <div class="row" style="justify-content: space-between; align-items: center; padding: 0 5px;">
+                        <div class="row cfg-adv" style="justify-content: space-between; align-items: center; padding: 0 5px;">
                             <label class="cfg-opt" for="cfgShowModelHintsSwitch" style="margin: 0; color: var(--text-main);">Show model button names</label>
                             <input type="checkbox" id="cfgShowModelHintsSwitch" class="bojro-switch" checked onchange="toggleModelHintsVisibility()">
                         </div>
-                        <div class="row" style="justify-content: space-between; align-items: center; padding: 0 5px;">
+                        <div class="row cfg-adv" style="justify-content: space-between; align-items: center; padding: 0 5px;">
                             <label class="cfg-opt" for="cfgShowUiHintsSwitch" style="margin: 0; color: var(--text-main);">Show UI hints</label>
                             <input type="checkbox" id="cfgShowUiHintsSwitch" class="bojro-switch" checked onchange="toggleUiHints()">
                         </div>
@@ -5859,7 +5870,7 @@
                         </div>
                     </div>
                 </div>
-                <div class="glass-box cfg-card cfg-theme-general">
+                <div class="glass-box cfg-card cfg-theme-general cfg-adv">
                     <div class="row cfg-accordion-header" onclick="toggleGeneric('cfg-prompts', 'arr-cfg-prompts', 'bojro_vis_cfg_prompts')" style="justify-content:space-between; cursor:pointer; margin-bottom:10px;">
                         <label style="cursor:pointer;"><i data-lucide="text-cursor-input" width="20" height="20"></i> PROMPTS</label>
                         <i id="arr-cfg-prompts" data-lucide="chevron-down" width="14" height="14" style="transition: transform 0.2s;"></i>
@@ -5926,7 +5937,7 @@
                         </div>
                     </div>
                 </div>
-                <div class="glass-box cfg-card cfg-theme-general">
+                <div class="glass-box cfg-card cfg-theme-general cfg-adv">
                     <div class="row cfg-accordion-header" onclick="toggleGeneric('cfg-magic', 'arr-cfg-magic', 'bojro_vis_cfg_magic')" style="justify-content:space-between; cursor:pointer; margin-bottom:10px;">
                         <label style="cursor:pointer;"><i data-lucide="sparkles" width="20" height="20"></i> MAGIC PROMPT</label>
                         <i id="arr-cfg-magic" data-lucide="chevron-down" width="14" height="14" style="transition: transform 0.2s;"></i>
@@ -5988,7 +5999,7 @@
                         </div>
                     </div>
                 </div>
-                <div class="glass-box cfg-card cfg-theme-general">
+                <div class="glass-box cfg-card cfg-theme-general cfg-adv">
                     <div class="row cfg-accordion-header" onclick="toggleGeneric('cfg-generation', 'arr-cfg-generation', 'bojro_vis_cfg_generation')" style="justify-content:space-between; cursor:pointer; margin-bottom:10px;">
                         <label style="cursor:pointer;"><i data-lucide="sliders-horizontal" width="20" height="20"></i> GENERATION</label>
                         <i id="arr-cfg-generation" data-lucide="chevron-down" width="14" height="14" style="transition: transform 0.2s;"></i>
@@ -6021,7 +6032,7 @@
                         </div>
                     </div>
                 </div>
-                <div class="glass-box cfg-card cfg-theme-general">
+                <div class="glass-box cfg-card cfg-theme-general cfg-adv">
                     <div class="row cfg-accordion-header" onclick="toggleGeneric('cfg-livepreview', 'arr-cfg-livepreview', 'bojro_vis_cfg_livepreview')" style="justify-content:space-between; cursor:pointer; margin-bottom:10px;">
                         <label style="cursor:pointer;"><i data-lucide="eye" width="20" height="20"></i> LIVE PREVIEW</label>
                         <i id="arr-cfg-livepreview" data-lucide="chevron-down" width="14" height="14" style="transition: transform 0.2s;"></i>
@@ -6053,7 +6064,7 @@
                         </div>
                     </div>
                 </div>
-                <div class="glass-box cfg-card cfg-theme-general">
+                <div class="glass-box cfg-card cfg-theme-general cfg-adv">
                     <div class="row cfg-accordion-header" onclick="toggleGeneric('cfg-history', 'arr-cfg-history', 'bojro_vis_cfg_history')" style="justify-content:space-between; cursor:pointer; margin-bottom:10px;">
                         <label style="cursor:pointer;"><i data-lucide="images" width="20" height="20"></i> HISTORY &amp; RESULTS</label>
                         <i id="arr-cfg-history" data-lucide="chevron-down" width="14" height="14" style="transition: transform 0.2s;"></i>
@@ -6102,7 +6113,7 @@
                         </div>
                     </div>
                 </div>
-                <div class="glass-box cfg-card cfg-theme-general">
+                <div class="glass-box cfg-card cfg-theme-general cfg-adv">
                     <div class="row cfg-accordion-header" onclick="toggleGeneric('cfg-inpana', 'arr-cfg-inpana', 'bojro_vis_cfg_inpana')" style="justify-content:space-between; cursor:pointer; margin-bottom:10px;">
                         <label style="cursor:pointer;"><i data-lucide="scan-search" width="20" height="20"></i> INPAINT &amp; ANALYZE</label>
                         <i id="arr-cfg-inpana" data-lucide="chevron-down" width="14" height="14" style="transition: transform 0.2s;"></i>
@@ -6126,7 +6137,7 @@
                         </div>
                     </div>
                 </div>
-                <div class="glass-box cfg-card cfg-theme-general">
+                <div class="glass-box cfg-card cfg-theme-general cfg-adv">
                     <div class="row cfg-accordion-header" onclick="toggleGeneric('cfg-models', 'arr-cfg-models', 'bojro_vis_cfg_models')" style="justify-content:space-between; cursor:pointer; margin-bottom:10px;">
                         <label style="cursor:pointer;"><i data-lucide="boxes" width="20" height="20"></i> MODELS</label>
                         <i id="arr-cfg-models" data-lucide="chevron-down" width="14" height="14" style="transition: transform 0.2s;"></i>
@@ -6150,7 +6161,7 @@
                         </div>
                     </div>
                 </div>
-                <div class="glass-box cfg-card cfg-theme-general">
+                <div class="glass-box cfg-card cfg-theme-general cfg-adv">
                     <div class="row cfg-accordion-header" onclick="toggleGeneric('cfg-extensions', 'arr-cfg-extensions', 'bojro_vis_cfg_extensions')" style="justify-content:space-between; cursor:pointer; margin-bottom:10px;">
                         <label style="cursor:pointer;"><i data-lucide="puzzle" width="20" height="20"></i> EXTENSIONS</label>
                         <i id="arr-cfg-extensions" data-lucide="chevron-down" width="14" height="14" style="transition: transform 0.2s;"></i>
@@ -6214,7 +6225,7 @@
                         </div>
                     </div>
                 </div>
-                <div class="glass-box cfg-card cfg-theme-general">
+                <div class="glass-box cfg-card cfg-theme-general cfg-adv">
                     <div class="row cfg-accordion-header" onclick="toggleGeneric('cfg-diag', 'arr-cfg-diag', 'bojro_vis_cfg_diag')" style="justify-content:space-between; cursor:pointer; margin-bottom:10px;">
                         <label style="cursor:pointer;"><i data-lucide="activity" width="20" height="20"></i> DIAGNOSTICS</label>
                         <i id="arr-cfg-diag" data-lucide="chevron-down" width="14" height="14" style="transition: transform 0.2s;"></i>
@@ -6243,7 +6254,7 @@
                         </div>
                     </div>
                 </div>
-                <div class="glass-box cfg-card cfg-theme-general">
+                <div class="glass-box cfg-card cfg-theme-general cfg-adv">
                     <div class="row cfg-accordion-header" onclick="toggleGeneric('cfg-experimental', 'arr-cfg-experimental', 'bojro_vis_cfg_experimental')" style="justify-content:space-between; cursor:pointer; margin-bottom:10px;">
                         <label style="cursor:pointer;"><i data-lucide="flask-conical" width="20" height="20"></i> EXPERIMENTAL</label>
                         <i id="arr-cfg-experimental" data-lucide="chevron-down" width="14" height="14" style="transition: transform 0.2s;"></i>
@@ -6993,6 +7004,76 @@
         </div>
     </div>
 
+    <!-- Mode selector (Config, advcontrol.js): hold the CPU to switch on Advanced Control. Its traces and glow take the
+         current tab's accent. -->
+    <div id="advControlModal" class="modal hidden">
+        <div class="modal-content ac-content">
+            <div class="modal-header">
+                <h3>Mode Selector</h3>
+                <button onclick="AdvControl.close()" class="close-btn">×</button>
+            </div>
+            <p id="acStatus" class="ac-status">Current mode: <b id="acStatusName">Simple</b></p>
+            <div id="acBoard" class="ac-board">
+                <svg class="ac-wires" viewBox="0 0 300 340" preserveAspectRatio="none" aria-hidden="true">
+                    <defs>
+                        <filter id="acGlow" x="-50%" y="-50%" width="200%" height="200%">
+                            <feGaussianBlur in="SourceGraphic" stdDeviation="2.6" result="b"/>
+                            <feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+                        </filter>
+                    </defs>
+                    <!-- Decorative wiring to the board's edges. -->
+                    <g class="ac-deco">
+                        <path d="M58 72 H34 L22 60 H8"/><path d="M58 102 H8"/><path d="M58 132 H38 L24 146 V196"/>
+                        <path d="M242 72 H266 L278 60 H292"/><path d="M242 102 H292"/><path d="M242 132 H262 L276 146 V196"/>
+                        <path d="M110 30 V18 L98 6"/><path d="M150 30 V4"/><path d="M190 30 V18 L202 6"/>
+                    </g>
+                    <g class="ac-pads">
+                        <circle cx="8" cy="60" r="3"/><circle cx="8" cy="102" r="3"/><circle cx="24" cy="196" r="3"/>
+                        <circle cx="292" cy="60" r="3"/><circle cx="292" cy="102" r="3"/><circle cx="276" cy="196" r="3"/>
+                        <circle cx="98" cy="6" r="3"/><circle cx="150" cy="4" r="3"/><circle cx="202" cy="6" r="3"/>
+                    </g>
+                    <!-- CPU pins. -->
+                    <g class="ac-pins">
+                        <path d="M58 52 H50 M58 72 H50 M58 92 H50 M58 112 H50 M58 132 H50 M58 152 H50"/>
+                        <path d="M242 52 H250 M242 72 H250 M242 92 H250 M242 112 H250 M242 132 H250 M242 152 H250"/>
+                        <path d="M90 30 V22 M110 30 V22 M130 30 V22 M150 30 V22 M170 30 V22 M190 30 V22 M210 30 V22"/>
+                    </g>
+                    <!-- The buses from the CPU to the app: a dim track, and the energy running along it. -->
+                    <g class="ac-track">
+                        <path d="M100 178 V198 L120 218 V268"/><path d="M125 178 V203 L135 213 V268"/><path d="M150 178 V268"/>
+                        <path d="M175 178 V203 L165 213 V268"/><path d="M200 178 V198 L180 218 V268"/>
+                        <path d="M58 92 H40 L30 102 V250 L50 270 H104"/><path d="M242 92 H260 L270 102 V250 L250 270 H196"/>
+                    </g>
+                    <g class="ac-flow" filter="url(#acGlow)">
+                        <path pathLength="100" style="--d:0s" d="M100 178 V198 L120 218 V268"/>
+                        <path pathLength="100" style="--d:-.55s" d="M125 178 V203 L135 213 V268"/>
+                        <path pathLength="100" style="--d:-.2s" d="M150 178 V268"/>
+                        <path pathLength="100" style="--d:-.8s" d="M175 178 V203 L165 213 V268"/>
+                        <path pathLength="100" style="--d:-.35s" d="M200 178 V198 L180 218 V268"/>
+                        <path pathLength="100" style="--d:-.65s" class="ac-flow-long" d="M58 92 H40 L30 102 V250 L50 270 H104"/>
+                        <path pathLength="100" style="--d:-1.1s" class="ac-flow-long" d="M242 92 H260 L270 102 V250 L250 270 H196"/>
+                    </g>
+                </svg>
+                <!-- The CPU: hold it until its bar fills. -->
+                <div id="acCpu" class="ac-cpu">
+                    <div class="ac-cpu-core">
+                        <span class="ac-cpu-title">ADVANCED<br>CONTROL</span>
+                        <span class="ac-cpu-warn"><i data-lucide="triangle-alert" width="12" height="12"></i> Proceed at your own risk</span>
+                        <div class="ac-cpu-bar"><div id="acCpuFill" class="ac-cpu-fill"></div></div>
+                        <span id="acCpuHint" class="ac-cpu-hint">HOLD TO ACTIVATE</span>
+                    </div>
+                </div>
+                <!-- The app the energy runs to. -->
+                <div class="ac-app">
+                    <img src="icon.png" alt="" class="ac-app-icon">
+                    <span>RESOLVER</span>
+                </div>
+            </div>
+            <p id="acInfo" class="ac-info">Simple shows only the essentials: Connection, theme, dock, visible tabs and System Settings. Hold the CPU's bar to activate <b>Advanced Control</b> and show every option. Hidden options keep working as they are set.</p>
+            <button type="button" id="acSimpleBtn" class="btn-small ac-simple-btn hidden" onclick="AdvControl.setSimple()"><i data-lucide="shield-check" width="16" height="16"></i> SWITCH TO SIMPLE</button>
+        </div>
+    </div>
+
     <!-- Debug log (Config > Experimental). -->
     <div id="debugLogModal" class="modal hidden">
         <div class="modal-content" style="max-height: calc(100vh - 60px); display: flex; flex-direction: column;">
@@ -7654,6 +7735,7 @@
     <script src="js/listsort.js"></script>
     <script src="js/promptcolors.js"></script>
     <script src="js/queueui.js"></script>
+    <script src="js/advcontrol.js"></script>
     <script src="js/boot.js"></script>
     <script src="js/dockglide.js"></script>
 
