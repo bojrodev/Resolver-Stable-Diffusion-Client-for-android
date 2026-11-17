@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Config · Resolver Docs</title>
-<meta name="description" content="Every setting in Resolver's Config tab, searchable: what it does and its default, section by section.">
+<meta name="description" content="Every setting in Resolver's Config tab, searchable: Simple mode and Advanced Control, what each option does and its default, section by section.">
 <link rel="icon" href="assets/img/favicon.png">
 <script>try{var t=localStorage.getItem('rdocs-theme'),a=localStorage.getItem('rdocs-accent');if(t&&t!=='system')document.documentElement.dataset.theme=t;if(a)document.documentElement.dataset.accent=a;}catch(e){}</script>
 <link rel="stylesheet" href="assets/css/docs.css">
@@ -14,20 +14,49 @@
 
 <p class="crumbs"><a href="index.html">Docs</a> / Settings</p>
 <h1>Config</h1>
-<p class="lead">The <i data-lucide="settings" style="width:18px;height:18px;vertical-align:-3px"></i> tab holds every setting, in 13 sections that open and close. All of them are below with their defaults: search, or pick a section.</p>
+<p class="lead">The <i data-lucide="settings" style="width:18px;height:18px;vertical-align:-3px"></i> tab holds every setting, in 13 sections that open and close. It starts in <b>Simple</b> mode with just the essentials; <b>Advanced Control</b> shows the rest. All of them are below with their defaults: search, or pick a section.</p>
+
+<h2 id="modes">Simple and Advanced Control</h2>
+<div class="split">
+    <div>
+        <p>The <span class="ui plain"><i data-lucide="cpu" style="width:14px;height:14px;vertical-align:-2px"></i> Mode selector</span> bar at the top of Config shows which mode you’re in.</p>
+        <dl class="opt"><dt>Simple<small>the default</small></dt><dd>What you need to connect and look after the app: all of <b>Connection</b>, <b>Dock style</b>, <b>Light mode</b> and <b>Visible tabs</b> from Interface, and all of <b>System Settings</b>.</dd></dl>
+        <dl class="opt"><dt>Advanced Control</dt><dd>Every option, in all 13 sections: Simple’s, plus Prompts, Magic Prompt, Generation, Live Preview, History &amp; Results, Inpaint &amp; Analyze, Models, Extensions, Diagnostics, Experimental and the rest of Interface.</dd></dl>
+        <div class="callout note"><i data-lucide="info"></i><div><b>Hidden isn’t off</b><p>An option you can’t see in Simple keeps working exactly as it is set. Switching modes only changes what Config shows. In these docs, options that only Advanced Control shows carry an <span class="adv-tag"><i data-lucide="cpu"></i>Advanced Control</span> tag.</p></div></div>
+    </div>
+    <figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/tab-config.webp" alt="The Config tab in Simple mode: Mode selector bar, Connection, Interface and System Settings" loading="lazy" width="412" height="892"></div></div><figcaption>Config in Simple mode, sections closed.</figcaption></figure>
+</div>
+
+<h3 id="switch-on">Switching on Advanced Control</h3>
+<ol class="steps">
+    <li><b>Tap the Mode selector bar</b>The <b>Mode Selector</b> window opens: a CPU wired to the app, with <i>ADVANCED CONTROL · Proceed at your own risk</i> on it.</li>
+    <li><b>Hold the CPU</b>Keep your finger on it until its bar fills (under 2 seconds). Energy runs faster along the wiring as it charges, and the phone gives a small tick every quarter. Let go early and nothing changes.</li>
+    <li><b>Done</b>The wiring lights up, the energy reaches the app, the window closes, and the Advanced Control sections fade in. The bar now reads <span class="ui">ADVANCED CONTROL</span>.</li>
+</ol>
+<div class="mode-shots">
+    <figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/mode-simple.webp" alt="Mode Selector window in Simple: the CPU with HOLD TO ACTIVATE" loading="lazy" width="412" height="892"></div></div><figcaption>The Mode Selector, in Simple.</figcaption></figure>
+    <figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/mode-charging.webp" alt="Holding the CPU: its bar filling, CHARGING" loading="lazy" width="412" height="892"></div></div><figcaption>Holding the CPU.</figcaption></figure>
+    <figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/mode-active.webp" alt="Mode Selector with Advanced Control on: the board lit, SWITCH TO SIMPLE" loading="lazy" width="412" height="892"></div></div><figcaption>Advanced Control on.</figcaption></figure>
+</div>
+<ul>
+    <li><b>Back to Simple:</b> tap the Mode selector bar again, then <span class="ui">SWITCH TO SIMPLE</span>. One tap, no hold.</li>
+    <li><b>Remembered:</b> the app keeps your mode when you close it. <span class="ui plain">RESET APP CONFIGURATION</span> doesn’t change it.</li>
+    <li><b>Colors:</b> the CPU and its wiring take the accent of the model last picked on Generate (SDXL orange, Flux cyan, Qwen pink, Anima green, Krea purple). In light mode they’re orange, as the rest of the app.</li>
+</ul>
 
 <div class="split">
     <div>
         <h2 id="using">Finding a setting in the app</h2>
         <ul>
-            <li>The <b>Search settings…</b> box at the top of Config finds any option by name and opens its section, with the match marked. The × clears it.</li>
-            <li>Tap a section’s header to open or close it; the app remembers which are open.</li>
+            <li>Tap the <span class="ui plain"><i data-lucide="search" style="width:14px;height:14px;vertical-align:-2px"></i></span> beside the Mode selector to search. The box takes the bar’s place, finds options by name and opens their section, with the match marked. The × closes the search.</li>
+            <li>The search looks only at what your mode shows. In Simple, an Advanced Control option isn’t found: switch Advanced Control on first.</li>
+            <li>Tap a section’s header to open or close it; one is open at a time, and the app remembers which.</li>
             <li>Changes are saved at once: there is no Save button.</li>
             <li>Options shown <i>under</i> another (indented below) appear only while that one is on.</li>
         </ul>
         <div class="callout tip"><i data-lucide="rotate-ccw"></i><div><b>Undo everything</b><p><span class="ui plain">System Settings → RESET APP CONFIGURATION</span> puts every option back to its default. Your connections, prompts, History, styles, LoRA settings and presets are kept.</p></div></div>
     </div>
-    <figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/tab-config.webp" alt="The Config tab" loading="lazy" width="412" height="892"></div></div><figcaption>The Config tab, sections closed.</figcaption></figure>
+    <figure class="shot"><div class="phone sm"><div class="screen"><img class="zoomable" src="assets/img/shots/tab-config-adv.webp" alt="The Config tab with Advanced Control on: all 13 sections" loading="lazy" width="412" height="892"></div></div><figcaption>Config with Advanced Control on: all 13 sections.</figcaption></figure>
 </div>
 
 <h2 id="all">Every setting</h2>
@@ -35,6 +64,7 @@
     <div class="cfgx-bar">
         <div class="faq-tools" style="margin:0"><input type="search" placeholder="Search settings: e.g. seed, vram, preview, badges…" aria-label="Search settings"></div>
         <div class="cfgx-chips" role="group" aria-label="Sections"></div>
+        <div class="cfgx-chips cfgx-modes" role="group" aria-label="Mode"></div>
         <span class="cfgx-count" aria-live="polite"></span>
     </div>
     <div class="cfgx-list"></div>

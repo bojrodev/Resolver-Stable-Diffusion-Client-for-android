@@ -1,4 +1,4 @@
-// Every option in the app's Config tab (www/index.html #view-cfg, Resolver v3.0), in the app's order, for the Config
+// Every option in the app's Config tab (www/index.html #view-cfg, Resolver v3.1.1), in the app's order, for the Config
 // page's explorer. n: the name as the app shows it, v: its default, d: what it does (HTML), k: more search words,
 // sub: shown under the option above it (only while that one is on).
 window.CFG_DATA = [

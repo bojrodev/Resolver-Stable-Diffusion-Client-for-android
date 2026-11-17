@@ -26,6 +26,11 @@ const check = id => on(id);
 const open = id => `{ const c = document.getElementById('${id}'); if (c && (c.classList.contains('hidden') || getComputedStyle(c).display === 'none')) { const h = c.previousElementSibling && c.previousElementSibling.matches('[onclick*="toggleGeneric"]') ? c.previousElementSibling : document.querySelector('[onclick*="toggleGeneric(\\'${id}\\'"]'); if (h) h.dispatchEvent(new MouseEvent('click', { bubbles: true })); } } ${wait(200)}`;
 // Scrolls so an element sits near the top of the screen.
 const top = sel => `${wait(300)} { const e = document.querySelector(${JSON.stringify(sel)}); if (e) { e.scrollIntoView({ block: 'start' }); window.scrollBy(0, -14); } } ${wait(250)}`;
+// Config's Advanced Control on, as holding the CPU leaves it (advcontrol.js), without the animation.
+const adv = `document.body.classList.add('adv-control'); try { localStorage.setItem('bojroCfgMode', 'advanced'); } catch (e) { }
+  { const n = document.getElementById('cfgModeName'); if (n) { n.textContent = 'Advanced Control'; n.classList.add('adv'); } }`;
+// Closes every Config section.
+const cfgClosed = `document.querySelectorAll('#view-cfg .cfg-accordion-content:not(.hidden)').forEach(c => c.previousElementSibling.click()); ${wait(250)} window.scrollTo(0, 0);`;
 const cfgOpen = id => `${tab('cfg')}
   const c = document.getElementById('${id}');
   if (c && (c.classList.contains('hidden') || getComputedStyle(c).display === 'none')) c.previousElementSibling.click();
@@ -67,7 +72,12 @@ export const SHOTS = [
     { name: 'tab-queue', setup: tab('que') },
     { name: 'tab-history', setup: tab('gal') },
     { name: 'tab-analyze', setup: tab('ana') },
-    { name: 'tab-config', setup: tab('cfg') },
+    { name: 'tab-config', setup: tab('cfg') + cfgClosed },
+    { name: 'tab-config-adv', setup: tab('cfg') + adv + cfgClosed },
+    // The Mode Selector window: in Simple, held (the bar part-filled, as at 60%) and with Advanced Control on.
+    { name: 'mode-simple', wait: 900, setup: tab('cfg') + cfgClosed + 'AdvControl.open();' },
+    { name: 'mode-charging', wait: 600, setup: tab('cfg') + cfgClosed + "AdvControl.open(); document.getElementById('acBoard').classList.add('charging'); document.getElementById('acCpuFill').style.width = '60%'; document.getElementById('acCpuHint').textContent = 'CHARGING...';" },
+    { name: 'mode-active', wait: 900, setup: tab('cfg') + adv + cfgClosed + 'AdvControl.open();' },
     { name: 'tab-comfy', setup: `document.getElementById('dock-comfy').classList.remove('hidden'); ${tab('comfy')}` },
     { name: 'cfg-connection', setup: cfgOpen('cfg-connection') },
     { name: 'gen-offline', setup: mode('xl') },
@@ -147,5 +157,5 @@ export const SHOTS = [
     { name: 'gallery-badges', online: true, wait: 600, setup: tab('cfg') + 'openGalleryBadges();' + wait(300) },
     { name: 'debug-log', online: true, wait: 800, setup: tab('cfg') + on('cfgDebugLogSwitch') + 'openDebugLog();' + wait(500) },
     { name: 'data-usage', online: true, wait: 800, setup: tab('cfg') + on('cfgDataUsageSwitch') + 'openDataUsageHistory();' + wait(500) },
-    ...['interface', 'prompts', 'magic', 'generation', 'livepreview', 'history', 'inpana', 'models', 'extensions', 'diag', 'experimental', 'sys'].map(s => ({ name: 'cfg-' + s, online: true, wait: 700, setup: cfgOpen('cfg-' + s) })),
+    ...['interface', 'prompts', 'magic', 'generation', 'livepreview', 'history', 'inpana', 'models', 'extensions', 'diag', 'experimental', 'sys'].map(s => ({ name: 'cfg-' + s, online: true, wait: 700, setup: (s === 'sys' ? '' : tab('cfg') + adv) + cfgOpen('cfg-' + s) })),
 ];

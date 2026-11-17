@@ -490,6 +490,18 @@ input[type=range] { accent-color: var(--accent); width: 100%; height: 30px; }
 .cfgx-item mark, .faq mark { background: rgba(var(--accent-rgb), .3); color: inherit; border-radius: 3px; }
 .cfgx-sub { margin-left: 22px; border-left-width: 3px; border-left-color: rgba(var(--accent-rgb), .35); }
 .cfgx-none { padding: 30px; text-align: center; color: var(--muted); }
+/* "Advanced Control": a setting Config shows only in that mode (docs.js marks them). */
+.adv-tag { display: inline-flex; align-items: center; gap: 4px; margin-left: 6px; padding: 2px 7px; border-radius: 999px; border: 1px solid rgba(var(--accent-rgb), .45); background: rgba(var(--accent-rgb), .08); color: var(--accent); font: 800 10.5px/1.3 var(--font); letter-spacing: .4px; text-transform: none; white-space: nowrap; vertical-align: 1px; text-decoration: none; }
+a.adv-tag:hover { background: rgba(var(--accent-rgb), .16); text-decoration: none; }
+.adv-tag svg { width: 12px; height: 12px; }
+.cfgx-sec .adv-tag { letter-spacing: .4px; margin-left: 0; }
+/* With the tag, a long section name wraps on a phone instead of pushing SCREENSHOT off the side. */
+.cfgx-sec { flex-wrap: wrap; row-gap: 8px; }
+.cfgx-item b .adv-tag { vertical-align: 2px; }
+/* The Mode Selector's three states, side by side. */
+.mode-shots { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin: 18px 0; }
+.mode-shots figure { margin: 0; }
+@media (max-width: 640px) { .mode-shots { grid-template-columns: minmax(0, 1fr); max-width: 300px; margin-inline: auto; } }
 
 /* ---------- FAQ ---------- */
 .faq-tools { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 10px 0 16px; }

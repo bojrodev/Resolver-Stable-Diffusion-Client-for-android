@@ -60,6 +60,10 @@ const RESET = `
   // Connected to the pretend Forge on this PC: Config shows a usual home address instead (on screen only, not saved).
   const ipBox = document.getElementById('cfgBaseIp'), portBox = document.getElementById('cfgPortWebUI');
   if (ipBox && /127\\.0\\.0\\.1/.test(ipBox.value)) { ipBox.value = 'http://192.168.1.20'; if (portBox) portBox.value = '7860'; }
+  // Config in Simple, the app's default (advcontrol.js): shots that need Advanced Control switch it on themselves.
+  document.body.classList.remove('adv-control'); try { localStorage.removeItem('bojroCfgMode'); } catch (e) { }
+  { const n = document.getElementById('cfgModeName'); if (n) { n.textContent = 'Simple'; n.classList.remove('adv'); } }
+  if (typeof closeCfgSearch === 'function' && !document.getElementById('cfgSearchWrap')?.classList.contains('hidden')) closeCfgSearch();
   window.__docShot = true;
 `;
 

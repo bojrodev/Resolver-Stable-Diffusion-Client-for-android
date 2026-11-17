@@ -1,7 +1,7 @@
 // Resolver docs: the site map. Every page (in reading order), the sidebar's groups, and the search index.
 // A page with ready: false is listed in the sidebar as coming soon and left out of search and prev / next.
 window.SITE = {
-    version: '3.0',
+    version: '3.1',
     groups: [
         { name: 'Start', pages: ['index', 'getting-started'] },
         { name: 'Create', pages: ['generate', 'prompting', 'loras-styles', 'wildcards', 'magic-prompt', 'extensions'] },
@@ -155,7 +155,9 @@ window.SITE = {
         { t: 'Polling rates', p: 'background', h: 'polling', k: 'polling rate background polling' },
         // Config
         { t: 'Every Config setting', p: 'config', h: 'all', k: 'config settings options all defaults explorer' },
-        { t: 'Finding a setting', p: 'config', h: 'using', k: 'search settings sections reset' },
+        { t: 'Finding a setting', p: 'config', h: 'using', k: 'search settings sections reset magnifier icon' },
+        { t: 'Simple mode and Advanced Control', p: 'config', h: 'modes', k: 'simple advanced control mode selector hidden settings missing essentials' },
+        { t: 'Switching on Advanced Control', p: 'config', h: 'switch-on', k: 'advanced control hold cpu mode selector unlock show all settings switch to simple' },
         // Backup
         { t: 'Making a backup', p: 'backup', h: 'backup', k: 'backup back up export parts documents' },
         { t: 'What a backup file holds', p: 'backup', h: 'files', k: 'backup zip json files manifest' },

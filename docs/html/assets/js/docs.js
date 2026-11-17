@@ -253,7 +253,7 @@
             gal: { icon: 'image', name: 'History', shot: 'tab-history', text: 'Every image you make, with search, favourites, date sections, multi-select, sharing and comparing.', link: 'history' },
             ana: { icon: 'scan-line', name: 'Analyze', shot: 'tab-analyze', text: "Open any image to read how it was made (prompt, seed, model, LoRAs) and send those settings straight back to Generate.", link: 'analyze' },
             comfy: { icon: 'workflow', name: 'ComfyUI', shot: 'tab-comfy', text: 'Run your own ComfyUI workflows. Resolver builds controls for the workflow’s inputs. Hidden until you switch it on in Config.', link: 'comfyui' },
-            cfg: { icon: 'settings', name: 'Config', shot: 'tab-config', text: 'Every setting, in 13 sections: Connection, Interface, Prompts, Magic Prompt, Generation, Live Preview, History & Results and more, with a search box at the top.', link: 'config' },
+            cfg: { icon: 'settings', name: 'Config', shot: 'tab-config', text: 'Every setting, in 13 sections. It starts in Simple mode (Connection, theme, dock, visible tabs, System Settings); the Mode selector at the top switches on Advanced Control for the rest. Search with the icon beside it.', link: 'config' },
         };
         const MODELS = [['xl', 'SDXL', '#ff9800', 'gen-sdxl'], ['anima', 'ANIMA', '#00c853', 'gen-anima'], ['qwen', 'QWEN', '#ff007f', 'gen-qwen'], ['flux', 'FLUX', '#00e5ff', 'gen-flux'], ['krea', 'KREA', '#b026ff', 'gen-krea']];
         const img = $('.screen img', el), dock = $('.tour-dock', el), info = $('.tour-info', el);
@@ -436,6 +436,49 @@
     const paintPc = t => (window.PromptPaint ? PromptPaint.html(t, false) : esc(t));
     $$('[data-pc]').forEach(el => { el.innerHTML = paintPc(el.dataset.pc); el.classList.add('pc-text'); });
 
+    // Config's two modes (the app's advcontrol.js). Simple, the default, shows Connection, System Settings and, in
+    // Interface, Dock style, Light mode and Visible tabs; everything else shows with Advanced Control on.
+    const CFG_SECTIONS = { 'connection': 'connection', 'interface': 'interface', 'prompts': 'prompts', 'magic prompt': 'magic',
+        'generation': 'generation', 'live preview': 'livepreview', 'history & results': 'history', 'inpaint & analyze': 'inpana',
+        'models': 'models', 'extensions': 'extensions', 'diagnostics': 'diag', 'experimental': 'experimental', 'system settings': 'sys' };
+    const SIMPLE_IFACE = ['dock style', 'light mode', 'visible tabs'];
+    const cfgAdvanced = (sec, item) => sec === 'interface'
+        ? !SIMPLE_IFACE.some(n => String(item || '').trim().toLowerCase().startsWith(n))
+        : !['connection', 'sys'].includes(sec);
+    const ADV_TAG = `<a class="adv-tag" href="config.html#modes" title="Shown with Advanced Control on">${icon('cpu')}Advanced Control</a>`;
+    // Each "Config → Section → Option" in the text gets that tag when the option is only in Advanced Control.
+    (function tagAdvanced() {
+        const main = $('main.content');
+        if (!main) return;
+        const walk = document.createTreeWalker(main, NodeFilter.SHOW_TEXT), hits = [];
+        for (let n; (n = walk.nextNode());) {
+            if (n.nodeValue.includes('Config →') && !n.parentElement.closest('th, code, pre, a, [data-widget="cfgexplorer"], .adv-tag')) hits.push(n);
+        }
+        hits.forEach(n => {
+            const t = n.nodeValue, i = t.indexOf('Config →');
+            const head = t.slice(i).match(/^Config →\s*/)[0];
+            const after = t.slice(i + head.length);
+            const key = Object.keys(CFG_SECTIONS).find(k => after.toLowerCase().startsWith(k));
+            if (!key) return;
+            const im = after.slice(key.length).match(/^\s*→\s*([^→·,;.()]+)/);
+            let item = im && im[1];
+            // "Config → Interface" under an option's name: that option.
+            if (!item && key === 'interface') { const dt = n.parentElement.closest('dt'); if (dt && dt.firstChild) item = dt.firstChild.textContent; }
+            if (!cfgAdvanced(CFG_SECTIONS[key], item)) return;
+            const host = n.parentElement.closest('.ui, small');
+            if (host) {
+                if (host.tagName === 'SMALL') { if (!$('.adv-tag', host)) host.insertAdjacentHTML('beforeend', ' ' + ADV_TAG); }
+                else if (!host.nextElementSibling || !host.nextElementSibling.classList.contains('adv-tag')) host.insertAdjacentHTML('afterend', ADV_TAG);
+                return;
+            }
+            // In running text: right after the path.
+            const rest = n.splitText(i + head.length + key.length + (im ? im[0].replace(/\s+$/, '').length : 0));
+            const tmp = document.createElement('span');
+            tmp.innerHTML = ADV_TAG;
+            rest.parentNode.insertBefore(tmp.firstChild, rest);
+        });
+    })();
+
     // The weight each tag of a prompt gets, as Forge reads brackets: ( ) x1.1, [ ] /1.1, (tag:1.3) that number, nested
     // ones multiplied; \( \) are text; [a:b:0.5] / [tag:0.5] are timings, not weights.
     function tagWeights(text) {
@@ -564,22 +607,31 @@
     // Config: every option, searchable (data in config-data.js).
     W.cfgexplorer = el => {
         const D = window.CFG_DATA || [];
-        const q = $('input', el), chips = $('.cfgx-chips', el), list = $('.cfgx-list', el), count = $('.cfgx-count', el);
-        let sec = 'all';
+        const q = $('input', el), chips = $('.cfgx-chips:not(.cfgx-modes)', el), modes = $('.cfgx-modes', el), list = $('.cfgx-list', el), count = $('.cfgx-count', el);
+        let sec = 'all', mode = 'all';
         const total = D.reduce((n, s) => n + s.items.length, 0);
+        const MODE_NAME = { simple: 'in Simple', advanced: 'only in Advanced Control' };
+        // A whole section in Advanced Control is marked once, on its heading; in Interface, each option.
+        const secAdv = s => s.id !== 'interface' && cfgAdvanced(s.id);
+        const inMode = (s, it) => mode === 'all' || (mode === 'advanced') === cfgAdvanced(s.id, it.n);
         chips.innerHTML = `<button data-s="all" aria-pressed="true">All</button>` + D.map(s => `<button data-s="${s.id}">${icon(s.icon)}${esc(s.name)}</button>`).join('');
+        if (modes) {
+            modes.innerHTML = `<button data-m="all" aria-pressed="true">Both modes</button><button data-m="simple">${icon('layout-list')}Simple</button><button data-m="advanced">${icon('cpu')}Advanced Control</button>`;
+            modes.onclick = e => { const b = e.target.closest('button'); if (!b) return; mode = b.dataset.m; $$('button', modes).forEach(x => x.setAttribute('aria-pressed', String(x === b))); paint(); };
+        }
         const hi = (text, words) => { let h = text; words.forEach(w => { if (w.length > 1) h = h.replace(new RegExp('(' + w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')(?![^<]*>)', 'ig'), '<mark>$1</mark>'); }); return h; };
         function paint() {
             const words = q.value.toLowerCase().split(/\s+/).filter(Boolean);
             let shown = 0;
             list.innerHTML = D.filter(s => sec === 'all' || s.id === sec).map(s => {
-                const items = s.items.filter(it => { const hay = (it.n + ' ' + it.d + ' ' + (it.k || '') + ' ' + s.name).toLowerCase(); return words.every(w => hay.includes(w)); });
+                const items = s.items.filter(it => { const hay = (it.n + ' ' + it.d + ' ' + (it.k || '') + ' ' + s.name).toLowerCase(); return inMode(s, it) && words.every(w => hay.includes(w)); });
                 shown += items.length;
                 if (!items.length) return '';
-                return `<div class="cfgx-sec" id="cfg-${s.id}">${icon(s.icon)}${esc(s.name)}<span class="muted" style="letter-spacing:0;text-transform:none;font-weight:600">· ${s.items.length}</span>${s.shot ? `<a href="assets/img/shots/${s.shot}.webp" class="cfgx-shot" data-shot="${s.shot}">SCREENSHOT</a>` : ''}</div>` +
-                    items.map(it => `<div class="cfgx-item${it.sub ? ' cfgx-sub' : ''}"><b>${hi(esc(it.n), words)}</b><span class="def${/^on$/i.test(it.v) ? ' on' : ''}">${esc(it.v || '')}</span><p>${hi(it.d, words)}</p></div>`).join('');
-            }).join('') || `<div class="cfgx-none">No setting matches “${esc(q.value)}”.</div>`;
-            count.textContent = words.length || sec !== 'all' ? `${shown} of ${total} settings` : `${total} settings in ${D.length} sections`;
+                const tag = `<span class="adv-tag">${icon('cpu')}Advanced Control</span>`;
+                return `<div class="cfgx-sec" id="cfg-${s.id}">${icon(s.icon)}${esc(s.name)}<span class="muted" style="letter-spacing:0;text-transform:none;font-weight:600">· ${s.items.length}</span>${secAdv(s) ? tag : ''}${s.shot ? `<a href="assets/img/shots/${s.shot}.webp" class="cfgx-shot" data-shot="${s.shot}">SCREENSHOT</a>` : ''}</div>` +
+                    items.map(it => `<div class="cfgx-item${it.sub ? ' cfgx-sub' : ''}"><b>${hi(esc(it.n), words)}${!secAdv(s) && cfgAdvanced(s.id, it.n) ? tag : ''}</b><span class="def${/^on$/i.test(it.v) ? ' on' : ''}">${esc(it.v || '')}</span><p>${hi(it.d, words)}</p></div>`).join('');
+            }).join('') || `<div class="cfgx-none">No setting matches${q.value ? ` “${esc(q.value)}”` : ''}${mode !== 'all' ? ' ' + MODE_NAME[mode] : ''}.</div>`;
+            count.textContent = words.length || sec !== 'all' || mode !== 'all' ? `${shown} of ${total} settings${mode !== 'all' ? ' ' + MODE_NAME[mode] : ''}` : `${total} settings in ${D.length} sections`;
             drawIcons();
         }
         chips.onclick = e => { const b = e.target.closest('button'); if (!b) return; sec = b.dataset.s; $$('button', chips).forEach(x => x.setAttribute('aria-pressed', String(x === b))); paint(); };
