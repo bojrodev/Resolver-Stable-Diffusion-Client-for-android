@@ -1,9 +1,9 @@
 {
-  "id": "docs-site-launch",
-  "title": "New: Resolver Documentation",
-  "message": "Resolver now has a full documentation website: an interactive guide to every tab, setting and feature, with screenshots, wildcards and extension guides, troubleshooting and answers to common questions. To open it, visit Resolver's page on GitHub (bojrodev / Resolver-Stable-Diffusion-Client-for-android) and tap \"Read the Docs\" at the top of the README.",
+  "id": "thanks-note",
+  "title": "1k+ Downloads",
+  "message": "Resolver now has become an app with 1000+ downloads on github. We were small and we became quite big(In my opinion). Thank you Bungles for making this app so more feature rich. Your contribution means a lot. I am currently implementing Bungle's latest patches to the kotlin app and it will soon be ready. I will give out a beta test for the new version too, Very soon.",
   "type": "info",
-  "date": "2026-11-17",
+  "date": "2026-11-18",
   "active": true,
   "link": "",
   "linkText": ""
